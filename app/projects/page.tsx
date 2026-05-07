@@ -1,0 +1,394 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { Plus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AppSidebar } from "@/components/app-sidebar";
+import { ProjectDetailPanel } from "@/components/projects/project-detail-panel";
+import { ProjectForm } from "@/components/projects/project-form";
+import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
+import {
+  calculateProjectPricing,
+  getExpirationLabel,
+  getNextProposalNumber,
+  getTodayLabel,
+  formatMargin,
+  formatMoney,
+  getTotalCost,
+  storageKeys,
+  statusOptions,
+  tradeOptions,
+  type Contact,
+  type PricingResult,
+  type PriceOptionName,
+  type Project,
+  type ProjectStatus,
+  type Quote,
+  type Trade,
+} from "@/lib/projects";
+import { useLocalStorageState, writeLocalStorage } from "@/lib/use-local-storage";
+
+const initialProjects: Project[] = [
+  {
+    id: "project-001",
+    projectName: "Architectural roof replacement",
+    customerName: "Maria Alvarez",
+    customerPhone: "(203) 555-0148",
+    customerEmail: "maria@example.com",
+    address: "42 Maple Ridge Road",
+    city: "Stamford",
+    state: "Connecticut",
+    zipCode: "06903",
+    trade: "Roofing",
+    projectSize: "Medium",
+    riskLevel: "Medium",
+    status: "Pricing",
+    notes: "Customer wants a clean Good / Better / Best quote with warranty options.",
+    costs: {
+      materials: 4800,
+      labor: 2400,
+      dumpster: 450,
+      permits: 250,
+      equipment: 0,
+      subcontractor: 0,
+      miscellaneous: 300,
+    },
+    createdAt: "May 1, 2026",
+  },
+  {
+    id: "project-002",
+    projectName: "Cedar siding refresh",
+    customerName: "James Whitaker",
+    customerPhone: "(212) 555-0194",
+    customerEmail: "james@example.com",
+    address: "118 Hudson Street",
+    city: "New York",
+    state: "New York",
+    zipCode: "10013",
+    trade: "Siding",
+    projectSize: "Large",
+    riskLevel: "High",
+    status: "Quoted",
+    notes: "Access is tight. Include buffer for staging and city logistics.",
+    costs: {
+      materials: 9200,
+      labor: 6100,
+      dumpster: 750,
+      permits: 600,
+      equipment: 900,
+      subcontractor: 0,
+      miscellaneous: 500,
+    },
+    createdAt: "Apr 28, 2026",
+  },
+  {
+    id: "project-003",
+    projectName: "Interior repaint package",
+    customerName: "Olivia Grant",
+    customerPhone: "(305) 555-0122",
+    customerEmail: "olivia@example.com",
+    address: "734 Palm Avenue",
+    city: "Orlando",
+    state: "Florida",
+    zipCode: "32801",
+    trade: "Painting",
+    projectSize: "Small",
+    riskLevel: "Low",
+    status: "Draft",
+    notes: "Customer is comparing two painters. Keep Good option competitive.",
+    costs: {
+      materials: 850,
+      labor: 1600,
+      dumpster: 0,
+      permits: 0,
+      equipment: 150,
+      subcontractor: 0,
+      miscellaneous: 200,
+    },
+    createdAt: "Apr 25, 2026",
+  },
+];
+
+type StatusFilter = "All" | ProjectStatus;
+type TradeFilter = "All" | Trade;
+
+export default function ProjectsPage() {
+  const router = useRouter();
+  const [projects, setProjects] = useLocalStorageState<Project[]>(
+    storageKeys.projects,
+    initialProjects
+  );
+  const [contacts] = useLocalStorageState<Contact[]>(storageKeys.contacts, []);
+  const [quotes, setQuotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+  const [tradeFilter, setTradeFilter] = useState<TradeFilter>("All");
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null
+  );
+  const [pricingByProject, setPricingByProject] = useState<
+    Record<string, PricingResult[]>
+  >({});
+
+  const filteredProjects = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return projects.filter((project) => {
+      const matchesSearch =
+        !query ||
+        project.projectName.toLowerCase().includes(query) ||
+        project.customerName.toLowerCase().includes(query) ||
+        project.address.toLowerCase().includes(query);
+      const matchesStatus =
+        statusFilter === "All" || project.status === statusFilter;
+      const matchesTrade =
+        tradeFilter === "All" || project.trade === tradeFilter;
+
+      return matchesSearch && matchesStatus && matchesTrade;
+    });
+  }, [projects, search, statusFilter, tradeFilter]);
+
+  const selectedProject = projects.find(
+    (project) => project.id === selectedProjectId
+  );
+
+  function createProject(project: Project) {
+    setProjects((current) => [project, ...current]);
+    setSelectedProjectId(project.id);
+    setIsFormOpen(false);
+  }
+
+  function duplicateProject(project: Project) {
+    const copy: Project = {
+      ...project,
+      id: crypto.randomUUID(),
+      projectName: `${project.projectName} (Copy)`,
+      status: "Draft",
+      createdAt: getTodayLabel(),
+    };
+    setProjects((current) => [copy, ...current]);
+    setSelectedProjectId(copy.id);
+  }
+
+  function updateProject(updatedProject: Project) {
+    setProjects((current) =>
+      current.map((project) =>
+        project.id === updatedProject.id ? updatedProject : project
+      )
+    );
+  }
+
+  function priceProject(project: Project) {
+    const pricedProject: Project = {
+      ...project,
+      status: project.status === "Draft" ? "Pricing" : project.status,
+    };
+
+    updateProject(pricedProject);
+    setPricingByProject((current) => ({
+      ...current,
+      [project.id]: calculateProjectPricing(pricedProject),
+    }));
+    setSelectedProjectId(project.id);
+    writeLocalStorage(storageKeys.projectForPricing, project.id);
+    router.push("/pricing");
+  }
+
+  function createQuoteFromProject(
+    project: Project,
+    pricing: PricingResult[],
+    selectedOption: PriceOptionName,
+    snapshot?: {
+      customerPhone?: string;
+      customerEmail?: string;
+      customerAddress?: string;
+      trade?: string;
+      warrantyText?: string;
+      termsText?: string;
+      proposalTitle?: string;
+    }
+  ) {
+    const nextProject: Project = { ...project, status: "Quoted" };
+    const id = crypto.randomUUID();
+    const quote: Quote = {
+      id,
+      projectId: project.id,
+      projectName: project.projectName,
+      customerName: project.customerName,
+      customerPhone: snapshot?.customerPhone,
+      customerEmail: snapshot?.customerEmail,
+      customerAddress: snapshot?.customerAddress,
+      trade: snapshot?.trade,
+      proposalTitle: snapshot?.proposalTitle,
+      proposalNumber: getNextProposalNumber(),
+      warrantyText: snapshot?.warrantyText,
+      termsText: snapshot?.termsText,
+      good: pricing[0],
+      better: pricing[1],
+      best: pricing[2],
+      selectedOption,
+      status: "Draft",
+      createdAt: getTodayLabel(),
+      expiresAt: getExpirationLabel(14),
+    };
+
+    updateProject(nextProject);
+    setQuotes((current) => [quote, ...current]);
+    setPricingByProject((current) => ({
+      ...current,
+      [project.id]: pricing,
+    }));
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+      <AppSidebar />
+
+      <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
+        <div className="w-full">
+          <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+            <div>
+              <p className="text-sm font-medium text-gray-500">Projects</p>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+                Projects
+              </h2>
+              <p className="mt-3 max-w-2xl text-gray-500">
+                Manage job opportunities, costs, and pricing recommendations.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setIsFormOpen(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-[#ff5c35] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#e94820]"
+            >
+              <Plus className="h-4 w-4" />
+              New Project
+            </button>
+          </header>
+
+          <section className="mt-8 rounded-lg border border-[#d9e2ec] bg-white p-4 sm:p-5">
+            <div className="grid gap-4 lg:grid-cols-[1fr_180px_180px]">
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search by project, customer, or address"
+                  className="w-full rounded-md border border-[#d9e2ec] py-3 pl-11 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
+                />
+              </label>
+
+              <select
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as StatusFilter)
+                }
+                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+              >
+                <option value="All">All statuses</option>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={tradeFilter}
+                onChange={(event) =>
+                  setTradeFilter(event.target.value as TradeFilter)
+                }
+                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+              >
+                <option value="All">All trades</option>
+                {tradeOptions.map((trade) => (
+                  <option key={trade} value={trade}>
+                    {trade}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          {filteredProjects.length > 0 ? (
+            <section className="mt-6 overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white">
+              <div className="grid min-w-230 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+                <span>Project</span>
+                <span>Trade</span>
+                <span>Status</span>
+                <span>Cost</span>
+                <span>Better</span>
+                <span>Margin</span>
+              </div>
+              <div className="min-w-230 divide-y divide-gray-100">
+                {filteredProjects.map((project) => {
+                  const betterPrice = calculateProjectPricing(project).find(
+                    (result) => result.name === "Better"
+                  );
+
+                  return (
+                    <button
+                      key={project.id}
+                      onClick={() => setSelectedProjectId(project.id)}
+                      className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-black">
+                          {project.projectName}
+                        </p>
+                        <p className="mt-1 truncate text-gray-500">
+                          {project.customerName} · {project.address}
+                        </p>
+                      </div>
+                      <span className="text-gray-600">{project.trade}</span>
+                      <ProjectStatusBadge status={project.status} />
+                      <span className="font-medium">
+                        {formatMoney(getTotalCost(project.costs))}
+                      </span>
+                      <span className="font-medium">
+                        {formatMoney(betterPrice?.salePrice ?? 0)}
+                      </span>
+                      <span>{formatMargin(betterPrice?.margin ?? 0)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <section className="mt-6 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
+              <p className="text-lg font-semibold tracking-tight">
+                No projects found
+              </p>
+              <p className="mt-2 text-sm text-gray-500">
+                Try a different search or create a new project.
+              </p>
+            </section>
+          )}
+        </div>
+      </main>
+
+      {isFormOpen ? (
+        <ProjectForm
+          onCreate={createProject}
+          onCancel={() => setIsFormOpen(false)}
+          contacts={contacts}
+        />
+      ) : null}
+
+      {selectedProject ? (
+        <ProjectDetailPanel
+          project={selectedProject}
+          pricingResults={pricingByProject[selectedProject.id]}
+          onClose={() => setSelectedProjectId(null)}
+          onUpdateProject={updateProject}
+          onPriceProject={priceProject}
+          onCreateQuote={createQuoteFromProject}
+          onDuplicateProject={duplicateProject}
+          quotes={quotes.filter((q) => q.projectId === selectedProject.id)}
+          onPreviewQuote={(id) => router.push(`/quotes/preview?id=${id}`)}
+        />
+      ) : null}
+    </div>
+  );
+}
