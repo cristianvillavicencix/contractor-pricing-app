@@ -28,6 +28,21 @@ export type RiskLevel = "Low" | "Medium" | "High";
 export type Strategy = "Competitive" | "Balanced" | "Premium";
 export type PriceOptionName = "Good" | "Better" | "Best";
 export type QuoteStatus = "Draft" | "Sent" | "Accepted" | "Declined";
+export type ProposalCredentialPlacement =
+  | "Before Signatures"
+  | "After Scope"
+  | "Footer";
+export type ProposalCoverLayout = "full" | "half" | "square";
+
+export type CompanyCredential = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  documentName?: string;
+  documentType?: string;
+  documentDataUrl?: string;
+  uploadedAt?: string;
+};
 
 export type CostBreakdown = {
   materials: number;
@@ -87,6 +102,7 @@ export type PricingInput = {
   overheadPercent: number;
   strategy: Strategy;
   baseMargins: Record<PriceOptionName, number>;
+  stateAdjustments?: Record<ProjectState, number>;
 };
 
 export type PricingResult = {
@@ -114,6 +130,7 @@ export type PricingCalculation = {
 export type Quote = {
   id: string;
   projectId?: string;
+  contactId?: string;
   projectName: string;
   customerName: string;
   // Snapshot fields populated at creation time
@@ -145,8 +162,11 @@ export type AppSettings = {
     email: string;
     phone: string;
     website: string;
+    licenseNumber: string;
+    insuranceProvider: string;
     mainTrade: SettingsTrade;
     companyLevel: CompanyLevel;
+    certifications: CompanyCredential[];
   };
   pricingDefaults: {
     goodMargin: number;
@@ -177,8 +197,14 @@ export type AppSettings = {
     overheadAllocationMethod:
       | "Percentage"
       | "Flat Per Project"
+      | "Project Duration"
       | "Ignore For Now";
     defaultOverheadPercent: number;
+    flatOverheadPerProject: number;
+    monthlyBillableDays: number;
+    defaultProjectDurationDays: number;
+    laborBurdenPercent: number;
+    minimumJobPrice: number;
     financingFeePercent: number;
     creditCardFeePercent: number;
     taxPercent: number;
@@ -202,6 +228,10 @@ export type AppSettings = {
     financingNote: string;
     showTaxSeparately: boolean;
     requireCustomerSignature: boolean;
+    showCertifications: boolean;
+    showLicenseNumber: boolean;
+    showInsuranceBadges: boolean;
+    credentialPlacement: ProposalCredentialPlacement;
   };
   branding: {
     logoUrl: string;
@@ -210,6 +240,7 @@ export type AppSettings = {
     tagline: string;
     footerText: string;
     proposalStyle: "Minimal" | "Premium" | "Contractor" | "Modern";
+    proposalCoverLayout: ProposalCoverLayout;
   };
   appPreferences: {
     defaultLandingPage: "Dashboard" | "Projects" | "Pricing";
@@ -283,6 +314,25 @@ export const quoteStatusOptions: QuoteStatus[] = [
   "Declined",
 ];
 
+export const defaultCompanyCredentials: CompanyCredential[] = [
+  { id: "licensed-insured", name: "Licensed & Insured", enabled: true },
+  {
+    id: "general-liability",
+    name: "General Liability Insurance",
+    enabled: true,
+  },
+  {
+    id: "workers-compensation",
+    name: "Workers' Compensation Insurance",
+    enabled: true,
+  },
+  {
+    id: "state-license",
+    name: "State Contractor License",
+    enabled: true,
+  },
+];
+
 export const defaultSettings: AppSettings = {
   companyProfile: {
     businessName: "Contractor Company",
@@ -290,8 +340,11 @@ export const defaultSettings: AppSettings = {
     email: "",
     phone: "",
     website: "",
+    licenseNumber: "",
+    insuranceProvider: "",
     mainTrade: "Roofing",
     companyLevel: "Small Crew",
+    certifications: defaultCompanyCredentials,
   },
   pricingDefaults: {
     goodMargin: 28,
@@ -321,6 +374,11 @@ export const defaultSettings: AppSettings = {
     monthlyOverhead: 5000,
     overheadAllocationMethod: "Percentage",
     defaultOverheadPercent: 10,
+    flatOverheadPerProject: 500,
+    monthlyBillableDays: 20,
+    defaultProjectDurationDays: 1,
+    laborBurdenPercent: 18,
+    minimumJobPrice: 850,
     financingFeePercent: 3,
     creditCardFeePercent: 3,
     taxPercent: 0,
@@ -346,6 +404,10 @@ export const defaultSettings: AppSettings = {
     financingNote: "Financing options may be available upon approval.",
     showTaxSeparately: false,
     requireCustomerSignature: false,
+    showCertifications: true,
+    showLicenseNumber: true,
+    showInsuranceBadges: true,
+    credentialPlacement: "Before Signatures",
   },
   branding: {
     logoUrl: "",
@@ -354,6 +416,7 @@ export const defaultSettings: AppSettings = {
     tagline: "",
     footerText: "Thank you for the opportunity to earn your business.",
     proposalStyle: "Minimal",
+    proposalCoverLayout: "full",
   },
   appPreferences: {
     defaultLandingPage: "Dashboard",
@@ -365,6 +428,87 @@ export const defaultSettings: AppSettings = {
     showPricingWarnings: true,
   },
 };
+
+export function mergeAppSettings(settings: AppSettings): AppSettings {
+  return {
+    ...defaultSettings,
+    ...settings,
+    companyProfile: {
+      ...defaultSettings.companyProfile,
+      ...settings.companyProfile,
+      certifications:
+        settings.companyProfile?.certifications ??
+        defaultSettings.companyProfile.certifications,
+    },
+    pricingDefaults: {
+      ...defaultSettings.pricingDefaults,
+      ...settings.pricingDefaults,
+    },
+    marketLocation: {
+      ...defaultSettings.marketLocation,
+      ...settings.marketLocation,
+      stateAdjustments: {
+        ...defaultSettings.marketLocation.stateAdjustments,
+        ...settings.marketLocation?.stateAdjustments,
+      },
+    },
+    costRules: {
+      ...defaultSettings.costRules,
+      ...settings.costRules,
+    },
+    proposalSettings: {
+      ...defaultSettings.proposalSettings,
+      ...settings.proposalSettings,
+    },
+    branding: {
+      ...defaultSettings.branding,
+      ...settings.branding,
+    },
+    appPreferences: {
+      ...defaultSettings.appPreferences,
+      ...settings.appPreferences,
+    },
+  };
+}
+
+export function getEnabledCompanyCredentials(settings: AppSettings) {
+  const merged = mergeAppSettings(settings);
+  const credentials = merged.companyProfile.certifications
+    .filter((credential) => credential.enabled)
+    .map((credential) => credential.name);
+
+  if (merged.proposalSettings.showLicenseNumber && merged.companyProfile.licenseNumber) {
+    credentials.push(`License: ${merged.companyProfile.licenseNumber}`);
+  }
+
+  if (
+    merged.proposalSettings.showInsuranceBadges &&
+    merged.companyProfile.insuranceProvider
+  ) {
+    credentials.push(`Insurance: ${merged.companyProfile.insuranceProvider}`);
+  }
+
+  return credentials;
+}
+
+export function getEnabledCompanyCredentialDocuments(settings: AppSettings) {
+  const merged = mergeAppSettings(settings);
+
+  return merged.companyProfile.certifications
+    .filter(
+      (credential) =>
+        credential.enabled &&
+        credential.documentName &&
+        credential.documentDataUrl
+    )
+    .map((credential) => ({
+      credentialName: credential.name,
+      fileName: credential.documentName ?? "",
+      fileType: credential.documentType ?? "",
+      dataUrl: credential.documentDataUrl ?? "",
+      uploadedAt: credential.uploadedAt ?? "",
+    }));
+}
 
 export const initialProjects: Project[] = [
   {
@@ -482,26 +626,34 @@ export function createPricingInputFromSettings(
   settings: AppSettings,
   overrides: Partial<PricingInput> = {}
 ): PricingInput {
+  const merged = mergeAppSettings(settings);
   const mainTrade =
-    settings.companyProfile.mainTrade === "General Contractor"
+    merged.companyProfile.mainTrade === "General Contractor"
       ? "Remodeling"
-      : settings.companyProfile.mainTrade;
+      : merged.companyProfile.mainTrade;
 
   return {
     cost: 7900,
     trade: mainTrade,
-    state: settings.marketLocation.defaultState,
-    companyLevel: settings.companyProfile.companyLevel,
-    projectSize: settings.pricingDefaults.defaultProjectSize,
-    riskLevel: settings.pricingDefaults.defaultRiskLevel,
-    overheadPercent: settings.costRules.includeOverhead
-      ? settings.costRules.defaultOverheadPercent
+    state: merged.marketLocation.defaultState,
+    companyLevel: merged.companyProfile.companyLevel,
+    projectSize: merged.pricingDefaults.defaultProjectSize,
+    riskLevel: merged.pricingDefaults.defaultRiskLevel,
+    overheadPercent: merged.costRules.includeOverhead
+      ? merged.costRules.defaultOverheadPercent
       : 0,
-    strategy: settings.pricingDefaults.defaultStrategy,
+    strategy: merged.pricingDefaults.defaultStrategy,
     baseMargins: {
-      Good: settings.pricingDefaults.goodMargin / 100,
-      Better: settings.pricingDefaults.betterMargin / 100,
-      Best: settings.pricingDefaults.bestMargin / 100,
+      Good: merged.pricingDefaults.goodMargin / 100,
+      Better: merged.pricingDefaults.betterMargin / 100,
+      Best: merged.pricingDefaults.bestMargin / 100,
+    },
+    stateAdjustments: {
+      Connecticut: merged.marketLocation.stateAdjustments.Connecticut / 100,
+      "New York": merged.marketLocation.stateAdjustments.NewYork / 100,
+      "New Jersey": merged.marketLocation.stateAdjustments.NewJersey / 100,
+      Florida: merged.marketLocation.stateAdjustments.Florida / 100,
+      Texas: merged.marketLocation.stateAdjustments.Texas / 100,
     },
     ...overrides,
   };
@@ -545,11 +697,11 @@ export function calculateProjectPricing(
   project: Project,
   settings: AppSettings = defaultSettings
 ) {
-  return calculatePricing(createPricingInputFromProject(project, settings));
+  return calculatePricing(createPricingInputFromProject(project, mergeAppSettings(settings)));
 }
 
 export function getPricingAdjustment(input: PricingInput) {
-  const stateAdjustments: Record<ProjectState, number> = {
+  const defaultStateAdjustments: Record<ProjectState, number> = {
     Connecticut: 0,
     "New York": 0.03,
     "New Jersey": 0.02,
@@ -587,7 +739,7 @@ export function getPricingAdjustment(input: PricingInput) {
   };
   const overhead = (input.overheadPercent / 100) * 0.35;
   const parts = {
-    state: stateAdjustments[input.state],
+    state: (input.stateAdjustments ?? defaultStateAdjustments)[input.state],
     trade: tradeAdjustments[input.trade],
     companyLevel: companyAdjustments[input.companyLevel],
     projectSize: sizeAdjustments[input.projectSize],

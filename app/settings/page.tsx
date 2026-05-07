@@ -25,6 +25,20 @@ type Strategy = "Competitive" | "Balanced" | "Premium";
 type RiskLevel = "Low" | "Medium" | "High";
 type ProjectSize = "Small" | "Medium" | "Large";
 type Level = "Low" | "Medium" | "High";
+type ProposalCredentialPlacement =
+  | "Before Signatures"
+  | "After Scope"
+  | "Footer";
+type ProposalCoverLayout = "full" | "half" | "square";
+type CompanyCredential = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  documentName?: string;
+  documentType?: string;
+  documentDataUrl?: string;
+  uploadedAt?: string;
+};
 type SettingsSection =
   | "Company Profile"
   | "Pricing Defaults"
@@ -42,8 +56,11 @@ type AppSettings = {
     email: string;
     phone: string;
     website: string;
+    licenseNumber: string;
+    insuranceProvider: string;
     mainTrade: Trade;
     companyLevel: CompanyLevel;
+    certifications: CompanyCredential[];
   };
   pricingDefaults: {
     goodMargin: number;
@@ -74,8 +91,14 @@ type AppSettings = {
     overheadAllocationMethod:
       | "Percentage"
       | "Flat Per Project"
+      | "Project Duration"
       | "Ignore For Now";
     defaultOverheadPercent: number;
+    flatOverheadPerProject: number;
+    monthlyBillableDays: number;
+    defaultProjectDurationDays: number;
+    laborBurdenPercent: number;
+    minimumJobPrice: number;
     financingFeePercent: number;
     creditCardFeePercent: number;
     taxPercent: number;
@@ -99,6 +122,10 @@ type AppSettings = {
     financingNote: string;
     showTaxSeparately: boolean;
     requireCustomerSignature: boolean;
+    showCertifications: boolean;
+    showLicenseNumber: boolean;
+    showInsuranceBadges: boolean;
+    credentialPlacement: ProposalCredentialPlacement;
   };
   branding: {
     logoUrl: string;
@@ -107,6 +134,7 @@ type AppSettings = {
     tagline: string;
     footerText: string;
     proposalStyle: "Minimal" | "Premium" | "Contractor" | "Modern";
+    proposalCoverLayout: ProposalCoverLayout;
   };
   appPreferences: {
     defaultLandingPage: "Dashboard" | "Projects" | "Pricing";
@@ -158,6 +186,31 @@ const levelOptions: Level[] = ["Low", "Medium", "High"];
 const strategyOptions: Strategy[] = ["Competitive", "Balanced", "Premium"];
 const riskLevelOptions: RiskLevel[] = ["Low", "Medium", "High"];
 const projectSizeOptions: ProjectSize[] = ["Small", "Medium", "Large"];
+const credentialPlacementOptions: ProposalCredentialPlacement[] = [
+  "Before Signatures",
+  "After Scope",
+  "Footer",
+];
+const coverLayoutOptions: ProposalCoverLayout[] = ["full", "half", "square"];
+
+const defaultCompanyCredentials: CompanyCredential[] = [
+  { id: "licensed-insured", name: "Licensed & Insured", enabled: true },
+  {
+    id: "general-liability",
+    name: "General Liability Insurance",
+    enabled: true,
+  },
+  {
+    id: "workers-compensation",
+    name: "Workers' Compensation Insurance",
+    enabled: true,
+  },
+  {
+    id: "state-license",
+    name: "State Contractor License",
+    enabled: true,
+  },
+];
 
 const defaultSettings: AppSettings = {
   companyProfile: {
@@ -166,8 +219,11 @@ const defaultSettings: AppSettings = {
     email: "",
     phone: "",
     website: "",
+    licenseNumber: "",
+    insuranceProvider: "",
     mainTrade: "Roofing",
     companyLevel: "Small Crew",
+    certifications: defaultCompanyCredentials,
   },
   pricingDefaults: {
     goodMargin: 28,
@@ -197,6 +253,11 @@ const defaultSettings: AppSettings = {
     monthlyOverhead: 5000,
     overheadAllocationMethod: "Percentage",
     defaultOverheadPercent: 10,
+    flatOverheadPerProject: 500,
+    monthlyBillableDays: 20,
+    defaultProjectDurationDays: 1,
+    laborBurdenPercent: 18,
+    minimumJobPrice: 850,
     financingFeePercent: 3,
     creditCardFeePercent: 3,
     taxPercent: 0,
@@ -222,6 +283,10 @@ const defaultSettings: AppSettings = {
     financingNote: "Financing options may be available upon approval.",
     showTaxSeparately: false,
     requireCustomerSignature: false,
+    showCertifications: true,
+    showLicenseNumber: true,
+    showInsuranceBadges: true,
+    credentialPlacement: "Before Signatures",
   },
   branding: {
     logoUrl: "",
@@ -230,6 +295,7 @@ const defaultSettings: AppSettings = {
     tagline: "",
     footerText: "Thank you for the opportunity to earn your business.",
     proposalStyle: "Minimal",
+    proposalCoverLayout: "full",
   },
   appPreferences: {
     defaultLandingPage: "Dashboard",
@@ -247,12 +313,18 @@ export default function SettingsPage() {
     useState<SettingsSection>("Company Profile");
   const [savedSettings, setSavedSettings] =
     useLocalStorageState<AppSettings>(storageKeys.settings, defaultSettings);
-  const [settings, setSettings] = useState<AppSettings>(savedSettings);
+  const normalizedSavedSettings = useMemo(
+    () => mergeSettings(savedSettings),
+    [savedSettings]
+  );
+  const [settings, setSettings] = useState<AppSettings>(() =>
+    mergeSettings(savedSettings)
+  );
   const [message, setMessage] = useState("");
 
   const hasUnsavedChanges = useMemo(
-    () => JSON.stringify(settings) !== JSON.stringify(savedSettings),
-    [settings, savedSettings]
+    () => JSON.stringify(settings) !== JSON.stringify(normalizedSavedSettings),
+    [settings, normalizedSavedSettings]
   );
 
   const validationMessage = getValidationMessage(settings);
@@ -392,6 +464,77 @@ function CompanyProfileSection({
   setSettings,
 }: SectionProps) {
   const profile = settings.companyProfile;
+  const [newCredential, setNewCredential] = useState("");
+
+  function addCredential() {
+    const name = newCredential.trim();
+    if (!name) return;
+
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: [
+          ...current.companyProfile.certifications,
+          {
+            id: `credential-${Date.now()}`,
+            name,
+            enabled: true,
+          },
+        ],
+      },
+    }));
+    setNewCredential("");
+  }
+
+  function uploadCredentialDocument(credentialId: string, file: File) {
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const result = event.target?.result;
+      if (typeof result !== "string") return;
+
+      setSettings((current) => ({
+        ...current,
+        companyProfile: {
+          ...current.companyProfile,
+          certifications: current.companyProfile.certifications.map((item) =>
+            item.id === credentialId
+              ? {
+                  ...item,
+                  documentName: file.name,
+                  documentType: file.type || "application/octet-stream",
+                  documentDataUrl: result,
+                  uploadedAt: new Date().toLocaleDateString("en-US"),
+                }
+              : item
+          ),
+        },
+      }));
+    };
+
+    reader.readAsDataURL(file);
+  }
+
+  function removeCredentialDocument(credentialId: string) {
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: current.companyProfile.certifications.map((item) =>
+          item.id === credentialId
+            ? {
+                ...item,
+                documentName: undefined,
+                documentType: undefined,
+                documentDataUrl: undefined,
+                uploadedAt: undefined,
+              }
+            : item
+        ),
+      },
+    }));
+  }
 
   return (
     <SettingsSection
@@ -453,6 +596,34 @@ function CompanyProfileSection({
             }))
           }
         />
+        <TextField
+          label="State License Number"
+          value={profile.licenseNumber}
+          helperText="Loaded automatically into future proposals when enabled."
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: {
+                ...current.companyProfile,
+                licenseNumber: value,
+              },
+            }))
+          }
+        />
+        <TextField
+          label="Insurance Provider"
+          value={profile.insuranceProvider}
+          helperText="Used as a proposal credential, not as insurance verification."
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: {
+                ...current.companyProfile,
+                insuranceProvider: value,
+              },
+            }))
+          }
+        />
         <SelectField
           label="Main Trade"
           value={profile.mainTrade}
@@ -483,6 +654,134 @@ function CompanyProfileSection({
             }))
           }
         />
+      </div>
+
+      <div className="mt-8 rounded-lg border border-[#d9e2ec] bg-[#f6f8fb] p-4">
+        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+          <div>
+            <h4 className="text-sm font-semibold text-[#213343]">
+              Certifications & Credentials
+            </h4>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-gray-500">
+              These are company-level defaults. Future proposals can load them
+              automatically so you do not repeat this setup every time.
+            </p>
+          </div>
+          <span className="w-fit rounded-md border border-[#d9e2ec] bg-white px-3 py-1 text-xs text-gray-500">
+            Company default
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {profile.certifications.map((credential) => (
+            <div
+              key={credential.id}
+              className="rounded-md border border-[#d9e2ec] bg-white p-3 text-sm"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <label className="flex min-w-0 items-center gap-3 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={credential.enabled}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        companyProfile: {
+                          ...current.companyProfile,
+                          certifications: current.companyProfile.certifications.map(
+                            (item) =>
+                              item.id === credential.id
+                                ? { ...item, enabled: event.target.checked }
+                                : item
+                          ),
+                        },
+                      }))
+                    }
+                    className="h-4 w-4 flex-none accent-[#ff5c35]"
+                  />
+                  <span
+                    className={`truncate ${
+                      credential.enabled ? "text-[#213343]" : "text-gray-400"
+                    }`}
+                  >
+                    {credential.name}
+                  </span>
+                </label>
+                {credential.documentDataUrl ? (
+                  <span className="rounded-md bg-[#f6f8fb] px-2 py-1 text-xs text-gray-500">
+                    Uploaded
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-3 rounded-md border border-dashed border-[#d9e2ec] bg-[#f6f8fb] p-3">
+                {credential.documentDataUrl ? (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[#213343]">
+                        {credential.documentName}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Uploaded {credential.uploadedAt}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <a
+                        href={credential.documentDataUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium transition hover:bg-[#f6f8fb]"
+                      >
+                        View
+                      </a>
+                      <button
+                        onClick={() => removeCredentialDocument(credential.id)}
+                        className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium transition hover:bg-[#f6f8fb]"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex cursor-pointer items-center justify-between gap-3 text-xs text-gray-500 transition hover:text-[#213343]">
+                    <span>Upload PDF or image proof</span>
+                    <span className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 font-medium">
+                      Choose File
+                    </span>
+                    <input
+                      type="file"
+                      accept="application/pdf,image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) uploadCredentialDocument(credential.id, file);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <input
+            value={newCredential}
+            onChange={(event) => setNewCredential(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addCredential();
+            }}
+            placeholder="Add custom certification..."
+            className="min-w-0 flex-1 rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+          />
+          <button
+            onClick={addCredential}
+            className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm font-medium transition hover:bg-[#f6f8fb]"
+          >
+            Add
+          </button>
+        </div>
       </div>
     </SettingsSection>
   );
@@ -684,7 +983,12 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
         <SelectField
           label="Overhead Allocation Method"
           value={costs.overheadAllocationMethod}
-          options={["Percentage", "Flat Per Project", "Ignore For Now"]}
+          options={[
+            "Percentage",
+            "Flat Per Project",
+            "Project Duration",
+            "Ignore For Now",
+          ]}
           onChange={(value) =>
             updateCostRule(
               setSettings,
@@ -699,6 +1003,52 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
           helperText="Adds a margin buffer to protect profit."
           onChange={(value) =>
             updateCostRule(setSettings, "defaultOverheadPercent", value)
+          }
+        />
+        <NumberField
+          label="Flat Overhead Per Project"
+          value={costs.flatOverheadPerProject}
+          helperText="Used when overhead allocation is flat per project."
+          onChange={(value) =>
+            updateCostRule(setSettings, "flatOverheadPerProject", value)
+          }
+        />
+        <NumberField
+          label="Monthly Billable Days"
+          value={costs.monthlyBillableDays}
+          helperText="Used to allocate monthly overhead by project duration."
+          min={1}
+          onChange={(value) =>
+            updateCostRule(setSettings, "monthlyBillableDays", Math.max(1, value))
+          }
+        />
+        <NumberField
+          label="Default Project Duration Days"
+          value={costs.defaultProjectDurationDays}
+          helperText="Default job length used by Calculator and Projects."
+          min={1}
+          onChange={(value) =>
+            updateCostRule(
+              setSettings,
+              "defaultProjectDurationDays",
+              Math.max(1, value)
+            )
+          }
+        />
+        <NumberField
+          label="Labor Burden %"
+          value={costs.laborBurdenPercent}
+          helperText="Payroll tax, workers comp, supervision, and labor-related burden."
+          onChange={(value) =>
+            updateCostRule(setSettings, "laborBurdenPercent", value)
+          }
+        />
+        <NumberField
+          label="Minimum Job Price"
+          value={costs.minimumJobPrice}
+          helperText="Lowest retail price you should normally sell any job for."
+          onChange={(value) =>
+            updateCostRule(setSettings, "minimumJobPrice", value)
           }
         />
         <NumberField
@@ -856,14 +1206,49 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
             updateProposal(setSettings, "requireCustomerSignature", value)
           }
         />
+        <ToggleField
+          label="Show Certifications & Credentials"
+          checked={proposal.showCertifications}
+          onChange={(value) =>
+            updateProposal(setSettings, "showCertifications", value)
+          }
+        />
+        <ToggleField
+          label="Show License Number"
+          checked={proposal.showLicenseNumber}
+          onChange={(value) =>
+            updateProposal(setSettings, "showLicenseNumber", value)
+          }
+        />
+        <ToggleField
+          label="Show Insurance Credentials"
+          checked={proposal.showInsuranceBadges}
+          onChange={(value) =>
+            updateProposal(setSettings, "showInsuranceBadges", value)
+          }
+        />
       </div>
 
-      <TextAreaField
-        label="Financing Note"
-        value={proposal.financingNote}
-        className="mt-6"
-        onChange={(value) => updateProposal(setSettings, "financingNote", value)}
-      />
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <SelectField
+          label="Credential Placement"
+          value={proposal.credentialPlacement}
+          options={credentialPlacementOptions}
+          helperText="Controls where Proposal Builder should place company credentials later."
+          onChange={(value) =>
+            updateProposal(
+              setSettings,
+              "credentialPlacement",
+              value as ProposalCredentialPlacement
+            )
+          }
+        />
+        <TextAreaField
+          label="Financing Note"
+          value={proposal.financingNote}
+          onChange={(value) => updateProposal(setSettings, "financingNote", value)}
+        />
+      </div>
     </SettingsSection>
   );
 }
@@ -894,6 +1279,19 @@ function BrandingSection({ settings, setSettings }: SectionProps) {
                 setSettings,
                 "proposalStyle",
                 value as AppSettings["branding"]["proposalStyle"]
+              )
+            }
+          />
+          <SelectField
+            label="Default Cover Layout"
+            value={branding.proposalCoverLayout}
+            options={coverLayoutOptions}
+            helperText="Loaded as the starting cover layout in future proposal previews."
+            onChange={(value) =>
+              updateBranding(
+                setSettings,
+                "proposalCoverLayout",
+                value as ProposalCoverLayout
               )
             }
           />
@@ -1222,10 +1620,52 @@ function ToggleField({
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="h-4 w-4 accent-black"
+        className="h-4 w-4 accent-[#ff5c35]"
       />
     </label>
   );
+}
+
+function mergeSettings(settings: AppSettings): AppSettings {
+  return {
+    ...defaultSettings,
+    ...settings,
+    companyProfile: {
+      ...defaultSettings.companyProfile,
+      ...settings.companyProfile,
+      certifications:
+        settings.companyProfile?.certifications ??
+        defaultSettings.companyProfile.certifications,
+    },
+    pricingDefaults: {
+      ...defaultSettings.pricingDefaults,
+      ...settings.pricingDefaults,
+    },
+    marketLocation: {
+      ...defaultSettings.marketLocation,
+      ...settings.marketLocation,
+      stateAdjustments: {
+        ...defaultSettings.marketLocation.stateAdjustments,
+        ...settings.marketLocation?.stateAdjustments,
+      },
+    },
+    costRules: {
+      ...defaultSettings.costRules,
+      ...settings.costRules,
+    },
+    proposalSettings: {
+      ...defaultSettings.proposalSettings,
+      ...settings.proposalSettings,
+    },
+    branding: {
+      ...defaultSettings.branding,
+      ...settings.branding,
+    },
+    appPreferences: {
+      ...defaultSettings.appPreferences,
+      ...settings.appPreferences,
+    },
+  };
 }
 
 function clampMargin(value: number) {

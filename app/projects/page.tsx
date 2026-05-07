@@ -2,23 +2,26 @@
 
 import { useRouter } from "next/navigation";
 import { Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ProjectDetailPanel } from "@/components/projects/project-detail-panel";
 import { ProjectForm } from "@/components/projects/project-form";
 import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
 import {
   calculateProjectPricing,
+  defaultSettings,
   getExpirationLabel,
   getNextProposalNumber,
   getTodayLabel,
   formatMargin,
   formatMoney,
   getTotalCost,
+  initialContacts,
   storageKeys,
   statusOptions,
   tradeOptions,
   type Contact,
+  type AppSettings,
   type PricingResult,
   type PriceOptionName,
   type Project,
@@ -111,6 +114,7 @@ const initialProjects: Project[] = [
 
 type StatusFilter = "All" | ProjectStatus;
 type TradeFilter = "All" | Trade;
+type ProjectDetailTab = "overview" | "costs" | "quote" | "notes";
 
 export default function ProjectsPage() {
   const router = useRouter();
@@ -118,15 +122,22 @@ export default function ProjectsPage() {
     storageKeys.projects,
     initialProjects
   );
-  const [contacts] = useLocalStorageState<Contact[]>(storageKeys.contacts, []);
+  const [contacts, setContacts] = useLocalStorageState<Contact[]>(
+    storageKeys.contacts,
+    initialContacts
+  );
   const [quotes, setQuotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
+  const [settings] = useLocalStorageState<AppSettings>(
+    storageKeys.settings,
+    defaultSettings
+  );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [tradeFilter, setTradeFilter] = useState<TradeFilter>("All");
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null
-  );
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [initialProjectTab, setInitialProjectTab] =
+    useState<ProjectDetailTab>("costs");
   const [pricingByProject, setPricingByProject] = useState<
     Record<string, PricingResult[]>
   >({});
@@ -153,10 +164,39 @@ export default function ProjectsPage() {
     (project) => project.id === selectedProjectId
   );
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get("projectId");
+
+    if (!projectId) return;
+
+    setSelectedProjectId(projectId);
+    setInitialProjectTab(getProjectTab(params.get("projectTab")));
+  }, []);
+
   function createProject(project: Project) {
     setProjects((current) => [project, ...current]);
     setSelectedProjectId(project.id);
     setIsFormOpen(false);
+  }
+
+  function createContact(contact: Omit<Contact, "id" | "createdAt">) {
+    const existing = contacts.find(
+      (item) =>
+        sameText(item.name, contact.name) ||
+        (Boolean(item.email) && sameText(item.email, contact.email)) ||
+        (Boolean(item.phone) && sameText(item.phone, contact.phone))
+    );
+
+    if (existing) return existing;
+
+    const nextContact: Contact = {
+      id: crypto.randomUUID(),
+      ...contact,
+      createdAt: getTodayLabel(),
+    };
+    setContacts((current) => [nextContact, ...current]);
+    return nextContact;
   }
 
   function duplicateProject(project: Project) {
@@ -166,6 +206,7 @@ export default function ProjectsPage() {
       projectName: `${project.projectName} (Copy)`,
       status: "Draft",
       createdAt: getTodayLabel(),
+      contactId: project.contactId,
     };
     setProjects((current) => [copy, ...current]);
     setSelectedProjectId(copy.id);
@@ -188,7 +229,7 @@ export default function ProjectsPage() {
     updateProject(pricedProject);
     setPricingByProject((current) => ({
       ...current,
-      [project.id]: calculateProjectPricing(pricedProject),
+      [project.id]: calculateProjectPricing(pricedProject, settings),
     }));
     setSelectedProjectId(project.id);
     writeLocalStorage(storageKeys.projectForPricing, project.id);
@@ -211,9 +252,18 @@ export default function ProjectsPage() {
   ) {
     const nextProject: Project = { ...project, status: "Quoted" };
     const id = crypto.randomUUID();
+    const contact =
+      contacts.find((item) => item.id === project.contactId) ??
+      contacts.find(
+        (item) =>
+          sameText(item.name, project.customerName) ||
+          (Boolean(item.email) && sameText(item.email, project.customerEmail)) ||
+          (Boolean(item.phone) && sameText(item.phone, project.customerPhone))
+      );
     const quote: Quote = {
       id,
       projectId: project.id,
+      contactId: contact?.id,
       projectName: project.projectName,
       customerName: project.customerName,
       customerPhone: snapshot?.customerPhone,
@@ -323,7 +373,7 @@ export default function ProjectsPage() {
               </div>
               <div className="min-w-230 divide-y divide-gray-100">
                 {filteredProjects.map((project) => {
-                  const betterPrice = calculateProjectPricing(project).find(
+                  const betterPrice = calculateProjectPricing(project, settings).find(
                     (result) => result.name === "Better"
                   );
 
@@ -372,6 +422,7 @@ export default function ProjectsPage() {
         <ProjectForm
           onCreate={createProject}
           onCancel={() => setIsFormOpen(false)}
+          onCreateContact={createContact}
           contacts={contacts}
         />
       ) : null}
@@ -379,7 +430,9 @@ export default function ProjectsPage() {
       {selectedProject ? (
         <ProjectDetailPanel
           project={selectedProject}
+          key={`${selectedProject.id}-${initialProjectTab}`}
           pricingResults={pricingByProject[selectedProject.id]}
+          initialTab={initialProjectTab}
           onClose={() => setSelectedProjectId(null)}
           onUpdateProject={updateProject}
           onPriceProject={priceProject}
@@ -391,4 +444,21 @@ export default function ProjectsPage() {
       ) : null}
     </div>
   );
+}
+
+function getProjectTab(value: string | null): ProjectDetailTab {
+  if (
+    value === "overview" ||
+    value === "costs" ||
+    value === "quote" ||
+    value === "notes"
+  ) {
+    return value;
+  }
+
+  return "costs";
+}
+
+function sameText(left: string, right: string) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }

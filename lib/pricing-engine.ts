@@ -22,11 +22,26 @@ export type PricingEngineInput = {
   };
   businessCosts: {
     overheadPercent: number;
+    overheadAllocationMethod:
+      | "Percentage"
+      | "Flat Per Project"
+      | "Project Duration"
+      | "Ignore For Now";
+    monthlyOverhead: number;
+    flatOverheadPerProject: number;
+    monthlyBillableDays: number;
+    projectDurationDays: number;
+    laborBurdenPercent: number;
+    minimumJobPrice: number;
     miscellaneousBufferPercent: number;
+    permitBuffer: number;
     creditCardFeePercent: number;
     financingFeePercent: number;
+    taxPercent: number;
     includeCreditCardFee: boolean;
     includeFinancingFee: boolean;
+    includeTax: boolean;
+    includeMiscellaneousBuffer: boolean;
   };
   commission: {
     includeCommission: boolean;
@@ -42,6 +57,11 @@ export type PricingEngineInput = {
     riskLevel: RiskLevel;
     strategy: Strategy;
   };
+  pricingRules?: {
+    baseMargins: Record<PriceOptionName, number>;
+    stateAdjustments: Record<ProjectState, number>;
+    minimumSafeMargin?: number;
+  };
 };
 
 export type PricingEngineOption = {
@@ -53,6 +73,7 @@ export type PricingEngineOption = {
   commissionCost: number;
   creditCardFeeCost: number;
   financingFeeCost: number;
+  taxCost: number;
   finalMargin: number;
   status: "Safe" | "Tight" | "Risky";
   recommended?: boolean;
@@ -62,6 +83,10 @@ export type PricingEngineResult = {
   baseCost: number;
   bufferCost: number;
   overheadCost: number;
+  laborBurdenCost: number;
+  permitBufferCost: number;
+  taxCost: number;
+  businessCostTotal: number;
   breakevenPrice: number;
   minimumSafePrice: number;
   minimumSafeMargin: number;
@@ -134,17 +159,27 @@ export function calculatePricingEngine(
     (sum, value) => sum + value,
     0
   );
+  const laborBurdenCost =
+    input.costs.labor * percentToDecimal(input.businessCosts.laborBurdenPercent);
   const bufferCost =
-    baseCost * percentToDecimal(input.businessCosts.miscellaneousBufferPercent);
-  const overheadCost =
-    baseCost * percentToDecimal(input.businessCosts.overheadPercent);
-  const fixedCostBeforeSaleBasedFees = baseCost + bufferCost + overheadCost;
+    input.businessCosts.includeMiscellaneousBuffer
+      ? baseCost *
+        percentToDecimal(input.businessCosts.miscellaneousBufferPercent)
+      : 0;
+  const permitBufferCost = input.businessCosts.permitBuffer;
+  const overheadCost = getOverheadCost(input, baseCost);
+  const fixedCostBeforeSaleBasedFees =
+    baseCost + laborBurdenCost + bufferCost + overheadCost + permitBufferCost;
+  const rules = input.pricingRules ?? {
+    baseMargins,
+    stateAdjustments,
+  };
   const minimumSafeMargin =
-    0.2 +
+    (input.pricingRules?.minimumSafeMargin ?? 0.2) +
     (input.setup.riskLevel === "High" ? 0.03 : 0) +
     (input.setup.projectSize === "Small" ? 0.02 : 0);
   const adjustments = {
-    state: stateAdjustments[input.setup.state],
+    state: rules.stateAdjustments[input.setup.state],
     trade: tradeAdjustments[input.setup.trade],
     company: companyAdjustments[input.setup.companyLevel],
     size: sizeAdjustments[input.setup.projectSize],
@@ -156,18 +191,23 @@ export function calculatePricingEngine(
     fixedCostBeforeSaleBasedFees,
     targetMargin: 0,
     input,
+    enforceMinimumJobPrice: false,
   }).salePrice;
 
-  const minimumSafePrice = solveSalePrice({
-    fixedCostBeforeSaleBasedFees,
-    targetMargin: minimumSafeMargin,
-    input,
-  }).salePrice;
+  const minimumSafePrice = Math.max(
+    solveSalePrice({
+      fixedCostBeforeSaleBasedFees,
+      targetMargin: minimumSafeMargin,
+      input,
+      enforceMinimumJobPrice: false,
+    }).salePrice,
+    input.businessCosts.minimumJobPrice
+  );
 
   const options = (["Good", "Better", "Best"] as PriceOptionName[]).map(
     (name) => {
       const finalMargin = clamp(
-        baseMargins[name] +
+        rules.baseMargins[name] +
           adjustments.state +
           adjustments.trade +
           adjustments.company +
@@ -181,12 +221,16 @@ export function calculatePricingEngine(
         fixedCostBeforeSaleBasedFees,
         targetMargin: finalMargin,
         input,
+        enforceMinimumJobPrice: true,
       });
       const netProfit =
         solved.salePrice -
         baseCost -
+        laborBurdenCost -
         overheadCost -
         bufferCost -
+        permitBufferCost -
+        solved.taxCost -
         solved.commissionCost -
         solved.creditCardFeeCost -
         solved.financingFeeCost;
@@ -202,6 +246,7 @@ export function calculatePricingEngine(
         commissionCost: solved.commissionCost,
         creditCardFeeCost: solved.creditCardFeeCost,
         financingFeeCost: solved.financingFeeCost,
+        taxCost: solved.taxCost,
         finalMargin,
         status: getOptionStatus(solved.salePrice, minimumSafePrice, margin),
         recommended: name === "Better",
@@ -225,6 +270,18 @@ export function calculatePricingEngine(
     baseCost,
     bufferCost,
     overheadCost,
+    laborBurdenCost,
+    permitBufferCost,
+    taxCost: options[1]?.taxCost ?? 0,
+    businessCostTotal:
+      laborBurdenCost +
+      bufferCost +
+      overheadCost +
+      permitBufferCost +
+      (options[1]?.taxCost ?? 0) +
+      (options[1]?.commissionCost ?? 0) +
+      (options[1]?.creditCardFeeCost ?? 0) +
+      (options[1]?.financingFeeCost ?? 0),
     breakevenPrice,
     minimumSafePrice,
     minimumSafeMargin,
@@ -245,10 +302,12 @@ function solveSalePrice({
   fixedCostBeforeSaleBasedFees,
   targetMargin,
   input,
+  enforceMinimumJobPrice,
 }: {
   fixedCostBeforeSaleBasedFees: number;
   targetMargin: number;
   input: PricingEngineInput;
+  enforceMinimumJobPrice: boolean;
 }) {
   const creditCardPercent = input.businessCosts.includeCreditCardFee
     ? percentToDecimal(input.businessCosts.creditCardFeePercent)
@@ -261,24 +320,54 @@ function solveSalePrice({
     input.commission.commissionType === "Percentage"
       ? percentToDecimal(input.commission.commissionPercentage)
       : 0;
+  const taxPercent = getTaxPercent(input);
   const flatCommission =
     input.commission.includeCommission &&
     input.commission.commissionType === "Flat Amount"
       ? input.commission.commissionFlatAmount
       : 0;
   const denominator =
-    1 - targetMargin - creditCardPercent - financingPercent - commissionPercent;
-  const salePrice =
+    1 -
+    targetMargin -
+    creditCardPercent -
+    financingPercent -
+    commissionPercent -
+    taxPercent;
+  const rawSalePrice =
     denominator > 0
       ? (fixedCostBeforeSaleBasedFees + flatCommission) / denominator
       : 0;
+  const salePrice = enforceMinimumJobPrice
+    ? Math.max(rawSalePrice, input.businessCosts.minimumJobPrice)
+    : rawSalePrice;
 
   return {
     salePrice,
     commissionCost: flatCommission + salePrice * commissionPercent,
     creditCardFeeCost: salePrice * creditCardPercent,
     financingFeeCost: salePrice * financingPercent,
+    taxCost: salePrice * taxPercent,
   };
+}
+
+function getOverheadCost(input: PricingEngineInput, baseCost: number) {
+  if (input.businessCosts.overheadAllocationMethod === "Ignore For Now") return 0;
+  if (input.businessCosts.overheadAllocationMethod === "Flat Per Project") {
+    return input.businessCosts.flatOverheadPerProject;
+  }
+  if (input.businessCosts.overheadAllocationMethod === "Project Duration") {
+    const billableDays = Math.max(1, input.businessCosts.monthlyBillableDays);
+    const days = Math.max(1, input.businessCosts.projectDurationDays);
+    return (input.businessCosts.monthlyOverhead / billableDays) * days;
+  }
+
+  return baseCost * percentToDecimal(input.businessCosts.overheadPercent);
+}
+
+function getTaxPercent(input: PricingEngineInput) {
+  return input.businessCosts.includeTax
+    ? percentToDecimal(input.businessCosts.taxPercent)
+    : 0;
 }
 
 function getOptionStatus(
@@ -355,6 +444,18 @@ function getWarnings({
   }
   if (options.some((option) => option.finalMargin > 0.55)) {
     warnings.push("Final margin is higher than 55%.");
+  }
+  if (
+    input.businessCosts.minimumJobPrice > 0 &&
+    options.some((option) => option.salePrice === input.businessCosts.minimumJobPrice)
+  ) {
+    warnings.push("Minimum job price is controlling one or more options.");
+  }
+  if (input.businessCosts.overheadAllocationMethod === "Ignore For Now") {
+    warnings.push("Overhead is ignored for this calculation.");
+  }
+  if (input.businessCosts.laborBurdenPercent === 0 && input.costs.labor > 0) {
+    warnings.push("Labor burden is 0%. Payroll taxes, insurance, and benefits may be missing.");
   }
 
   return warnings;

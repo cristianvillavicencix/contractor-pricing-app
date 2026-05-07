@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
@@ -27,6 +28,7 @@ const emptyContact: ContactForm = {
 };
 
 export default function ContactsPage() {
+  const router = useRouter();
   const [contacts, setContacts] = useLocalStorageState<Contact[]>(
     storageKeys.contacts,
     initialContacts
@@ -40,7 +42,10 @@ export default function ContactsPage() {
   const [form, setForm] = useState<ContactForm>(emptyContact);
   const [error, setError] = useState("");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
-    null
+    () =>
+      typeof window === "undefined"
+        ? null
+        : new URLSearchParams(window.location.search).get("contactId")
   );
 
   const filteredContacts = useMemo(() => {
@@ -226,6 +231,10 @@ export default function ContactsPage() {
           projects={getContactProjects(selectedContact, projects)}
           quotes={getContactQuotes(selectedContact, quotes)}
           onClose={() => setSelectedContactId(null)}
+          onOpenProject={(projectId) =>
+            router.push(`/projects?projectId=${projectId}&projectTab=overview`)
+          }
+          onOpenQuote={(quoteId) => router.push(`/quotes/preview?id=${quoteId}`)}
         />
       ) : null}
     </div>
@@ -237,11 +246,15 @@ function ContactDetailPanel({
   projects,
   quotes,
   onClose,
+  onOpenProject,
+  onOpenQuote,
 }: {
   contact: Contact;
   projects: Project[];
   quotes: Quote[];
   onClose: () => void;
+  onOpenProject: (projectId: string) => void;
+  onOpenQuote: (quoteId: string) => void;
 }) {
   return (
     <div
@@ -304,9 +317,10 @@ function ContactDetailPanel({
           <div className="mt-4 divide-y divide-gray-100">
             {projects.length > 0 ? (
               projects.map((project) => (
-                <div
+                <button
                   key={project.id}
-                  className="grid gap-3 py-4 text-sm sm:grid-cols-[1.4fr_1fr_1fr]"
+                  onClick={() => onOpenProject(project.id)}
+                  className="grid w-full gap-3 py-4 text-left text-sm transition hover:bg-[#f6f8fb] sm:grid-cols-[1.4fr_1fr_1fr]"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-black">
@@ -318,7 +332,7 @@ function ContactDetailPanel({
                   </div>
                   <span className="text-gray-600">{project.trade}</span>
                   <span className="font-medium">{project.status}</span>
-                </div>
+                </button>
               ))
             ) : (
               <p className="py-6 text-sm text-gray-500">
@@ -348,9 +362,10 @@ function ContactDetailPanel({
               quotes.map((quote) => {
                 const selected = getSelectedQuote(quote);
                 return (
-                  <div
+                  <button
                     key={quote.id}
-                    className="grid gap-3 py-4 text-sm sm:grid-cols-[1.3fr_1fr_1fr_1fr]"
+                    onClick={() => onOpenQuote(quote.id)}
+                    className="grid w-full gap-3 py-4 text-left text-sm transition hover:bg-[#f6f8fb] sm:grid-cols-[1.3fr_1fr_1fr_1fr]"
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-black">
@@ -363,7 +378,7 @@ function ContactDetailPanel({
                     <span>{formatMoney(selected.salePrice)}</span>
                     <span>{formatMoney(selected.profit)}</span>
                     <span>{formatMargin(selected.margin)}</span>
-                  </div>
+                  </button>
                 );
               })
             ) : (
@@ -380,6 +395,7 @@ function ContactDetailPanel({
 
 function getContactProjects(contact: Contact, projects: Project[]) {
   return projects.filter((project) => {
+    if (project.contactId === contact.id) return true;
     const nameMatch = sameText(project.customerName, contact.name);
     const emailMatch =
       Boolean(contact.email) && sameText(project.customerEmail, contact.email);
@@ -391,7 +407,13 @@ function getContactProjects(contact: Contact, projects: Project[]) {
 }
 
 function getContactQuotes(contact: Contact, quotes: Quote[]) {
-  return quotes.filter((quote) => sameText(quote.customerName, contact.name));
+  return quotes.filter(
+    (quote) =>
+      quote.contactId === contact.id ||
+      sameText(quote.customerName, contact.name) ||
+      (Boolean(contact.email) && sameText(quote.customerEmail ?? "", contact.email)) ||
+      (Boolean(contact.phone) && sameText(quote.customerPhone ?? "", contact.phone))
+  );
 }
 
 function getSelectedQuote(quote: Quote) {

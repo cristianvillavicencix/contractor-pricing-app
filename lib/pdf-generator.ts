@@ -1,4 +1,11 @@
-import type { Quote, Project, AppSettings } from "./app-data";
+import {
+  getEnabledCompanyCredentialDocuments,
+  getEnabledCompanyCredentials,
+  mergeAppSettings,
+  type AppSettings,
+  type Project,
+  type Quote,
+} from "./app-data";
 
 export type CoverLayout = "full" | "half" | "square";
 
@@ -30,6 +37,13 @@ export type QuoteDocument = {
   termsText: string;
   includedServices: string[];
   certifications: string[];
+  certificationDocuments: {
+    credentialName: string;
+    fileName: string;
+    fileType: string;
+    dataUrl: string;
+    uploadedAt: string;
+  }[];
   // Pricing — NO margin/profit/markup shown to customer
   goodPrice: number;
   betterPrice: number;
@@ -64,22 +78,27 @@ export function buildQuoteDocument(
   project: Project | undefined,
   settings: AppSettings
 ): QuoteDocument {
+  const mergedSettings = mergeAppSettings(settings);
   const projectAddress = project
     ? `${project.address}, ${project.city}, ${project.state} ${project.zipCode}`
     : "";
 
+  const certifications = mergedSettings.proposalSettings.showCertifications
+    ? quote.certifications ?? getEnabledCompanyCredentials(mergedSettings)
+    : [];
+
   return {
-    companyName: settings.companyProfile.businessName || "Your Company",
-    companyPhone: settings.companyProfile.phone,
-    companyEmail: settings.companyProfile.email,
-    companyWebsite: settings.companyProfile.website,
-    companyLogoUrl: settings.branding.logoUrl,
-    companyTagline: settings.branding.tagline,
-    companyFooterText: settings.branding.footerText,
+    companyName: mergedSettings.companyProfile.businessName || "Your Company",
+    companyPhone: mergedSettings.companyProfile.phone,
+    companyEmail: mergedSettings.companyProfile.email,
+    companyWebsite: mergedSettings.companyProfile.website,
+    companyLogoUrl: mergedSettings.branding.logoUrl,
+    companyTagline: mergedSettings.branding.tagline,
+    companyFooterText: mergedSettings.branding.footerText,
 
     proposalTitle:
       quote.proposalTitle ||
-      settings.proposalSettings.defaultProposalTitle ||
+      mergedSettings.proposalSettings.defaultProposalTitle ||
       "Project Proposal",
     proposalNumber: quote.proposalNumber || generateProposalNumber(quote.id),
     dateCreated: quote.createdAt,
@@ -95,10 +114,15 @@ export function buildQuoteDocument(
 
     scopeSummary: quote.scopeSummary || "",
     warrantyText:
-      quote.warrantyText || settings.proposalSettings.defaultWarrantyText,
-    termsText: quote.termsText || settings.proposalSettings.defaultTerms,
+      quote.warrantyText || mergedSettings.proposalSettings.defaultWarrantyText,
+    termsText: quote.termsText || mergedSettings.proposalSettings.defaultTerms,
     includedServices: quote.includedServices ?? defaultIncludedServices,
-    certifications: quote.certifications ?? [],
+    certifications,
+    certificationDocuments: mergedSettings.proposalSettings.showCertifications
+      ? getEnabledCompanyCredentialDocuments(mergedSettings).filter((document) =>
+          certifications.includes(document.credentialName)
+        )
+      : [],
 
     goodPrice: quote.good.salePrice,
     betterPrice: quote.better.salePrice,

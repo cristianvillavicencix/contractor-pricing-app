@@ -530,9 +530,10 @@ export async function downloadQuotePDF(
   coverImageUrl?: string,
   coverLayout: import("@/lib/pdf-generator").CoverLayout = "full"
 ): Promise<void> {
-  const blob = await pdf(
+  const quoteBlob = await pdf(
     <QuotePDFDocument doc={doc} coverImageUrl={coverImageUrl} coverLayout={coverLayout} />
   ).toBlob();
+  const blob = await appendCredentialDocuments(quoteBlob, doc);
   const fileName = `${doc.proposalNumber} - ${doc.customerName}.pdf`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -540,4 +541,94 @@ export async function downloadQuotePDF(
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function appendCredentialDocuments(
+  quoteBlob: Blob,
+  doc: QuoteDocument
+) {
+  const documents = doc.certificationDocuments.filter(
+    (document) => document.dataUrl
+  );
+
+  if (documents.length === 0) return quoteBlob;
+
+  const { PDFDocument: PDFLibDocument } = await import("pdf-lib");
+  const mergedPdf = await PDFLibDocument.load(await quoteBlob.arrayBuffer());
+
+  for (const document of documents) {
+    const fileBytes = dataUrlToUint8Array(document.dataUrl);
+
+    try {
+      if (isPdfDocument(document)) {
+        const attachedPdf = await PDFLibDocument.load(fileBytes);
+        const pages = await mergedPdf.copyPages(
+          attachedPdf,
+          attachedPdf.getPageIndices()
+        );
+        pages.forEach((page) => mergedPdf.addPage(page));
+        continue;
+      }
+
+      if (isImageDocument(document)) {
+        const image = document.fileType.includes("png")
+          ? await mergedPdf.embedPng(fileBytes)
+          : await mergedPdf.embedJpg(fileBytes);
+        const page = mergedPdf.addPage();
+        const { width, height } = page.getSize();
+        const margin = 48;
+        const scale = Math.min(
+          (width - margin * 2) / image.width,
+          (height - margin * 2) / image.height
+        );
+
+        page.drawImage(image, {
+          x: (width - image.width * scale) / 2,
+          y: (height - image.height * scale) / 2,
+          width: image.width * scale,
+          height: image.height * scale,
+        });
+      }
+    } catch {
+      // If a browser cannot read a specific credential file, keep the quote usable
+      // and continue with the remaining documents.
+    }
+  }
+
+  const mergedBytes = await mergedPdf.save();
+  const mergedBuffer = mergedBytes.buffer.slice(
+    mergedBytes.byteOffset,
+    mergedBytes.byteOffset + mergedBytes.byteLength
+  ) as ArrayBuffer;
+  return new Blob([mergedBuffer], { type: "application/pdf" });
+}
+
+function dataUrlToUint8Array(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function isPdfDocument(document: QuoteDocument["certificationDocuments"][number]) {
+  return (
+    document.fileType === "application/pdf" ||
+    document.dataUrl.startsWith("data:application/pdf")
+  );
+}
+
+function isImageDocument(
+  document: QuoteDocument["certificationDocuments"][number]
+) {
+  return (
+    document.fileType.includes("png") ||
+    document.fileType.includes("jpeg") ||
+    document.fileType.includes("jpg") ||
+    document.dataUrl.startsWith("data:image/")
+  );
 }

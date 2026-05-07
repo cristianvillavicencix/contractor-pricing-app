@@ -9,8 +9,10 @@ import {
   formatMargin,
   formatMoney,
   getTodayLabel,
+  initialContacts,
   initialProjects,
   companyLevelOptions,
+  mergeAppSettings,
   projectSizeOptions,
   riskLevelOptions,
   stateOptions,
@@ -18,6 +20,7 @@ import {
   strategyOptions,
   tradeOptions,
   type AppSettings,
+  type Contact,
   type Project,
   type ProjectState,
   type Trade,
@@ -46,11 +49,22 @@ const defaultInput: PricingEngineInput = {
   },
   businessCosts: {
     overheadPercent: 10,
+    overheadAllocationMethod: "Percentage",
+    monthlyOverhead: 5000,
+    flatOverheadPerProject: 500,
+    monthlyBillableDays: 20,
+    projectDurationDays: 1,
+    laborBurdenPercent: 18,
+    minimumJobPrice: 850,
     miscellaneousBufferPercent: 5,
+    permitBuffer: 0,
     creditCardFeePercent: 3,
     financingFeePercent: 3,
+    taxPercent: 0,
     includeCreditCardFee: false,
     includeFinancingFee: false,
+    includeTax: false,
+    includeMiscellaneousBuffer: true,
   },
   commission: {
     includeCommission: false,
@@ -68,7 +82,84 @@ const defaultInput: PricingEngineInput = {
   },
 };
 
+function createInputFromSettings(
+  settings: AppSettings,
+  project?: Project | null
+): PricingEngineInput {
+  const merged = mergeAppSettings(settings);
+  const mainTrade =
+    merged.companyProfile.mainTrade === "General Contractor"
+      ? "Remodeling"
+      : merged.companyProfile.mainTrade;
+
+  return {
+    ...defaultInput,
+    costs: project
+      ? {
+          material: project.costs.materials,
+          labor: project.costs.labor,
+          dumpster: project.costs.dumpster,
+          permits: project.costs.permits,
+          equipment: project.costs.equipment,
+          subcontractor: project.costs.subcontractor,
+          miscellaneous: project.costs.miscellaneous,
+        }
+      : defaultInput.costs,
+    businessCosts: {
+      overheadPercent: merged.costRules.includeOverhead
+        ? merged.costRules.defaultOverheadPercent
+        : 0,
+      overheadAllocationMethod: merged.costRules.includeOverhead
+        ? merged.costRules.overheadAllocationMethod
+        : "Ignore For Now",
+      monthlyOverhead: merged.costRules.monthlyOverhead,
+      flatOverheadPerProject: merged.costRules.flatOverheadPerProject,
+      monthlyBillableDays: merged.costRules.monthlyBillableDays,
+      projectDurationDays: merged.costRules.defaultProjectDurationDays,
+      laborBurdenPercent: merged.costRules.laborBurdenPercent,
+      minimumJobPrice: merged.costRules.minimumJobPrice,
+      miscellaneousBufferPercent: merged.costRules.miscellaneousBufferPercent,
+      permitBuffer: merged.costRules.permitBuffer,
+      creditCardFeePercent: merged.costRules.creditCardFeePercent,
+      financingFeePercent: merged.costRules.financingFeePercent,
+      taxPercent: merged.costRules.taxPercent,
+      includeCreditCardFee: merged.costRules.includeCreditCardFee,
+      includeFinancingFee: merged.costRules.includeFinancingFee,
+      includeTax: merged.costRules.includeTax,
+      includeMiscellaneousBuffer: merged.costRules.includeMiscellaneousBuffer,
+    },
+    setup: {
+      trade: project?.trade ?? mainTrade,
+      state: project?.state ?? merged.marketLocation.defaultState,
+      companyLevel: merged.companyProfile.companyLevel,
+      projectSize: project?.projectSize ?? merged.pricingDefaults.defaultProjectSize,
+      riskLevel: project?.riskLevel ?? merged.pricingDefaults.defaultRiskLevel,
+      strategy: merged.pricingDefaults.defaultStrategy,
+    },
+    pricingRules: getPricingRules(merged),
+  };
+}
+
+function getPricingRules(settings: AppSettings): PricingEngineInput["pricingRules"] {
+  return {
+    baseMargins: {
+      Good: settings.pricingDefaults.goodMargin / 100,
+      Better: settings.pricingDefaults.betterMargin / 100,
+      Best: settings.pricingDefaults.bestMargin / 100,
+    },
+    minimumSafeMargin: settings.pricingDefaults.minimumSafeMargin / 100,
+    stateAdjustments: {
+      Connecticut: settings.marketLocation.stateAdjustments.Connecticut / 100,
+      "New York": settings.marketLocation.stateAdjustments.NewYork / 100,
+      "New Jersey": settings.marketLocation.stateAdjustments.NewJersey / 100,
+      Florida: settings.marketLocation.stateAdjustments.Florida / 100,
+      Texas: settings.marketLocation.stateAdjustments.Texas / 100,
+    },
+  };
+}
+
 type ProjectDraft = {
+  contactId: string;
   projectName: string;
   customerName: string;
   customerPhone: string;
@@ -81,6 +172,7 @@ export default function PricingPage() {
   const router = useRouter();
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>({
+    contactId: "",
     projectName: "",
     customerName: "",
     customerPhone: "",
@@ -93,6 +185,11 @@ export default function PricingPage() {
     storageKeys.settings,
     defaultSettings
   );
+  const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
+  const [contacts, setContacts] = useLocalStorageState<Contact[]>(
+    storageKeys.contacts,
+    initialContacts
+  );
   const [sourceProject, setSourceProject] = useState<Project | null>(() => {
     const savedProjects = readLocalStorage<Project[]>(storageKeys.projects, initialProjects);
     const projectId = readLocalStorage<string | null>(storageKeys.projectForPricing, null);
@@ -102,27 +199,7 @@ export default function PricingPage() {
     const savedProjects = readLocalStorage<Project[]>(storageKeys.projects, initialProjects);
     const projectId = readLocalStorage<string | null>(storageKeys.projectForPricing, null);
     const project = savedProjects.find((p) => p.id === projectId);
-    if (!project) return { ...defaultInput, setup: { ...defaultInput.setup, companyLevel: settings.companyProfile.companyLevel, strategy: settings.pricingDefaults.defaultStrategy } };
-    return {
-      ...defaultInput,
-      costs: {
-        material: project.costs.materials,
-        labor: project.costs.labor,
-        dumpster: project.costs.dumpster,
-        permits: project.costs.permits,
-        equipment: project.costs.equipment,
-        subcontractor: project.costs.subcontractor,
-        miscellaneous: project.costs.miscellaneous,
-      },
-      setup: {
-        trade: project.trade,
-        state: project.state,
-        companyLevel: settings.companyProfile.companyLevel,
-        projectSize: project.projectSize,
-        riskLevel: project.riskLevel,
-        strategy: settings.pricingDefaults.defaultStrategy,
-      },
-    };
+    return createInputFromSettings(settings, project);
   });
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -131,7 +208,7 @@ export default function PricingPage() {
   const hasResults = baseCost > 0;
 
   function reset() {
-    setInput({ ...defaultInput, setup: { ...defaultInput.setup, companyLevel: settings.companyProfile.companyLevel, strategy: settings.pricingDefaults.defaultStrategy } });
+    setInput(createInputFromSettings(mergedSettings));
     setSourceProject(null);
     writeLocalStorage(storageKeys.projectForPricing, null);
   }
@@ -141,6 +218,26 @@ export default function PricingPage() {
       setProjectError("Project name and customer name are required.");
       return;
     }
+    const matchedContact =
+      contacts.find((contact) => contact.id === projectDraft.contactId) ??
+      contacts.find(
+        (contact) =>
+          sameText(contact.name, projectDraft.customerName) ||
+          (Boolean(contact.email) && sameText(contact.email, projectDraft.customerEmail)) ||
+          (Boolean(contact.phone) && sameText(contact.phone, projectDraft.customerPhone))
+      );
+    const contact =
+      matchedContact ??
+      createContact({
+        name: projectDraft.customerName.trim(),
+        phone: projectDraft.customerPhone.trim(),
+        email: projectDraft.customerEmail.trim(),
+        address: [projectDraft.address, projectDraft.city, input.setup.state]
+          .filter((part) => part.trim())
+          .join(", "),
+        notes: "",
+        customerType: "Homeowner",
+      });
     const existing = readLocalStorage<Project[]>(storageKeys.projects, initialProjects);
     const newProject: Project = {
       id: crypto.randomUUID(),
@@ -148,6 +245,7 @@ export default function PricingPage() {
       customerName: projectDraft.customerName.trim(),
       customerPhone: projectDraft.customerPhone.trim(),
       customerEmail: projectDraft.customerEmail.trim(),
+      contactId: contact.id,
       address: projectDraft.address.trim(),
       city: projectDraft.city.trim(),
       state: input.setup.state as ProjectState,
@@ -170,9 +268,32 @@ export default function PricingPage() {
     };
     writeLocalStorage(storageKeys.projects, [newProject, ...existing]);
     setShowProjectModal(false);
-    setProjectDraft({ projectName: "", customerName: "", customerPhone: "", customerEmail: "", address: "", city: "" });
+    setProjectDraft({ contactId: "", projectName: "", customerName: "", customerPhone: "", customerEmail: "", address: "", city: "" });
     setProjectError("");
-    router.push("/projects");
+    router.push(`/projects?projectId=${newProject.id}`);
+  }
+
+  function createContact(contact: Omit<Contact, "id" | "createdAt">) {
+    const nextContact: Contact = {
+      id: crypto.randomUUID(),
+      ...contact,
+      createdAt: getTodayLabel(),
+    };
+    setContacts((current) => [nextContact, ...current]);
+    return nextContact;
+  }
+
+  function applyContact(contactId: string) {
+    const contact = contacts.find((item) => item.id === contactId);
+    setProjectDraft((current) => ({
+      ...current,
+      contactId,
+      customerName: contact?.name ?? current.customerName,
+      customerPhone: contact?.phone ?? current.customerPhone,
+      customerEmail: contact?.email ?? current.customerEmail,
+      address: contact?.address.split(",")[0]?.trim() || current.address,
+      city: contact?.address.split(",")[1]?.trim() || current.city,
+    }));
   }
 
   function updateCost<K extends keyof PricingEngineInput["costs"]>(key: K, value: number) {
@@ -281,10 +402,27 @@ export default function PricingPage() {
                     <div>
                       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Business Costs</p>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <NumberInput label="Overhead %" value={input.businessCosts.overheadPercent} onChange={(v) => updateBiz("overheadPercent", v)} />
-                        <NumberInput label="Misc Buffer %" value={input.businessCosts.miscellaneousBufferPercent} onChange={(v) => updateBiz("miscellaneousBufferPercent", v)} />
+                        <SelectInput label="Overhead Method" value={input.businessCosts.overheadAllocationMethod} options={["Percentage", "Flat Per Project", "Project Duration", "Ignore For Now"]} onChange={(v) => updateBiz("overheadAllocationMethod", v as PricingEngineInput["businessCosts"]["overheadAllocationMethod"])} />
+                        <NumberInput label="Minimum Job $" value={input.businessCosts.minimumJobPrice} onChange={(v) => updateBiz("minimumJobPrice", v)} />
+                        {input.businessCosts.overheadAllocationMethod === "Percentage" && (
+                          <NumberInput label="Overhead %" value={input.businessCosts.overheadPercent} onChange={(v) => updateBiz("overheadPercent", v)} />
+                        )}
+                        {input.businessCosts.overheadAllocationMethod === "Flat Per Project" && (
+                          <NumberInput label="Flat Overhead $" value={input.businessCosts.flatOverheadPerProject} onChange={(v) => updateBiz("flatOverheadPerProject", v)} />
+                        )}
+                        {input.businessCosts.overheadAllocationMethod === "Project Duration" && (
+                          <>
+                            <NumberInput label="Monthly Overhead $" value={input.businessCosts.monthlyOverhead} onChange={(v) => updateBiz("monthlyOverhead", v)} />
+                            <NumberInput label="Billable Days / Month" value={input.businessCosts.monthlyBillableDays} onChange={(v) => updateBiz("monthlyBillableDays", v)} />
+                            <NumberInput label="Project Duration Days" value={input.businessCosts.projectDurationDays} onChange={(v) => updateBiz("projectDurationDays", v)} />
+                          </>
+                        )}
+                        <NumberInput label="Labor Burden %" value={input.businessCosts.laborBurdenPercent} onChange={(v) => updateBiz("laborBurdenPercent", v)} />
+                        <ToggleNumberInput label="Misc Buffer %" value={input.businessCosts.miscellaneousBufferPercent} enabled={input.businessCosts.includeMiscellaneousBuffer} onToggle={(v) => updateBiz("includeMiscellaneousBuffer", v)} onChange={(v) => updateBiz("miscellaneousBufferPercent", v)} />
+                        <NumberInput label="Permit Buffer $" value={input.businessCosts.permitBuffer} onChange={(v) => updateBiz("permitBuffer", v)} />
                         <ToggleNumberInput label="CC Fee %" value={input.businessCosts.creditCardFeePercent} enabled={input.businessCosts.includeCreditCardFee} onToggle={(v) => updateBiz("includeCreditCardFee", v)} onChange={(v) => updateBiz("creditCardFeePercent", v)} />
                         <ToggleNumberInput label="Financing Fee %" value={input.businessCosts.financingFeePercent} enabled={input.businessCosts.includeFinancingFee} onToggle={(v) => updateBiz("includeFinancingFee", v)} onChange={(v) => updateBiz("financingFeePercent", v)} />
+                        <ToggleNumberInput label="Tax %" value={input.businessCosts.taxPercent} enabled={input.businessCosts.includeTax} onToggle={(v) => updateBiz("includeTax", v)} onChange={(v) => updateBiz("taxPercent", v)} />
                       </div>
                     </div>
 
@@ -327,8 +465,22 @@ export default function PricingPage() {
                   {/* Reference row */}
                   <div className="grid gap-4 sm:grid-cols-3">
                     <RefBox label="Base Cost" value={formatMoney(baseCost)} sub={`Mat ${formatMoney(input.costs.material)} · Labor ${formatMoney(input.costs.labor)}`} />
-                    <RefBox label="Breakeven" value={formatMoney(result.breakevenPrice)} sub={`Overhead ${formatMoney(result.overheadCost)}`} />
-                    <RefBox label="Min Safe Price" value={formatMoney(result.minimumSafePrice)} sub={`${formatMargin(result.minimumSafeMargin)} minimum margin`} />
+                    <RefBox label="Breakeven" value={formatMoney(result.breakevenPrice)} sub={`Overhead ${formatMoney(result.overheadCost)} · Burden ${formatMoney(result.laborBurdenCost)}`} />
+                    <RefBox label="Min Safe Price" value={formatMoney(result.minimumSafePrice)} sub={`${formatMargin(result.minimumSafeMargin)} min · Floor ${formatMoney(input.businessCosts.minimumJobPrice)}`} />
+                  </div>
+
+                  <div className="rounded-lg border border-[#d9e2ec] bg-white p-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Cost Protection
+                    </p>
+                    <div className="grid gap-2 text-sm sm:grid-cols-2">
+                      <Row label="Labor burden" value={formatMoney(result.laborBurdenCost)} />
+                      <Row label="Overhead" value={formatMoney(result.overheadCost)} />
+                      <Row label="Misc buffer" value={formatMoney(result.bufferCost)} />
+                      <Row label="Permit buffer" value={formatMoney(result.permitBufferCost)} />
+                      <Row label="Tax on Better" value={formatMoney(result.taxCost)} />
+                      <Row label="Total protection" value={formatMoney(result.businessCostTotal)} strong />
+                    </div>
                   </div>
 
                   {/* Project health */}
@@ -378,6 +530,22 @@ export default function PricingPage() {
             </div>
 
             <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+              <label className="block text-xs font-medium text-gray-600 sm:col-span-2">
+                Existing contact
+                <select
+                  value={projectDraft.contactId}
+                  onChange={(event) => applyContact(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#ff5c35]"
+                >
+                  <option value="">Create or match by customer info</option>
+                  {contacts.map((contact) => (
+                    <option key={contact.id} value={contact.id}>
+                      {contact.name}
+                      {contact.phone ? ` · ${contact.phone}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <ModalField
                 label="Project name *"
                 value={projectDraft.projectName}
@@ -460,6 +628,10 @@ function ModalField({ label, value, placeholder, onChange, className = "" }: { l
       />
     </label>
   );
+}
+
+function sameText(left: string, right: string) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 /* ── Result card ── */

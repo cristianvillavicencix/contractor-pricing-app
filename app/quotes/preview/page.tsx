@@ -17,7 +17,6 @@ import { useSearchParams } from "next/navigation";
 import { QuotePreview } from "@/components/quotes/quote-preview";
 import {
   buildQuoteDocument,
-  defaultCertifications,
   defaultIncludedServices,
   TRADE_SERVICES,
   type CoverLayout,
@@ -26,6 +25,9 @@ import {
 import { ScopeWizard } from "@/components/quotes/scope-wizard";
 import {
   defaultSettings,
+  getEnabledCompanyCredentialDocuments,
+  getEnabledCompanyCredentials,
+  mergeAppSettings,
   storageKeys,
   type AppSettings,
   type Project,
@@ -49,7 +51,9 @@ function QuotePreviewContent() {
 
   const quotes = readLocalStorage<Quote[]>(storageKeys.quotes, []);
   const projects = readLocalStorage<Project[]>(storageKeys.projects, []);
-  const settings = readLocalStorage<AppSettings>(storageKeys.settings, defaultSettings);
+  const settings = mergeAppSettings(
+    readLocalStorage<AppSettings>(storageKeys.settings, defaultSettings)
+  );
 
   const quote = quotes.find((q) => q.id === quoteId);
   const project = projects.find((p) => p.id === quote?.projectId);
@@ -68,7 +72,7 @@ function QuotePreviewContent() {
     }))
   );
   const [certs, setCerts] = useState<ServiceItem[]>(() =>
-    (quote?.certifications ?? defaultCertifications).map((name) => ({
+    (quote?.certifications ?? getEnabledCompanyCredentials(settings)).map((name) => ({
       name,
       visible: true,
     }))
@@ -78,7 +82,9 @@ function QuotePreviewContent() {
   const [newService, setNewService] = useState("");
   const [newCert, setNewCert] = useState("");
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
-  const [coverLayout, setCoverLayout] = useState<CoverLayout>("full");
+  const [coverLayout, setCoverLayout] = useState<CoverLayout>(
+    settings.branding.proposalCoverLayout
+  );
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -109,7 +115,16 @@ function QuotePreviewContent() {
     warrantyText: warranty,
     termsText: terms,
     includedServices: services.filter((s) => s.visible).map((s) => s.name),
-    certifications: certs.filter((c) => c.visible).map((c) => c.name),
+    certifications: settings.proposalSettings.showCertifications
+      ? certs.filter((c) => c.visible).map((c) => c.name)
+      : [],
+    certificationDocuments: settings.proposalSettings.showCertifications
+      ? getEnabledCompanyCredentialDocuments(settings).filter((document) =>
+          certs.some(
+            (cert) => cert.visible && cert.name === document.credentialName
+          )
+        )
+      : [],
   };
 
   const tradeSuggestions = (TRADE_SERVICES[doc.trade] ?? []).filter(

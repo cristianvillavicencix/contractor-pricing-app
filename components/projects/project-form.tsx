@@ -47,15 +47,18 @@ const initialForm: FormState = {
 export function ProjectForm({
   onCreate,
   onCancel,
+  onCreateContact,
   contacts = [],
 }: {
   onCreate: (project: Project) => void;
   onCancel: () => void;
+  onCreateContact?: (contact: Omit<Contact, "id" | "createdAt">) => Contact;
   contacts?: Contact[];
 }) {
   const [form, setForm] = useState<FormState>(initialForm);
   const [error, setError] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -89,6 +92,7 @@ export function ProjectForm({
       state: matchedState,
       zipCode: zip || current.zipCode,
     }));
+    setSelectedContactId(contact.id);
     setShowSuggestions(false);
   }
 
@@ -103,9 +107,30 @@ export function ProjectForm({
       return;
     }
 
+    const matchedContact =
+      contacts.find((contact) => contact.id === selectedContactId) ??
+      contacts.find(
+        (contact) =>
+          sameText(contact.name, form.customerName) ||
+          (Boolean(contact.email) && sameText(contact.email, form.customerEmail)) ||
+          (Boolean(contact.phone) && sameText(contact.phone, form.customerPhone))
+      );
+
+    const createdContact =
+      matchedContact ??
+      onCreateContact?.({
+        name: form.customerName.trim(),
+        phone: form.customerPhone.trim(),
+        email: form.customerEmail.trim(),
+        address: buildAddress(form),
+        notes: "",
+        customerType: "Homeowner",
+      });
+
     onCreate({
       id: crypto.randomUUID(),
       ...form,
+      contactId: createdContact?.id,
       status: "Draft",
       costs: {
         materials: 0,
@@ -274,6 +299,16 @@ export function ProjectForm({
       </div>
     </div>
   );
+}
+
+function buildAddress(form: FormState) {
+  return [form.address, form.city, `${form.state} ${form.zipCode}`]
+    .filter((part) => part.trim())
+    .join(", ");
+}
+
+function sameText(left: string, right: string) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function InputField({

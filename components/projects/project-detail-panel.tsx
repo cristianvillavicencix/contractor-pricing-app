@@ -12,6 +12,7 @@ import {
   formatMargin,
   formatMoney,
   getTotalCost,
+  mergeAppSettings,
   projectSizeOptions,
   riskLevelOptions,
   stateOptions,
@@ -50,6 +51,7 @@ const costFields: { key: keyof CostBreakdown; label: string }[] = [
 export function ProjectDetailPanel({
   project,
   pricingResults: _pricingResults,
+  initialTab = "costs",
   onClose,
   onUpdateProject,
   onPriceProject: _onPriceProject,
@@ -60,6 +62,7 @@ export function ProjectDetailPanel({
 }: {
   project: Project;
   pricingResults?: PricingResult[];
+  initialTab?: Tab;
   onClose: () => void;
   onUpdateProject: (project: Project) => void;
   onPriceProject: (project: Project) => void;
@@ -85,7 +88,8 @@ export function ProjectDetailPanel({
     storageKeys.settings,
     defaultSettings
   );
-  const [activeTab, setActiveTab] = useState<Tab>("costs");
+  const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [draftProject, setDraftProject] = useState(project);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedOption, setSelectedOption] = useState<PriceOptionName>("Better");
@@ -93,20 +97,56 @@ export function ProjectDetailPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [overheadPct, setOverheadPct] = useState(() =>
-    settings.costRules.includeOverhead ? settings.costRules.defaultOverheadPercent : 0
+    mergedSettings.costRules.includeOverhead ? mergedSettings.costRules.defaultOverheadPercent : 0
+  );
+  const [overheadMethod, setOverheadMethod] = useState<
+    PricingEngineInput["businessCosts"]["overheadAllocationMethod"]
+  >(() =>
+    mergedSettings.costRules.includeOverhead
+      ? mergedSettings.costRules.overheadAllocationMethod
+      : "Ignore For Now"
+  );
+  const [flatOverhead, setFlatOverhead] = useState(
+    () => mergedSettings.costRules.flatOverheadPerProject
+  );
+  const [monthlyOverhead, setMonthlyOverhead] = useState(
+    () => mergedSettings.costRules.monthlyOverhead
+  );
+  const [billableDays, setBillableDays] = useState(
+    () => mergedSettings.costRules.monthlyBillableDays
+  );
+  const [durationDays, setDurationDays] = useState(
+    () => mergedSettings.costRules.defaultProjectDurationDays
+  );
+  const [laborBurdenPct, setLaborBurdenPct] = useState(
+    () => mergedSettings.costRules.laborBurdenPercent
+  );
+  const [minimumJobPrice, setMinimumJobPrice] = useState(
+    () => mergedSettings.costRules.minimumJobPrice
+  );
+  const [miscBufferPct, setMiscBufferPct] = useState(
+    () => mergedSettings.costRules.miscellaneousBufferPercent
+  );
+  const [includeMiscBuffer, setIncludeMiscBuffer] = useState(
+    () => mergedSettings.costRules.includeMiscellaneousBuffer
+  );
+  const [permitBuffer, setPermitBuffer] = useState(
+    () => mergedSettings.costRules.permitBuffer
   );
   const [commissionPct, setCommissionPct] = useState(0);
   const [includeCommission, setIncludeCommission] = useState(false);
-  const [financingPct, setFinancingPct] = useState(() => settings.costRules.financingFeePercent);
+  const [financingPct, setFinancingPct] = useState(() => mergedSettings.costRules.financingFeePercent);
   const [includeFinancing, setIncludeFinancing] = useState(
-    () => settings.costRules.includeFinancingFee
+    () => mergedSettings.costRules.includeFinancingFee
   );
-  const [ccPct, setCcPct] = useState(() => settings.costRules.creditCardFeePercent);
-  const [includeCc, setIncludeCc] = useState(() => settings.costRules.includeCreditCardFee);
+  const [ccPct, setCcPct] = useState(() => mergedSettings.costRules.creditCardFeePercent);
+  const [includeCc, setIncludeCc] = useState(() => mergedSettings.costRules.includeCreditCardFee);
+  const [taxPct, setTaxPct] = useState(() => mergedSettings.costRules.taxPercent);
+  const [includeTax, setIncludeTax] = useState(() => mergedSettings.costRules.includeTax);
   const [riskLevel, setRiskLevel] = useState<RiskLevel>(() => draftProject.riskLevel);
   const [projectSize, setProjectSize] = useState<ProjectSize>(() => draftProject.projectSize);
   const [strategy, setStrategy] = useState<Strategy>(
-    () => settings.pricingDefaults.defaultStrategy
+    () => mergedSettings.pricingDefaults.defaultStrategy
   );
 
   const engineInput = useMemo<PricingEngineInput>(
@@ -122,11 +162,22 @@ export function ProjectDetailPanel({
       },
       businessCosts: {
         overheadPercent: overheadPct,
-        miscellaneousBufferPercent: settings.costRules.miscellaneousBufferPercent,
+        overheadAllocationMethod: overheadMethod,
+        monthlyOverhead,
+        flatOverheadPerProject: flatOverhead,
+        monthlyBillableDays: billableDays,
+        projectDurationDays: durationDays,
+        laborBurdenPercent: laborBurdenPct,
+        minimumJobPrice,
+        miscellaneousBufferPercent: miscBufferPct,
+        permitBuffer,
         creditCardFeePercent: ccPct,
         financingFeePercent: financingPct,
+        taxPercent: taxPct,
         includeCreditCardFee: includeCc,
         includeFinancingFee: includeFinancing,
+        includeTax,
+        includeMiscellaneousBuffer: includeMiscBuffer,
       },
       commission: {
         includeCommission,
@@ -137,25 +188,54 @@ export function ProjectDetailPanel({
       setup: {
         trade: draftProject.trade,
         state: draftProject.state,
-        companyLevel: settings.companyProfile.companyLevel,
+        companyLevel: mergedSettings.companyProfile.companyLevel,
         projectSize,
         riskLevel,
         strategy,
+      },
+      pricingRules: {
+        baseMargins: {
+          Good: mergedSettings.pricingDefaults.goodMargin / 100,
+          Better: mergedSettings.pricingDefaults.betterMargin / 100,
+          Best: mergedSettings.pricingDefaults.bestMargin / 100,
+        },
+        minimumSafeMargin: mergedSettings.pricingDefaults.minimumSafeMargin / 100,
+        stateAdjustments: {
+          Connecticut:
+            mergedSettings.marketLocation.stateAdjustments.Connecticut / 100,
+          "New York": mergedSettings.marketLocation.stateAdjustments.NewYork / 100,
+          "New Jersey":
+            mergedSettings.marketLocation.stateAdjustments.NewJersey / 100,
+          Florida: mergedSettings.marketLocation.stateAdjustments.Florida / 100,
+          Texas: mergedSettings.marketLocation.stateAdjustments.Texas / 100,
+        },
       },
     }),
     [
       draftProject,
       overheadPct,
+      overheadMethod,
+      flatOverhead,
+      monthlyOverhead,
+      billableDays,
+      durationDays,
+      laborBurdenPct,
+      minimumJobPrice,
+      miscBufferPct,
+      includeMiscBuffer,
+      permitBuffer,
       commissionPct,
       includeCommission,
       financingPct,
       includeFinancing,
       ccPct,
       includeCc,
+      taxPct,
+      includeTax,
       riskLevel,
       projectSize,
       strategy,
-      settings,
+      mergedSettings,
     ]
   );
 
@@ -214,9 +294,9 @@ export function ProjectDetailPanel({
       customerEmail: draftProject.customerEmail,
       customerAddress: `${draftProject.address}, ${draftProject.city}, ${draftProject.state} ${draftProject.zipCode}`,
       trade: draftProject.trade,
-      warrantyText: settings.proposalSettings.defaultWarrantyText,
-      termsText: settings.proposalSettings.defaultTerms,
-      proposalTitle: settings.proposalSettings.defaultProposalTitle,
+      warrantyText: mergedSettings.proposalSettings.defaultWarrantyText,
+      termsText: mergedSettings.proposalSettings.defaultTerms,
+      proposalTitle: mergedSettings.proposalSettings.defaultProposalTitle,
     });
     setMessage(`${selectedOption} quote created.`);
   }
@@ -228,7 +308,14 @@ export function ProjectDetailPanel({
     setMessage(`Marked as ${status}.`);
   }
 
-  const pricingInsight = buildInsight(draftProject, result, overheadPct, riskLevel, strategy);
+  const pricingInsight = buildInsight(
+    draftProject,
+    result,
+    overheadPct,
+    riskLevel,
+    strategy,
+    overheadMethod
+  );
 
   return (
     <div
@@ -478,10 +565,76 @@ export function ProjectDetailPanel({
               {advancedOpen && (
                 <div className="border-t border-[#d9e2ec] px-5 py-4">
                   <div className="grid gap-4 sm:grid-cols-2">
+                    <SelectField
+                      label="Overhead Method"
+                      value={overheadMethod}
+                      options={[
+                        "Percentage",
+                        "Flat Per Project",
+                        "Project Duration",
+                        "Ignore For Now",
+                      ]}
+                      onChange={(v) =>
+                        setOverheadMethod(
+                          v as PricingEngineInput["businessCosts"]["overheadAllocationMethod"]
+                        )
+                      }
+                    />
+
+                    <NumberField
+                      label="Minimum Job Price"
+                      value={minimumJobPrice}
+                      onChange={setMinimumJobPrice}
+                    />
+
                     <NumberField
                       label="Overhead %"
                       value={overheadPct}
                       onChange={setOverheadPct}
+                    />
+
+                    <NumberField
+                      label="Flat Overhead"
+                      value={flatOverhead}
+                      onChange={setFlatOverhead}
+                    />
+
+                    <NumberField
+                      label="Monthly Overhead"
+                      value={monthlyOverhead}
+                      onChange={setMonthlyOverhead}
+                    />
+
+                    <NumberField
+                      label="Billable Days / Month"
+                      value={billableDays}
+                      onChange={setBillableDays}
+                    />
+
+                    <NumberField
+                      label="Project Duration Days"
+                      value={durationDays}
+                      onChange={setDurationDays}
+                    />
+
+                    <NumberField
+                      label="Labor Burden %"
+                      value={laborBurdenPct}
+                      onChange={setLaborBurdenPct}
+                    />
+
+                    <ToggleNumberField
+                      label="Misc Buffer %"
+                      value={miscBufferPct}
+                      enabled={includeMiscBuffer}
+                      onToggle={setIncludeMiscBuffer}
+                      onChange={setMiscBufferPct}
+                    />
+
+                    <NumberField
+                      label="Permit Buffer"
+                      value={permitBuffer}
+                      onChange={setPermitBuffer}
                     />
 
                     <ToggleNumberField
@@ -506,6 +659,14 @@ export function ProjectDetailPanel({
                       enabled={includeCc}
                       onToggle={setIncludeCc}
                       onChange={setCcPct}
+                    />
+
+                    <ToggleNumberField
+                      label="Tax %"
+                      value={taxPct}
+                      enabled={includeTax}
+                      onToggle={setIncludeTax}
+                      onChange={setTaxPct}
                     />
 
                     <SelectField
@@ -545,6 +706,9 @@ export function ProjectDetailPanel({
                     <p className="mt-1 text-lg font-semibold">
                       {formatMoney(result.breakevenPrice)}
                     </p>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Includes overhead, burden, buffers, fees.
+                    </p>
                   </div>
                   <div className="rounded border border-[#d9e2ec]/80 p-4">
                     <p className="text-xs text-gray-500">Min Safe Price</p>
@@ -554,6 +718,20 @@ export function ProjectDetailPanel({
                     <p className="text-xs text-gray-400">
                       {formatMargin(result.minimumSafeMargin)} min margin
                     </p>
+                  </div>
+                </div>
+
+                <div className="rounded border border-[#d9e2ec]/80 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Cost Protection
+                  </p>
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                    <MiniRow label="Labor burden" value={formatMoney(result.laborBurdenCost)} />
+                    <MiniRow label="Overhead" value={formatMoney(result.overheadCost)} />
+                    <MiniRow label="Misc buffer" value={formatMoney(result.bufferCost)} />
+                    <MiniRow label="Permit buffer" value={formatMoney(result.permitBufferCost)} />
+                    <MiniRow label="Tax on Better" value={formatMoney(result.taxCost)} />
+                    <MiniRow label="Total protection" value={formatMoney(result.businessCostTotal)} strong />
                   </div>
                 </div>
 
@@ -706,7 +884,8 @@ function buildInsight(
   result: ReturnType<typeof calculatePricingEngine>,
   overheadPct: number,
   riskLevel: RiskLevel,
-  strategy: Strategy
+  strategy: Strategy,
+  overheadMethod: PricingEngineInput["businessCosts"]["overheadAllocationMethod"]
 ): string {
   const parts: string[] = [`${project.trade} work in ${project.state}`];
 
@@ -720,8 +899,10 @@ function buildInsight(
   if (result.adjustments.company !== 0) {
     parts.push("company level adjustment");
   }
-  if (overheadPct > 0) {
+  if (overheadMethod === "Percentage" && overheadPct > 0) {
     parts.push(`${overheadPct}% overhead`);
+  } else if (overheadMethod !== "Ignore For Now") {
+    parts.push(`${overheadMethod.toLowerCase()} overhead`);
   }
   if (riskLevel !== "Medium") {
     parts.push(`${riskLevel.toLowerCase()} risk premium`);
@@ -836,6 +1017,25 @@ function FieldText({ label, value }: { label: string; value: string }) {
     <div className="text-sm">
       <p className="text-gray-500">{label}</p>
       <p className="mt-1 font-medium text-black">{value}</p>
+    </div>
+  );
+}
+
+function MiniRow({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-gray-500">{label}</span>
+      <span className={strong ? "font-semibold text-black" : "font-medium text-black"}>
+        {value}
+      </span>
     </div>
   );
 }

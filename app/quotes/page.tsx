@@ -8,9 +8,13 @@ import { AppSidebar } from "@/components/app-sidebar";
 import {
   formatMargin,
   formatMoney,
+  initialContacts,
+  initialProjects,
   quoteStatusOptions,
   storageKeys,
+  type Contact,
   type PriceOptionName,
+  type Project,
   type Quote,
   type QuoteStatus,
 } from "@/lib/app-data";
@@ -19,8 +23,20 @@ import { useLocalStorageState } from "@/lib/use-local-storage";
 export default function QuotesPage() {
   const router = useRouter();
   const [quotes, setQuotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
+  const [projects] = useLocalStorageState<Project[]>(
+    storageKeys.projects,
+    initialProjects
+  );
+  const [contacts] = useLocalStorageState<Contact[]>(
+    storageKeys.contacts,
+    initialContacts
+  );
   const [statusFilter, setStatusFilter] = useState<"All" | QuoteStatus>("All");
-  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("quoteId")
+  );
 
   const filteredQuotes = useMemo(
     () =>
@@ -37,6 +53,12 @@ export default function QuotesPage() {
   }
 
   const selectedQuote = quotes.find((q) => q.id === selectedQuoteId);
+  const selectedProject = selectedQuote?.projectId
+    ? projects.find((project) => project.id === selectedQuote.projectId)
+    : undefined;
+  const selectedContact = selectedQuote
+    ? findQuoteContact(selectedQuote, contacts)
+    : undefined;
 
   return (
     <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
@@ -132,8 +154,12 @@ export default function QuotesPage() {
       {selectedQuote ? (
         <QuoteDetailPanel
           quote={selectedQuote}
+          project={selectedProject}
+          contact={selectedContact}
           onClose={() => setSelectedQuoteId(null)}
           onStatusChange={(status) => updateQuoteStatus(selectedQuote.id, status)}
+          onOpenProject={(projectId) => router.push(`/projects?projectId=${projectId}`)}
+          onOpenContact={(contactId) => router.push(`/contacts?contactId=${contactId}`)}
           onPreview={() => {
             router.push(`/quotes/preview?id=${selectedQuote.id}`);
           }}
@@ -145,13 +171,21 @@ export default function QuotesPage() {
 
 function QuoteDetailPanel({
   quote,
+  project,
+  contact,
   onClose,
   onStatusChange,
+  onOpenProject,
+  onOpenContact,
   onPreview,
 }: {
   quote: Quote;
+  project?: Project;
+  contact?: Contact;
   onClose: () => void;
   onStatusChange: (status: QuoteStatus) => void;
+  onOpenProject: (projectId: string) => void;
+  onOpenContact: (contactId: string) => void;
   onPreview: () => void;
 }) {
   const selected = getSelectedResult(quote);
@@ -214,6 +248,27 @@ function QuoteDetailPanel({
           </label>
         </div>
 
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button
+            disabled={!contact}
+            onClick={() => contact && onOpenContact(contact.id)}
+            className="rounded-md border border-[#d9e2ec] px-4 py-3 text-left text-sm transition hover:bg-[#f6f8fb] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="block text-xs text-gray-500">Contact</span>
+            <span className="mt-1 block font-medium">
+              {contact?.name ?? quote.customerName}
+            </span>
+          </button>
+          <button
+            disabled={!project}
+            onClick={() => project && onOpenProject(project.id)}
+            className="rounded-md border border-[#d9e2ec] px-4 py-3 text-left text-sm transition hover:bg-[#f6f8fb] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="block text-xs text-gray-500">Project</span>
+            <span className="mt-1 block font-medium">{quote.projectName}</span>
+          </button>
+        </div>
+
         {/* Metrics */}
         <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
           <Metric label="Selected" value={quote.selectedOption} />
@@ -256,6 +311,20 @@ function getQuoteResult(quote: Quote, option: PriceOptionName) {
   if (option === "Good") return quote.good;
   if (option === "Better") return quote.better;
   return quote.best;
+}
+
+function findQuoteContact(quote: Quote, contacts: Contact[]) {
+  return contacts.find(
+    (contact) =>
+      contact.id === quote.contactId ||
+      contact.name.trim().toLowerCase() === quote.customerName.trim().toLowerCase() ||
+      (Boolean(contact.email) &&
+        contact.email.trim().toLowerCase() ===
+          (quote.customerEmail ?? "").trim().toLowerCase()) ||
+      (Boolean(contact.phone) &&
+        contact.phone.trim().toLowerCase() ===
+          (quote.customerPhone ?? "").trim().toLowerCase())
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
