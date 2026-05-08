@@ -168,3 +168,71 @@
     font: inherit;
   }
 }
+
+.proposal-document {
+  counter-reset: proposal-page;
+}
+
+.proposal-document > section {
+  position: relative;
+  counter-increment: proposal-page;
+}
+
+.proposal-document > section::after {
+  content: "Page " counter(proposal-page);
+  position: absolute;
+  right: 14mm;
+  bottom: 10mm;
+  font-size: 10px;
+  line-height: 1;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .proposal-document,
+  .proposal-document * {
+    visibility: visible;
+  }
+
+  .proposal-document {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 210mm !important;
+    background: white !important;
+    color: #1a2733 !important;
+  }
+
+  .proposal-document > section {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    height: 297mm !important;
+    max-width: none !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    break-after: page;
+    page-break-after: always;
+    overflow: hidden !important;
+  }
+
+  .proposal-document > footer {
+    display: none !important;
+  }
+}

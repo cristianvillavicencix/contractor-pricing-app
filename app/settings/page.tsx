@@ -1,10 +1,16 @@
 "use client";
 
-import { RotateCcw, Save } from "lucide-react";
+import { Check, ChevronDown, Pencil, Plus, RotateCcw, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { storageKeys } from "@/lib/app-data";
 import { useLocalStorageState } from "@/lib/use-local-storage";
+import {
+  blankTemplate,
+  mergeProposalTemplates,
+  type ProposalTemplate,
+} from "@/lib/proposal-templates";
+import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
 
 type Trade =
   | "Roofing"
@@ -42,9 +48,10 @@ type CompanyCredential = {
 type SettingsSection =
   | "Company Profile"
   | "Pricing Defaults"
+  | "Pricing Thresholds"
   | "Market & Location"
   | "Cost Rules"
-  | "Proposal Settings"
+  | "Proposals"
   | "Branding"
   | "App Preferences"
   | "Data";
@@ -70,6 +77,11 @@ type AppSettings = {
     defaultStrategy: Strategy;
     defaultRiskLevel: RiskLevel;
     defaultProjectSize: ProjectSize;
+    tradeAdjustments: Record<string, number>;
+    sizeAdjustments: Record<string, number>;
+    riskAdjustments: Record<string, number>;
+    strategyAdjustments: Record<string, number>;
+    companyAdjustments: Record<string, number>;
   };
   marketLocation: {
     defaultState: string;
@@ -78,13 +90,7 @@ type AppSettings = {
     marketCompetitiveness: Level;
     customerPriceSensitivity: Level;
     serviceAreaNotes: string;
-    stateAdjustments: {
-      Connecticut: number;
-      NewYork: number;
-      NewJersey: number;
-      Florida: number;
-      Texas: number;
-    };
+    stateAdjustments: Record<string, number>;
   };
   costRules: {
     monthlyOverhead: number;
@@ -126,6 +132,27 @@ type AppSettings = {
     showLicenseNumber: boolean;
     showInsuranceBadges: boolean;
     credentialPlacement: ProposalCredentialPlacement;
+    goodDescription: string;
+    betterDescription: string;
+    bestDescription: string;
+    defaultIncludedServices: string[];
+  };
+  pricingThresholds: {
+    riskyMarginPercent: number;
+    tightMarginPercent: number;
+    safePriceCushionPercent: number;
+    warningMarginLowPercent: number;
+    warningMarginHighPercent: number;
+    warningCommissionPercent: number;
+    warningFeeProfitPercent: number;
+    safeMarginRiskBonusPercent: number;
+    safeMarginSmallBonusPercent: number;
+    marginClampMinPercent: number;
+    marginClampMaxPercent: number;
+  };
+  contentDefaults: {
+    tradeServices: Record<string, string[]>;
+    scopeTemplates: Record<string, string[]>;
   };
   branding: {
     logoUrl: string;
@@ -150,9 +177,10 @@ type AppSettings = {
 const sectionItems: SettingsSection[] = [
   "Company Profile",
   "Pricing Defaults",
+  "Pricing Thresholds",
   "Market & Location",
   "Cost Rules",
-  "Proposal Settings",
+  "Proposals",
   "Branding",
   "App Preferences",
   "Data",
@@ -176,11 +204,14 @@ const companyLevelOptions: CompanyLevel[] = [
 ];
 
 const stateOptions = [
-  "Connecticut",
-  "New York",
-  "New Jersey",
-  "Florida",
-  "Texas",
+  "Alabama", "Arizona", "Arkansas", "California", "Colorado",
+  "Connecticut", "Florida", "Georgia", "Idaho", "Illinois",
+  "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
+  "Missouri", "Montana", "Nebraska", "Nevada", "New Jersey",
+  "New Mexico", "New York", "North Carolina", "Ohio", "Oklahoma",
+  "Oregon", "Pennsylvania", "South Carolina", "Tennessee", "Texas",
+  "Utah", "Virginia", "Washington", "West Virginia", "Wisconsin",
 ];
 const levelOptions: Level[] = ["Low", "Medium", "High"];
 const strategyOptions: Strategy[] = ["Competitive", "Balanced", "Premium"];
@@ -233,6 +264,11 @@ const defaultSettings: AppSettings = {
     defaultStrategy: "Balanced",
     defaultRiskLevel: "Medium",
     defaultProjectSize: "Medium",
+    tradeAdjustments: { Roofing: 2, Siding: 1, Painting: 0, Drywall: -1, Gutters: 1, Remodeling: 3 },
+    sizeAdjustments: { Small: 5, Medium: 0, Large: -4 },
+    riskAdjustments: { Low: -1, Medium: 0, High: 5 },
+    strategyAdjustments: { Competitive: -2, Balanced: 0, Premium: 3 },
+    companyAdjustments: { "Solo Owner": -3, "Small Crew": 0, "Established Company": 3, "Premium Company": 5 },
   },
   marketLocation: {
     defaultState: "Connecticut",
@@ -242,11 +278,16 @@ const defaultSettings: AppSettings = {
     customerPriceSensitivity: "Medium",
     serviceAreaNotes: "",
     stateAdjustments: {
-      Connecticut: 0,
-      NewYork: 3,
-      NewJersey: 2,
-      Florida: -2,
-      Texas: -1,
+      California: 5, Massachusetts: 4, "New York": 3, Washington: 3,
+      Colorado: 2, Maryland: 2, "New Jersey": 2, Virginia: 2,
+      Arizona: 1, Georgia: 1, Illinois: 1, Minnesota: 1, Nevada: 1,
+      "North Carolina": 1, Oregon: 1, Pennsylvania: 1,
+      Connecticut: 0, Michigan: 0, Ohio: 0, Wisconsin: 0,
+      Idaho: -1, Indiana: -1, Missouri: -1, "New Mexico": -1,
+      "South Carolina": -1, Tennessee: -1, Texas: -1, Utah: -1,
+      Alabama: -2, Florida: -2, Iowa: -2, Kansas: -2, Kentucky: -2, Louisiana: -2,
+      Montana: -2, Nebraska: -2, Oklahoma: -2, "West Virginia": -2,
+      Arkansas: -3, Mississippi: -3,
     },
   },
   costRules: {
@@ -287,6 +328,41 @@ const defaultSettings: AppSettings = {
     showLicenseNumber: true,
     showInsuranceBadges: true,
     credentialPlacement: "Before Signatures",
+    goodDescription: "Competitive option for budget-conscious customers.",
+    betterDescription: "Recommended option with balanced value and quality.",
+    bestDescription: "Premium option for enhanced service and long-term value.",
+    defaultIncludedServices: ["Materials", "Labor", "Cleanup", "Disposal", "Warranty", "Licensed & Insured"],
+  },
+  pricingThresholds: {
+    riskyMarginPercent: 25,
+    tightMarginPercent: 35,
+    safePriceCushionPercent: 8,
+    warningMarginLowPercent: 30,
+    warningMarginHighPercent: 55,
+    warningCommissionPercent: 8,
+    warningFeeProfitPercent: 10,
+    safeMarginRiskBonusPercent: 3,
+    safeMarginSmallBonusPercent: 2,
+    marginClampMinPercent: 15,
+    marginClampMaxPercent: 65,
+  },
+  contentDefaults: {
+    tradeServices: {
+      Roofing: ["Remove & Dispose of Old Roofing","Install Underlayment","Install Ice & Water Shield","Install Shingles","Install Ridge Cap","Flash Valleys & Penetrations","Install Drip Edge","Inspect & Replace Decking","Ventilation","Gutters & Downspouts"],
+      Siding: ["Remove Old Siding","Install House Wrap / Moisture Barrier","Install New Siding","Corner Trim","Window & Door Trim","Soffit & Fascia","Caulking & Sealing","Paint Touch-up"],
+      Painting: ["Pressure Washing","Surface Prep & Sanding","Priming","Interior Painting","Exterior Painting","Trim & Detail Work","Ceiling Painting","Touch-up & Final Walk"],
+      Drywall: ["Tear-out & Demo","Install New Drywall","Tape & Mud","Sand & Finish","Texture Matching","Prime"],
+      Gutters: ["Remove Old Gutters","Install Seamless Gutters","Install Downspouts","Leaf Guards","Seal & Test"],
+      Remodeling: ["Demolition","Framing","Plumbing Rough-in","Electrical Rough-in","Insulation","Drywall","Flooring","Trim & Molding","Painting","Final Cleanup"],
+    },
+    scopeTemplates: {
+      Roofing: ["Remove and dispose of existing roofing materials. Install new underlayment, ice & water shield, and architectural shingles. Flash all valleys, penetrations, and perimeter. Install ridge cap and ventilation. Final clean-up included.","Full roof replacement including tear-off, new decking inspection and repair where needed, synthetic underlayment, and premium architectural shingles. All flashing replaced. 5-year workmanship warranty.","Roof repair and spot replacement. Address damaged or missing shingles, re-flash affected areas, and reseal penetrations. Includes debris removal and site clean-up."],
+      Siding: ["Remove existing siding and trim. Install moisture barrier and house wrap. Install new fiber cement siding with matching corner trim, window wraps, and caulking. Paint-ready finish.","Full re-siding including removal, new sheathing wrap, premium vinyl siding installation, corner trim, soffit, and fascia. All seams caulked and sealed.","Partial siding repair and replacement. Match existing profile and color as closely as possible. Includes caulking, priming, and touch-up paint."],
+      Painting: ["Power wash all surfaces. Scrape, sand, and prime as needed. Apply two coats of premium exterior paint on all siding, trim, doors, and shutters. Final walk-through included.","Interior painting of all walls and ceilings. Protect floors and furnishings. Patch nail holes and minor imperfections. Apply two coats of low-VOC paint throughout. Clean-up included.","Full interior and exterior paint package. Includes surface prep, spot priming, two finish coats on all surfaces, trim work, and final punch-list touch-ups."],
+      Drywall: ["Tear out damaged drywall sections. Install new 5/8\" drywall, tape, mud, and sand to a Level 5 finish. Ready for primer and paint.","Install new drywall on all walls and ceilings. Tape, bed, and sand to smooth finish. Includes texture matching where applicable.","Patch and repair drywall damage. Match existing texture, prime patched areas, and prepare for final paint."],
+      Gutters: ["Remove existing gutters and downspouts. Install new seamless aluminum gutters sized for roof area. Add downspout extensions to direct water away from foundation. Seal all joints.","Full seamless gutter installation with leaf guards. Install all downspouts and underground drainage extensions. Final test with water.","Gutter cleaning, resealing, and spot repair. Re-secure any loose sections, reseal end caps and seams, and flush all downspouts."],
+      Remodeling: ["Complete kitchen remodel including demo, new cabinets, countertops, backsplash, plumbing fixtures, and electrical updates. Flooring and painting included.","Bathroom remodel including tile removal, new shower/tub surround, vanity, fixtures, toilet, and tile floor. Permit included where required.","Basement finishing including framing, insulation, drywall, electrical, lighting, and flooring. Bathroom rough-in optional."],
+    },
   },
   branding: {
     logoUrl: "",
@@ -321,6 +397,7 @@ export default function SettingsPage() {
     mergeSettings(savedSettings)
   );
   const [message, setMessage] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
 
   const hasUnsavedChanges = useMemo(
     () => JSON.stringify(settings) !== JSON.stringify(normalizedSavedSettings),
@@ -343,7 +420,9 @@ export default function SettingsPage() {
     }
 
     setSavedSettings(settings);
-    setMessage("Settings saved locally for this session.");
+    setMessage("");
+    setSaveStatus("saved");
+    setTimeout(() => setSaveStatus("idle"), 2500);
   }
 
   return (
@@ -379,10 +458,23 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={saveSettings}
-                className="inline-flex items-center gap-2 rounded-md bg-[#ff5c35] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#e94820]"
+                className={`inline-flex items-center gap-2 rounded-md px-4 py-3 text-sm font-medium text-white transition-all duration-300 ${
+                  saveStatus === "saved"
+                    ? "bg-[#16a34a] hover:bg-[#15803d]"
+                    : "bg-[#ff5c35] hover:bg-[#e94820]"
+                }`}
               >
-                <Save className="h-4 w-4" />
-                Save Changes
+                {saveStatus === "saved" ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Saved
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Save Changes
+                  </>
+                )}
               </button>
             </div>
           </header>
@@ -423,6 +515,12 @@ export default function SettingsPage() {
                   setSettings={setSettings}
                 />
               ) : null}
+              {activeSection === "Pricing Thresholds" ? (
+                <PricingThresholdsSection
+                  settings={settings}
+                  setSettings={setSettings}
+                />
+              ) : null}
               {activeSection === "Market & Location" ? (
                 <MarketLocationSection
                   settings={settings}
@@ -435,11 +533,8 @@ export default function SettingsPage() {
                   setSettings={setSettings}
                 />
               ) : null}
-              {activeSection === "Proposal Settings" ? (
-                <ProposalSettingsSection
-                  settings={settings}
-                  setSettings={setSettings}
-                />
+              {activeSection === "Proposals" ? (
+                <ProposalsSection settings={settings} setSettings={setSettings} />
               ) : null}
               {activeSection === "Branding" ? (
                 <BrandingSection settings={settings} setSettings={setSettings} />
@@ -539,14 +634,15 @@ function CompanyProfileSection({
   return (
     <SettingsSection
       title="Company Profile"
-      description="Stores the contractor's business identity for future proposals, PDFs, and pricing defaults."
+      description="Basic business info used on proposals, PDFs, and pricing defaults."
     >
+      {/* ── Basic fields ── */}
       <div className="grid gap-4 md:grid-cols-2">
         <TextField
           label="Business Name"
           placeholder="GA Castro Construction LLC"
           value={profile.businessName}
-          helperText="Used on future proposals and PDFs."
+          helperText="Appears on all proposals and PDFs."
           onChange={(value) =>
             setSettings((current) => ({
               ...current,
@@ -586,56 +682,16 @@ function CompanyProfileSection({
             }))
           }
         />
-        <TextField
-          label="Website"
-          value={profile.website}
-          onChange={(value) =>
-            setSettings((current) => ({
-              ...current,
-              companyProfile: { ...current.companyProfile, website: value },
-            }))
-          }
-        />
-        <TextField
-          label="State License Number"
-          value={profile.licenseNumber}
-          helperText="Loaded automatically into future proposals when enabled."
-          onChange={(value) =>
-            setSettings((current) => ({
-              ...current,
-              companyProfile: {
-                ...current.companyProfile,
-                licenseNumber: value,
-              },
-            }))
-          }
-        />
-        <TextField
-          label="Insurance Provider"
-          value={profile.insuranceProvider}
-          helperText="Used as a proposal credential, not as insurance verification."
-          onChange={(value) =>
-            setSettings((current) => ({
-              ...current,
-              companyProfile: {
-                ...current.companyProfile,
-                insuranceProvider: value,
-              },
-            }))
-          }
-        />
         <SelectField
           label="Main Trade"
           value={profile.mainTrade}
           options={tradeOptions}
-          helperText="Used as default trade in Pricing and Projects."
+          helperText="Default trade in the Calculator and new projects."
+          tooltip="Used as the default trade when you open the Calculator or create a new project. You can always change it per job. Pick the trade that represents most of your revenue."
           onChange={(value) =>
             setSettings((current) => ({
               ...current,
-              companyProfile: {
-                ...current.companyProfile,
-                mainTrade: value as Trade,
-              },
+              companyProfile: { ...current.companyProfile, mainTrade: value as Trade },
             }))
           }
         />
@@ -643,18 +699,55 @@ function CompanyProfileSection({
           label="Company Level"
           value={profile.companyLevel}
           options={companyLevelOptions}
-          helperText="Affects pricing margin adjustments."
+          helperText="Adds or subtracts margin points automatically."
+          tooltip="Solo Owner = just you, no crew. Small Crew = 2–5 people on jobs. Established Company = 5+ years, solid reputation, repeat customers. Premium Company = recognized brand, high-end clients, premium pricing power. Established and Premium companies can typically charge more because customers trust their name."
           onChange={(value) =>
             setSettings((current) => ({
               ...current,
-              companyProfile: {
-                ...current.companyProfile,
-                companyLevel: value as CompanyLevel,
-              },
+              companyProfile: { ...current.companyProfile, companyLevel: value as CompanyLevel },
             }))
           }
         />
       </div>
+
+      {/* ── Advanced ── */}
+      <AdvancedFields>
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextField
+            label="Website"
+            value={profile.website}
+            onChange={(value) =>
+              setSettings((current) => ({
+                ...current,
+                companyProfile: { ...current.companyProfile, website: value },
+              }))
+            }
+          />
+          <TextField
+            label="State License Number"
+            value={profile.licenseNumber}
+            helperText="Loaded automatically into proposals when enabled."
+            tooltip="Your official state contractor license number. Find it on your license certificate or your state's Contractor Board website. Examples: CT-HIC-0123456, ROC-123456 (AZ), CGC-012345 (FL)."
+            onChange={(value) =>
+              setSettings((current) => ({
+                ...current,
+                companyProfile: { ...current.companyProfile, licenseNumber: value },
+              }))
+            }
+          />
+          <TextField
+            label="Insurance Provider"
+            value={profile.insuranceProvider}
+            helperText="Company name shown as a proposal credential."
+            tooltip="The name of your General Liability insurance company — not the policy number. Examples: Travelers, Nationwide, Zurich, The Hartford. Check your Certificate of Insurance (COI) or call your insurance agent."
+            onChange={(value) =>
+              setSettings((current) => ({
+                ...current,
+                companyProfile: { ...current.companyProfile, insuranceProvider: value },
+              }))
+            }
+          />
+        </div>
 
       <div className="mt-8 rounded-lg border border-[#d9e2ec] bg-[#f6f8fb] p-4">
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
@@ -783,6 +876,7 @@ function CompanyProfileSection({
           </button>
         </div>
       </div>
+      </AdvancedFields>
     </SettingsSection>
   );
 }
@@ -793,8 +887,8 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
   return (
     <SettingsSection
       title="Pricing Defaults"
-      description="Controls default Good, Better, and Best margins used when starting new pricing calculations."
-      footer="Pricing Calculator uses these defaults when starting a new calculation. Projects use these defaults when a new project is created. Quotes use the final calculated prices."
+      description="Your starting margins for Good, Better, and Best pricing tiers. These pre-fill the Calculator — you can adjust them per job. The adjustment grids below show how trade, size, risk, strategy, and company level modify your base margin automatically."
+      footer="If you're new to margin-based pricing: margin is NOT the same as markup. A 35% margin on a $10,000 job = $3,500 kept after costs. A 35% markup on $7,000 cost = $9,450 sale price = 26% margin. Always work in margins, not markups, to avoid underpricing."
     >
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <NumberField
@@ -802,7 +896,8 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           value={pricing.goodMargin}
           min={0}
           max={80}
-          helperText="Competitive option for price-sensitive customers."
+          helperText="Budget-friendly option for price-sensitive customers."
+          tooltip="Margin = what you keep after covering ALL costs. Formula: Margin % = (Sale Price − Total Cost) ÷ Sale Price × 100. At 28% margin on a $10,000 job you keep $2,800. This is your lowest-tier option — use it to stay competitive without losing money."
           onChange={(value) => updatePricingDefault(setSettings, "goodMargin", value)}
         />
         <NumberField
@@ -810,7 +905,8 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           value={pricing.betterMargin}
           min={0}
           max={80}
-          helperText="Recommended option. Balanced between profit and closing probability."
+          helperText="Your main option — most customers choose this."
+          tooltip="Your most important number. Most customers choose the middle option, so this is your primary revenue driver. Aim to close 60%+ of bids at this tier. If you're not winning enough, your costs or market position may be off — not necessarily your margin."
           onChange={(value) =>
             updatePricingDefault(setSettings, "betterMargin", value)
           }
@@ -820,7 +916,8 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           value={pricing.bestMargin}
           min={0}
           max={80}
-          helperText="Premium option for stronger value, urgency, or warranty."
+          helperText="Premium tier — fewer customers, higher profit per job."
+          tooltip="Only 20–30% of clients choose the top tier, but those who do deliver the highest profit per job. Justify it with: longer warranty, premium materials, faster timeline, or white-glove service. Never present it as 'just more expensive.'"
           onChange={(value) => updatePricingDefault(setSettings, "bestMargin", value)}
         />
         <NumberField
@@ -828,7 +925,8 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           value={pricing.minimumSafeMargin}
           min={0}
           max={80}
-          helperText="Lowest acceptable margin before a project becomes too risky."
+          helperText="Never price below this, even to win a job."
+          tooltip="The absolute floor. At 20% on a $10k job, you keep $2,000 gross profit — barely enough to cover overhead and risk. Going below this means you might finish the job and have nothing left. Ask your accountant what your actual break-even margin is based on your P&L."
           onChange={(value) =>
             updatePricingDefault(setSettings, "minimumSafeMargin", value)
           }
@@ -837,6 +935,7 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           label="Default Strategy"
           value={pricing.defaultStrategy}
           options={strategyOptions}
+          tooltip="Competitive = lower margins to win more volume (good for slow periods or new markets). Balanced = standard margins for typical jobs. Premium = higher margins for quality-focused clients who value your reputation. You can change this per job in the Calculator."
           onChange={(value) =>
             updatePricingDefault(
               setSettings,
@@ -849,6 +948,7 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           label="Default Risk Level"
           value={pricing.defaultRiskLevel}
           options={riskLevelOptions}
+          tooltip="Low = straightforward job, clear scope, no unknowns. Medium = typical job with some variables. High = complex scope, unknown site conditions, callback risk, hazardous access. Higher risk adds margin points automatically to protect you from unexpected costs."
           onChange={(value) =>
             updatePricingDefault(
               setSettings,
@@ -861,6 +961,7 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           label="Default Project Size"
           value={pricing.defaultProjectSize}
           options={projectSizeOptions}
+          tooltip="Small = roughly under $3k. Medium = $3k–$15k. Large = over $15k. Small jobs cost almost as much to mobilize as large ones (fuel, setup, crew minimum), so they carry a higher margin per dollar to cover those fixed costs."
           onChange={(value) =>
             updatePricingDefault(
               setSettings,
@@ -870,31 +971,138 @@ function PricingDefaultsSection({ settings, setSettings }: SectionProps) {
           }
         />
       </div>
+
+      <AdvancedFields>
+      {/* Trade Adjustments */}
+      <div>
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Trade Adjustments %
+          <InfoTip text="Each trade has a different risk profile and overhead cost. Roofing involves more liability and callbacks than painting, so it earns a higher margin. These values add or subtract percentage points from your base margin. To calibrate: look at your last 20 jobs by trade and compare your actual profit margin. Ask your accountant to pull a profit-by-trade report from your P&L." />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">Added to base margin per trade. Positive = more margin, negative = less. Reflects the real cost and risk difference between trades.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+          {(["Roofing", "Siding", "Painting", "Drywall", "Gutters", "Remodeling"] as const).map((trade) => (
+            <NumberField
+              key={trade}
+              label={trade}
+              value={pricing.tradeAdjustments[trade] ?? 0}
+              allowNegative
+              onChange={(value) =>
+                setSettings((c) => ({ ...c, pricingDefaults: { ...c.pricingDefaults, tradeAdjustments: { ...c.pricingDefaults.tradeAdjustments, [trade]: value } } }))
+              }
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Size Adjustments */}
+      <div className="mt-8">
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Project Size Adjustments %
+          <InfoTip text="A small job (e.g., $800 gutter repair) costs almost as much to mobilize as a $12,000 job — fuel, crew time, truck, setup. So small jobs need a higher margin per dollar just to break even. Large jobs spread your fixed costs further and let you price more competitively without sacrificing profit. Set Small positive and Large slightly negative." />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">Small jobs have high overhead per dollar; large jobs can afford slightly lower margins. Adjust to reflect your actual mobilization costs.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {(["Small", "Medium", "Large"] as const).map((size) => (
+            <NumberField
+              key={size}
+              label={size}
+              value={pricing.sizeAdjustments[size] ?? 0}
+              allowNegative
+              onChange={(value) =>
+                setSettings((c) => ({ ...c, pricingDefaults: { ...c.pricingDefaults, sizeAdjustments: { ...c.pricingDefaults.sizeAdjustments, [size]: value } } }))
+              }
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Risk Adjustments */}
+      <div className="mt-8">
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Risk Level Adjustments %
+          <InfoTip text="High risk jobs (unknown site conditions, hazardous access, complex coordination) are more likely to run over budget or generate callbacks. Adding extra margin on risky jobs protects you when things go wrong. Think about your last few problem jobs — what was the risk level, and how much did the overruns cost you?" />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">Extra margin buffer for riskier jobs. Covers unexpected costs, callbacks, and complexity on difficult projects.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {(["Low", "Medium", "High"] as const).map((risk) => (
+            <NumberField
+              key={risk}
+              label={risk}
+              value={pricing.riskAdjustments[risk] ?? 0}
+              allowNegative
+              onChange={(value) =>
+                setSettings((c) => ({ ...c, pricingDefaults: { ...c.pricingDefaults, riskAdjustments: { ...c.pricingDefaults.riskAdjustments, [risk]: value } } }))
+              }
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Strategy Adjustments */}
+      <div className="mt-8">
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Strategy Adjustments %
+          <InfoTip text="Competitive pricing lowers your margin to win more bids — useful when you're slow or entering a new market. Premium pricing adds margin for jobs where the client values quality over price. You can switch strategy per job in the Calculator. These adjustments are applied on top of your base margins." />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">How aggressively you price this job. Competitive wins more bids; Premium earns more per job. You can change this per job in the Calculator.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {(["Competitive", "Balanced", "Premium"] as const).map((strategy) => (
+            <NumberField
+              key={strategy}
+              label={strategy}
+              value={pricing.strategyAdjustments[strategy] ?? 0}
+              allowNegative
+              onChange={(value) =>
+                setSettings((c) => ({ ...c, pricingDefaults: { ...c.pricingDefaults, strategyAdjustments: { ...c.pricingDefaults.strategyAdjustments, [strategy]: value } } }))
+              }
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Company Level Adjustments */}
+      <div className="mt-8">
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Company Level Adjustments %
+          <InfoTip text="A well-known, established company can charge more because customers trust their name and reduce their own risk by hiring them. A solo owner competing with larger companies may need to price more aggressively to close deals. This is also about your overhead — Premium companies have higher fixed costs that need to be covered." />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">Established and premium companies command higher prices due to reputation, trust, and overhead. Adjust to match where your company stands.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {(["Solo Owner", "Small Crew", "Established Company", "Premium Company"] as const).map((level) => (
+            <NumberField
+              key={level}
+              label={level}
+              value={pricing.companyAdjustments[level] ?? 0}
+              allowNegative
+              onChange={(value) =>
+                setSettings((c) => ({ ...c, pricingDefaults: { ...c.pricingDefaults, companyAdjustments: { ...c.pricingDefaults.companyAdjustments, [level]: value } } }))
+              }
+            />
+          ))}
+        </div>
+      </div>
+      </AdvancedFields>
     </SettingsSection>
   );
 }
 
 function MarketLocationSection({ settings, setSettings }: SectionProps) {
   const market = settings.marketLocation;
-  const stateRows = [
-    ["Connecticut Adjustment %", "Connecticut"],
-    ["New York Adjustment %", "NewYork"],
-    ["New Jersey Adjustment %", "NewJersey"],
-    ["Florida Adjustment %", "Florida"],
-    ["Texas Adjustment %", "Texas"],
-  ] as const;
+  const stateRows = stateOptions.map((state) => [state, state] as const);
 
   return (
     <SettingsSection
       title="Market & Location"
-      description="Sets default market assumptions and state margin adjustments."
-      footer="Market adjustments help the app avoid applying the same margin in every state. Pricing Engine uses the state adjustment, Projects use the project address, and Dashboard can later show performance by market."
+      description="Helps the app understand your local market. Your default location pre-fills the Calculator, and the state adjustments ensure your pricing reflects regional cost differences — what's profitable in Texas may not be profitable in California."
+      footer="State adjustments are pre-loaded based on regional construction cost data. You can override any state based on your own experience. If you work exclusively in one state, you can leave the others at their defaults."
     >
       <div className="grid gap-4 md:grid-cols-2">
         <SelectField
           label="Default State"
           value={market.defaultState}
           options={stateOptions}
+          helperText="Pre-filled in the Calculator for every new job."
           onChange={(value) => updateMarket(setSettings, "defaultState", value)}
         />
         <TextField
@@ -902,64 +1110,73 @@ function MarketLocationSection({ settings, setSettings }: SectionProps) {
           value={market.defaultCity}
           onChange={(value) => updateMarket(setSettings, "defaultCity", value)}
         />
-        <TextField
-          label="Default ZIP Code"
-          value={market.defaultZipCode}
-          onChange={(value) => updateMarket(setSettings, "defaultZipCode", value)}
-        />
-        <SelectField
-          label="Market Competitiveness"
-          value={market.marketCompetitiveness}
-          options={levelOptions}
-          onChange={(value) =>
-            updateMarket(setSettings, "marketCompetitiveness", value as Level)
-          }
-        />
-        <SelectField
-          label="Customer Price Sensitivity"
-          value={market.customerPriceSensitivity}
-          options={levelOptions}
-          onChange={(value) =>
-            updateMarket(setSettings, "customerPriceSensitivity", value as Level)
-          }
-        />
-        <TextAreaField
-          label="Service Area Notes"
-          value={market.serviceAreaNotes}
-          className="md:col-span-2"
-          onChange={(value) =>
-            updateMarket(setSettings, "serviceAreaNotes", value)
-          }
-        />
       </div>
 
-      <div className="mt-8">
-        <h4 className="text-sm font-medium text-black">
-          Location Margin Adjustments
-        </h4>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {stateRows.map(([label, key]) => (
-            <NumberField
-              key={key}
-              label={label}
-              value={market.stateAdjustments[key]}
-              allowNegative
-              onChange={(value) =>
-                setSettings((current) => ({
-                  ...current,
-                  marketLocation: {
-                    ...current.marketLocation,
-                    stateAdjustments: {
-                      ...current.marketLocation.stateAdjustments,
-                      [key]: value,
-                    },
-                  },
-                }))
-              }
-            />
-          ))}
+      <AdvancedFields>
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextField
+            label="Default ZIP Code"
+            value={market.defaultZipCode}
+            onChange={(value) => updateMarket(setSettings, "defaultZipCode", value)}
+          />
+          <SelectField
+            label="Market Competitiveness"
+            value={market.marketCompetitiveness}
+            options={levelOptions}
+            tooltip="How many other contractors compete for the same jobs in your area? High = lots of competitors bidding on every job, pricing must be sharp. Low = you're one of few qualified options, giving you more pricing power. This is informational — used to contextualize your strategy."
+            onChange={(value) =>
+              updateMarket(setSettings, "marketCompetitiveness", value as Level)
+            }
+          />
+          <SelectField
+            label="Customer Price Sensitivity"
+            value={market.customerPriceSensitivity}
+            options={levelOptions}
+            tooltip="Are your typical customers price-shoppers or quality-focused? High = they get 3+ bids and pick the cheapest. Low = they value your reputation and won't balk at premium prices. If most clients ask 'can you do it cheaper?', set this to High."
+            onChange={(value) =>
+              updateMarket(setSettings, "customerPriceSensitivity", value as Level)
+            }
+          />
+          <TextAreaField
+            label="Service Area Notes"
+            value={market.serviceAreaNotes}
+            className="md:col-span-2"
+            onChange={(value) =>
+              updateMarket(setSettings, "serviceAreaNotes", value)
+            }
+          />
         </div>
-      </div>
+
+        <div>
+          <h4 className="flex items-center text-sm font-medium text-black">
+            State Margin Adjustments %
+            <InfoTip text="Construction labor costs, material prices, and market expectations vary significantly by state. California and New York average 15–20% above the national baseline; Mississippi and Arkansas run 10–15% below. Positive values = you can charge more in that state. Negative = be more price-competitive. Based on Bureau of Labor Statistics regional construction wage data and RSMeans Cost Data. You can override any value based on your own experience in that market." />
+          </h4>
+          <p className="mt-1 text-xs text-gray-500">Adds or subtracts margin points based on the project&apos;s state. Reflects regional labor costs and market pricing power.</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {stateRows.map(([label, key]) => (
+              <NumberField
+                key={key}
+                label={label}
+                value={market.stateAdjustments[key]}
+                allowNegative
+                onChange={(value) =>
+                  setSettings((current) => ({
+                    ...current,
+                    marketLocation: {
+                      ...current.marketLocation,
+                      stateAdjustments: {
+                        ...current.marketLocation.stateAdjustments,
+                        [key]: value,
+                      },
+                    },
+                  }))
+                }
+              />
+            ))}
+          </div>
+        </div>
+      </AdvancedFields>
     </SettingsSection>
   );
 }
@@ -970,16 +1187,65 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
   return (
     <SettingsSection
       title="Cost Rules"
-      description="Controls overhead, buffers, and extra business costs that protect profit."
-      footer="Pricing Calculator uses overhead and buffer rules. Projects use these rules when calculating real cost. Quotes may display or hide fees depending on proposal settings."
+      description="These numbers protect your profit by making sure every job covers its full cost — not just materials and labor, but overhead, fees, and the small costs that add up. Most contractors undercharge because they forget to include these."
+      footer="Start with estimates if you don't have exact numbers — you can refine them over time. Your accountant can pull your actual overhead and labor burden from your P&L and payroll reports. The toggles below control which costs are actively included in your pricing calculations."
     >
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <NumberField
-          label="Monthly Overhead"
+          label="Monthly Overhead ($)"
           value={costs.monthlyOverhead}
-          helperText="Used later to understand how much the business needs to cover."
+          helperText="All fixed business costs not tied to specific jobs."
+          tooltip="Add up: rent or office lease, vehicle payments (trucks, trailers), insurance premiums, phone and internet, software subscriptions, tools and equipment payments, any salaried office staff. Run your P&L report with your accountant — look for 'Total Fixed Expenses' per month. If you're not sure, start with a rough estimate and refine it."
           onChange={(value) => updateCostRule(setSettings, "monthlyOverhead", value)}
         />
+        <NumberField
+          label="Labor Burden %"
+          value={costs.laborBurdenPercent}
+          helperText="True cost of labor beyond base wages."
+          tooltip="The real cost of an employee beyond their base hourly wage. Includes: FICA payroll taxes (~7.65%), workers' compensation insurance (3–10%), federal/state unemployment insurance (~3%), health benefits if provided, paid time off, and any supervision cost. Industry average: 18–28%. Ask your payroll provider or accountant for your exact 'loaded labor rate' — it's on your payroll reports."
+          onChange={(value) =>
+            updateCostRule(setSettings, "laborBurdenPercent", value)
+          }
+        />
+        <NumberField
+          label="Minimum Job Price ($)"
+          value={costs.minimumJobPrice}
+          helperText="Never sell a job below this price."
+          tooltip="The absolute lowest you'll charge for any job, regardless of what the math suggests. Even tiny jobs have irreducible costs: fuel, crew minimum, setup, cleanup, billing time. Set this based on your minimum half-day rate. Example: if your crew costs $400/half-day and you need 30% margin, your minimum job price should be at least $570."
+          onChange={(value) =>
+            updateCostRule(setSettings, "minimumJobPrice", value)
+          }
+        />
+        <NumberField
+          label="Miscellaneous Buffer %"
+          value={costs.miscellaneousBufferPercent}
+          helperText="Safety net for small missed costs."
+          tooltip="A catch-all for small costs that are easy to forget: extra hardware, touch-up paint, caulk, fuel for additional trips, minor disposal overages. Industry standard: 3–7%. This is added to your job cost before calculating margin — it's the difference between 'I priced it right' and 'where did my profit go?'"
+          onChange={(value) =>
+            updateCostRule(setSettings, "miscellaneousBufferPercent", value)
+          }
+        />
+      </div>
+
+      <div className="mt-6 grid gap-3 md:grid-cols-2">
+        <ToggleField
+          label="Include overhead in pricing"
+          checked={costs.includeOverhead}
+          tooltip="When ON, the overhead allocation (% or flat amount) is added to the job cost before calculating your sale price. Recommended: ON. Turning it off means your margin must cover overhead on its own, which requires higher base margins."
+          onChange={(value) => updateCostRule(setSettings, "includeOverhead", value)}
+        />
+        <ToggleField
+          label="Include miscellaneous buffer"
+          checked={costs.includeMiscellaneousBuffer}
+          tooltip="When ON, the miscellaneous buffer % is added to the job cost before calculating your price. Highly recommended — this covers the small costs that always seem to appear (extra materials, hardware runs, disposal). Turning it off means your margin must cover these surprises."
+          onChange={(value) =>
+            updateCostRule(setSettings, "includeMiscellaneousBuffer", value)
+          }
+        />
+      </div>
+
+      <AdvancedFields>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <SelectField
           label="Overhead Allocation Method"
           value={costs.overheadAllocationMethod}
@@ -989,6 +1255,7 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
             "Project Duration",
             "Ignore For Now",
           ]}
+          tooltip="How to spread your monthly overhead across jobs. Percentage: adds X% to every job's direct cost (simplest, most common). Flat Per Project: adds a fixed dollar amount per job regardless of size. Project Duration: divides monthly overhead by billable days to get a daily rate per project. Ignore For Now: skip overhead allocation and rely on your margin instead. Ask your accountant which matches your bookkeeping method."
           onChange={(value) =>
             updateCostRule(
               setSettings,
@@ -1000,15 +1267,17 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
         <NumberField
           label="Default Overhead %"
           value={costs.defaultOverheadPercent}
-          helperText="Adds a margin buffer to protect profit."
+          helperText="Used with the Percentage allocation method."
+          tooltip="What % of each job's direct cost (materials + labor) goes toward overhead. Example: 10% on a $5,000 cost job = $500 overhead charge added to cost. To calculate yours: divide your monthly overhead by your monthly revenue, then multiply by 100. Your accountant can pull this from your income statement."
           onChange={(value) =>
             updateCostRule(setSettings, "defaultOverheadPercent", value)
           }
         />
         <NumberField
-          label="Flat Overhead Per Project"
+          label="Flat Overhead Per Project ($)"
           value={costs.flatOverheadPerProject}
-          helperText="Used when overhead allocation is flat per project."
+          helperText="Used with the Flat Per Project allocation method."
+          tooltip="A fixed dollar amount added to every job regardless of its size. Example: $400 per project. Works best when your jobs are similar in size and duration. If your jobs vary widely in scope, the Percentage method may be more accurate."
           onChange={(value) =>
             updateCostRule(setSettings, "flatOverheadPerProject", value)
           }
@@ -1016,16 +1285,18 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
         <NumberField
           label="Monthly Billable Days"
           value={costs.monthlyBillableDays}
-          helperText="Used to allocate monthly overhead by project duration."
+          helperText="Actual days your crew works on paid jobs per month."
+          tooltip="How many days per month your crew actually works on paying jobs — not admin days, training, callbacks, or travel. Typical range: 18–22 days. Used to calculate your daily overhead rate when using the Project Duration method. Formula: Monthly Overhead ÷ Billable Days = Daily Overhead Rate."
           min={1}
           onChange={(value) =>
             updateCostRule(setSettings, "monthlyBillableDays", Math.max(1, value))
           }
         />
         <NumberField
-          label="Default Project Duration Days"
+          label="Default Project Duration (days)"
           value={costs.defaultProjectDurationDays}
-          helperText="Default job length used by Calculator and Projects."
+          helperText="Default job length used in overhead calculations."
+          tooltip="How long a typical job takes in calendar days. Used by the Project Duration overhead method (Daily Rate × Duration Days = Overhead Per Job). Can be overridden per project. If your jobs vary widely, set this to your most common duration."
           min={1}
           onChange={(value) =>
             updateCostRule(
@@ -1036,25 +1307,10 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
           }
         />
         <NumberField
-          label="Labor Burden %"
-          value={costs.laborBurdenPercent}
-          helperText="Payroll tax, workers comp, supervision, and labor-related burden."
-          onChange={(value) =>
-            updateCostRule(setSettings, "laborBurdenPercent", value)
-          }
-        />
-        <NumberField
-          label="Minimum Job Price"
-          value={costs.minimumJobPrice}
-          helperText="Lowest retail price you should normally sell any job for."
-          onChange={(value) =>
-            updateCostRule(setSettings, "minimumJobPrice", value)
-          }
-        />
-        <NumberField
           label="Financing Fee %"
           value={costs.financingFeePercent}
-          helperText="Can be added when offering financing."
+          helperText="Dealer fee charged by financing partners."
+          tooltip="If you partner with a financing company (GreenSky, Synchrony, Foundation Finance, etc.), they charge you a dealer fee of 2–8% of the financed amount. This fee gets passed into the price when financing is offered. Enable it in the toggles below to include it automatically."
           onChange={(value) =>
             updateCostRule(setSettings, "financingFeePercent", value)
           }
@@ -1062,7 +1318,8 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
         <NumberField
           label="Credit Card Fee %"
           value={costs.creditCardFeePercent}
-          helperText="Can be added when customer pays by card."
+          helperText="Processing fee charged by card payment providers."
+          tooltip="Payment processors (Square, Stripe, QuickBooks Payments, etc.) charge 2.6–3.5% per transaction. Enable this in the toggles below to automatically build card fees into your price when the customer pays by card. Common rates: Square 2.6% + 10¢, Stripe 2.9% + 30¢."
           onChange={(value) =>
             updateCostRule(setSettings, "creditCardFeePercent", value)
           }
@@ -1070,56 +1327,44 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
         <NumberField
           label="Tax %"
           value={costs.taxPercent}
+          helperText="Sales tax on materials or services, if applicable."
+          tooltip="Sales tax on materials or services, if required in your state. Many states do not charge sales tax on contractor labor — only on materials. Laws vary widely. Ask your accountant or check your state's Department of Revenue website before enabling this. Set to 0 if unsure."
           onChange={(value) => updateCostRule(setSettings, "taxPercent", value)}
         />
         <NumberField
-          label="Permit Buffer"
+          label="Permit Buffer ($)"
           value={costs.permitBuffer}
+          helperText="Flat dollar amount reserved for permit costs."
+          tooltip="Average permit cost for a typical project in your area. Usually $100–$500 for residential work, more for commercial. Check your local municipality's building department fee schedule. Set to 0 if you bill permits separately as a line item on your proposals."
           onChange={(value) => updateCostRule(setSettings, "permitBuffer", value)}
         />
-        <NumberField
-          label="Miscellaneous Buffer %"
-          value={costs.miscellaneousBufferPercent}
-          helperText="Protects against small missed costs."
-          onChange={(value) =>
-            updateCostRule(setSettings, "miscellaneousBufferPercent", value)
-          }
-        />
-      </div>
+        </div>
 
-      <div className="mt-8 grid gap-3 md:grid-cols-2">
-        <ToggleField
-          label="Include overhead in pricing"
-          checked={costs.includeOverhead}
-          onChange={(value) => updateCostRule(setSettings, "includeOverhead", value)}
-        />
-        <ToggleField
-          label="Include financing fee in pricing"
-          checked={costs.includeFinancingFee}
-          onChange={(value) =>
-            updateCostRule(setSettings, "includeFinancingFee", value)
-          }
-        />
-        <ToggleField
-          label="Include credit card fee in pricing"
-          checked={costs.includeCreditCardFee}
-          onChange={(value) =>
-            updateCostRule(setSettings, "includeCreditCardFee", value)
-          }
-        />
-        <ToggleField
-          label="Include tax in pricing"
-          checked={costs.includeTax}
-          onChange={(value) => updateCostRule(setSettings, "includeTax", value)}
-        />
-        <ToggleField
-          label="Include miscellaneous buffer"
-          checked={costs.includeMiscellaneousBuffer}
-          onChange={(value) =>
-            updateCostRule(setSettings, "includeMiscellaneousBuffer", value)
-          }
-        />
-      </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <ToggleField
+            label="Include financing fee in pricing"
+            checked={costs.includeFinancingFee}
+            tooltip="When ON, the financing fee % is added to the job cost, which raises the sale price slightly. Only affects jobs where financing is offered. Turn ON if you routinely offer financing through a lending partner."
+            onChange={(value) =>
+              updateCostRule(setSettings, "includeFinancingFee", value)
+            }
+          />
+          <ToggleField
+            label="Include credit card fee in pricing"
+            checked={costs.includeCreditCardFee}
+            tooltip="When ON, the credit card fee % is added to the job cost, which raises the sale price. Only applicable when the customer pays by card. Turn ON if most of your customers pay by card and you absorb the processing fee."
+            onChange={(value) =>
+              updateCostRule(setSettings, "includeCreditCardFee", value)
+            }
+          />
+          <ToggleField
+            label="Include tax in pricing"
+            checked={costs.includeTax}
+            tooltip="When ON, the tax % is added on top of the sale price. Only enable this if your state requires you to collect sales tax on contractor work or materials. Check with your accountant first — many contractor services are tax-exempt."
+            onChange={(value) => updateCostRule(setSettings, "includeTax", value)}
+          />
+        </div>
+      </AdvancedFields>
     </SettingsSection>
   );
 }
@@ -1137,6 +1382,7 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
         <TextField
           label="Default Proposal Title"
           value={proposal.defaultProposalTitle}
+          tooltip="The title printed at the top of every new proposal. Examples: 'Project Proposal', 'Roofing Estimate', 'Home Improvement Proposal'. You can change it per quote."
           onChange={(value) =>
             updateProposal(setSettings, "defaultProposalTitle", value)
           }
@@ -1145,6 +1391,8 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
           label="Default Expiration Days"
           value={proposal.defaultExpirationDays}
           min={1}
+          helperText="How long a new quote stays valid before expiring."
+          tooltip="Proposals expire to protect you from clients accepting an old price after material or labor costs have changed. Industry standard: 14–30 days. Short expirations create urgency; long ones reduce friction. You can always extend per quote."
           onChange={(value) =>
             updateProposal(setSettings, "defaultExpirationDays", Math.max(1, value))
           }
@@ -1167,8 +1415,9 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
 
       <div className="mt-8 grid gap-3 md:grid-cols-2">
         <ToggleField
-          label="Show Good / Better / Best"
+          label="Show Good / Better / Best options"
           checked={proposal.showGoodBetterBest}
+          tooltip="When ON, proposals show three price options side-by-side. This is the recommended approach — it anchors the client to the middle option and increases your average sale value. Studies show 3-tier pricing increases revenue vs. single-price proposals."
           onChange={(value) =>
             updateProposal(setSettings, "showGoodBetterBest", value)
           }
@@ -1176,53 +1425,61 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
         <ToggleField
           label="Highlight Better as Recommended"
           checked={proposal.highlightBetterRecommended}
+          tooltip="When ON, the middle (Better) option gets a 'Recommended' badge on the proposal. This nudges most clients toward your primary revenue option. Recommended: keep this ON unless your clients specifically prefer non-directed proposals."
           onChange={(value) =>
             updateProposal(setSettings, "highlightBetterRecommended", value)
           }
         />
         <ToggleField
-          label="Show Profit Internally Only"
+          label="Keep profit & margin internal only"
           checked={proposal.showProfitInternallyOnly}
+          tooltip="When ON, your margin %, profit amount, and cost breakdown are NEVER shown to the customer — only the sale price. This should always be ON. Clients don't need to see your profit; showing it creates unnecessary negotiation pressure."
           onChange={(value) =>
             updateProposal(setSettings, "showProfitInternallyOnly", value)
           }
         />
         <ToggleField
-          label="Show Financing Note"
+          label="Show financing note on proposals"
           checked={proposal.showFinancingNote}
+          tooltip="When ON, a financing note is printed on the proposal (you can customize the text below). Use this if you offer payment plans or partner with a financing company. It can help close larger jobs."
           onChange={(value) => updateProposal(setSettings, "showFinancingNote", value)}
         />
         <ToggleField
-          label="Show Tax Separately"
+          label="Show tax as a separate line item"
           checked={proposal.showTaxSeparately}
+          tooltip="When ON, sales tax is shown as a separate line on the proposal instead of being included in the price. Some clients and states prefer transparency. Turn OFF if your price already includes tax or if tax doesn't apply in your state."
           onChange={(value) =>
             updateProposal(setSettings, "showTaxSeparately", value)
           }
         />
         <ToggleField
-          label="Require Customer Signature"
+          label="Require customer signature"
           checked={proposal.requireCustomerSignature}
+          tooltip="When ON, the proposal includes a signature line for the customer to sign and date. A signed proposal is a basic form of authorization — it's not a legal contract, but it confirms the customer agreed to the scope and price. Recommended: ON."
           onChange={(value) =>
             updateProposal(setSettings, "requireCustomerSignature", value)
           }
         />
         <ToggleField
-          label="Show Certifications & Credentials"
+          label="Show certifications & credentials"
           checked={proposal.showCertifications}
+          tooltip="When ON, your license number, insurance badges, and certifications appear on the proposal. This builds trust and differentiates you from unlicensed competitors. Strongly recommended for all proposals — customers often choose the contractor they perceive as most legitimate."
           onChange={(value) =>
             updateProposal(setSettings, "showCertifications", value)
           }
         />
         <ToggleField
-          label="Show License Number"
+          label="Show license number on proposals"
           checked={proposal.showLicenseNumber}
+          tooltip="When ON, your state contractor license number is printed on the proposal. In many states this is legally required on any written estimate or contract. Check your state's contractor licensing requirements."
           onChange={(value) =>
             updateProposal(setSettings, "showLicenseNumber", value)
           }
         />
         <ToggleField
-          label="Show Insurance Credentials"
+          label="Show insurance credentials"
           checked={proposal.showInsuranceBadges}
+          tooltip="When ON, your insurance provider and coverage types (General Liability, Workers' Comp) are shown on the proposal. Customers increasingly ask 'are you insured?' — showing it proactively removes that objection before they even ask."
           onChange={(value) =>
             updateProposal(setSettings, "showInsuranceBadges", value)
           }
@@ -1247,6 +1504,55 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
           label="Financing Note"
           value={proposal.financingNote}
           onChange={(value) => updateProposal(setSettings, "financingNote", value)}
+        />
+      </div>
+
+      <div className="mt-8">
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Pricing Option Descriptions
+          <InfoTip text="Short taglines that appear under each price on the proposal. Keep them benefit-focused, not feature-focused. Good: 'Budget-friendly option with core coverage.' Better: 'Our most popular package — great balance of value and quality.' Best: 'Premium materials and extended warranty for lasting peace of mind.'" />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">One line of text shown under each price tier in customer-facing proposals. Focus on the benefit the customer gets, not the price difference.</p>
+        <div className="mt-4 grid gap-4">
+          <TextField
+            label="Good — tagline"
+            value={proposal.goodDescription ?? ""}
+            tooltip="Keep this short and honest. The customer choosing 'Good' is budget-conscious — validate their choice. Example: 'A reliable, professional solution at the most accessible price.'"
+            onChange={(value) => updateProposal(setSettings, "goodDescription", value)}
+          />
+          <TextField
+            label="Better — tagline"
+            value={proposal.betterDescription ?? ""}
+            tooltip="This is your most important tier — most clients choose it. Make it sound like the smart, balanced choice. Example: 'Our most popular option — the right balance of quality and value.'"
+            onChange={(value) => updateProposal(setSettings, "betterDescription", value)}
+          />
+          <TextField
+            label="Best — tagline"
+            value={proposal.bestDescription ?? ""}
+            tooltip="Justify the premium with a tangible benefit: longer warranty, better materials, faster timeline, or white-glove service. Example: 'Premium materials and our longest warranty — built to last.'"
+            onChange={(value) => updateProposal(setSettings, "bestDescription", value)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h4 className="flex items-center text-sm font-medium text-black">
+          Default Included Services
+          <InfoTip text="These appear as pre-checked items in the 'What's Included' section of new quotes. Keep them accurate — don't promise what you don't deliver. Common defaults: Materials, Labor, Cleanup, Disposal, Warranty, Licensed & Insured. You can customize per trade in Content Defaults." />
+        </h4>
+        <p className="mt-1 text-xs text-gray-500">One item per line. Pre-checked by default on every new quote. Customers see these in the proposal.</p>
+        <textarea
+          value={(proposal.defaultIncludedServices ?? []).join("\n")}
+          onChange={(e) =>
+            setSettings((c) => ({
+              ...c,
+              proposalSettings: {
+                ...c.proposalSettings,
+                defaultIncludedServices: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+              },
+            }))
+          }
+          className="mt-3 min-h-36 w-full resize-none rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
         />
       </div>
     </SettingsSection>
@@ -1437,6 +1743,25 @@ type SectionProps = {
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
 };
 
+function AdvancedFields({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-8 border-t border-dashed border-[#d9e2ec] pt-5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-xs font-medium text-gray-400 transition hover:text-gray-700"
+      >
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+        {open ? "Hide advanced settings" : "Show advanced settings"}
+      </button>
+      {open && <div className="mt-6 space-y-8">{children}</div>}
+    </div>
+  );
+}
+
 function SettingsSection({
   title,
   description,
@@ -1466,12 +1791,36 @@ function SettingsSection({
   );
 }
 
+function InfoTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative ml-1.5 inline-flex shrink-0 align-middle">
+      <button
+        type="button"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#d9e2ec] bg-[#f6f8fb] text-[9px] font-bold text-[#9CA3AF] transition hover:border-[#9CA3AF] hover:text-[#6B7280]"
+        aria-label="More info"
+      >
+        i
+      </button>
+      {open && (
+        <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2.5 w-72 -translate-x-1/2 rounded-lg border border-[#d9e2ec] bg-white p-3.5 text-xs font-normal leading-relaxed text-[#374151] shadow-xl">
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function TextField({
   label,
   value,
   onChange,
   placeholder,
   helperText,
+  tooltip,
   type = "text",
   className = "",
 }: {
@@ -1480,12 +1829,16 @@ function TextField({
   onChange: (value: string) => void;
   placeholder?: string;
   helperText?: string;
+  tooltip?: string;
   type?: "text" | "email";
   className?: string;
 }) {
   return (
     <label className={`block text-sm font-medium ${className}`}>
-      {label}
+      <span className="flex items-center">
+        {label}
+        {tooltip && <InfoTip text={tooltip} />}
+      </span>
       <input
         type={type}
         value={value}
@@ -1507,6 +1860,7 @@ function NumberField({
   value,
   onChange,
   helperText,
+  tooltip,
   min = 0,
   max,
   allowNegative = false,
@@ -1515,13 +1869,17 @@ function NumberField({
   value: number;
   onChange: (value: number) => void;
   helperText?: string;
+  tooltip?: string;
   min?: number;
   max?: number;
   allowNegative?: boolean;
 }) {
   return (
     <label className="block text-sm font-medium">
-      {label}
+      <span className="flex items-center">
+        {label}
+        {tooltip && <InfoTip text={tooltip} />}
+      </span>
       <input
         type="number"
         min={allowNegative ? undefined : min}
@@ -1551,16 +1909,21 @@ function SelectField({
   options,
   onChange,
   helperText,
+  tooltip,
 }: {
   label: string;
   value: string;
   options: readonly string[];
   onChange: (value: string) => void;
   helperText?: string;
+  tooltip?: string;
 }) {
   return (
     <label className="block text-sm font-medium">
-      {label}
+      <span className="flex items-center">
+        {label}
+        {tooltip && <InfoTip text={tooltip} />}
+      </span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -1586,15 +1949,20 @@ function TextAreaField({
   value,
   onChange,
   className = "",
+  tooltip,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  tooltip?: string;
 }) {
   return (
     <label className={`block text-sm font-medium ${className}`}>
-      {label}
+      <span className="flex items-center">
+        {label}
+        {tooltip && <InfoTip text={tooltip} />}
+      </span>
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -1608,14 +1976,19 @@ function ToggleField({
   label,
   checked,
   onChange,
+  tooltip,
 }: {
   label: string;
   checked: boolean;
   onChange: (value: boolean) => void;
+  tooltip?: string;
 }) {
   return (
     <label className="flex items-center justify-between gap-4 rounded-md border border-[#d9e2ec] bg-white p-4 text-sm font-medium">
-      {label}
+      <span className="flex items-center">
+        {label}
+        {tooltip && <InfoTip text={tooltip} />}
+      </span>
       <input
         type="checkbox"
         checked={checked}
@@ -1623,6 +1996,130 @@ function ToggleField({
         className="h-4 w-4 accent-[#ff5c35]"
       />
     </label>
+  );
+}
+
+function PricingThresholdsSection({ settings, setSettings }: SectionProps) {
+  const t = settings.pricingThresholds ?? defaultSettings.pricingThresholds;
+  const set = (key: keyof AppSettings["pricingThresholds"], value: number) =>
+    setSettings((c) => ({ ...c, pricingThresholds: { ...(c.pricingThresholds ?? defaultSettings.pricingThresholds), [key]: value } }));
+
+  return (
+    <SettingsSection
+      title="Pricing Thresholds"
+      description="Controls the color-coded status badges (Red, Yellow, Green) and advisory warnings in the Calculator. These don't block you from pricing — they're guardrails to help you stay profitable."
+      footer="The defaults work well for most contractors. Only change these if the badges are firing too often (lower the thresholds) or not enough (raise them). When in doubt, leave them at the defaults and revisit after a few months of use."
+    >
+      <div className="mt-2">
+        <h4 className="text-sm font-medium text-black">Status Thresholds</h4>
+        <p className="mt-1 text-xs text-gray-500">Margins below these values trigger the corresponding status labels.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <NumberField label="Risky below %" value={t.riskyMarginPercent} min={0} max={80} onChange={(v) => set("riskyMarginPercent", v)} helperText="Margin below this = Risky (red badge)" tooltip="If a job's margin falls below this number, the app shows a red 'Risky' badge. Default: 25%. Example: on a $10k job, margin below 25% means less than $2,500 gross profit — often not enough to cover overhead and risk." />
+          <NumberField label="Tight below %" value={t.tightMarginPercent} min={0} max={80} onChange={(v) => set("tightMarginPercent", v)} helperText="Margin below this = Tight (yellow badge)" tooltip="If margin is above 'Risky' but still below this threshold, the app shows a yellow 'Tight' badge. Default: 35%. Use this as a nudge to push your prices a bit higher — you're covering costs but not thriving." />
+          <NumberField label="Safe price cushion %" value={t.safePriceCushionPercent} min={0} max={30} onChange={(v) => set("safePriceCushionPercent", v)} helperText="Extra % above min margin required for green status" tooltip="How far above the minimum safe margin a price needs to be before showing a green badge. Example: if minimum safe margin is 20% and cushion is 8%, you need a 28%+ margin for green. This prevents borderline jobs from looking 'safe' when they're actually just scraping by." />
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h4 className="text-sm font-medium text-black">Margin Clamp Limits</h4>
+        <p className="mt-1 text-xs text-gray-500">Hard floor and ceiling for any calculated margin.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <NumberField label="Minimum margin %" value={t.marginClampMinPercent} min={0} max={50} onChange={(v) => set("marginClampMinPercent", v)} helperText="Hard floor — no option can drop below this" tooltip="Hard floor. Even if all adjustments (trade, state, risk, etc.) push the margin lower, no pricing option will ever go below this number. Prevents accidentally pricing below your costs due to stacked negative adjustments." />
+          <NumberField label="Maximum margin %" value={t.marginClampMaxPercent} min={30} max={90} onChange={(v) => set("marginClampMaxPercent", v)} helperText="Hard ceiling — no option can exceed this" tooltip="Hard ceiling. Prevents the app from recommending unrealistically high prices that could embarrass you or lose bids. If you find yourself capping out, your base margins or adjustments may be set too high." />
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h4 className="text-sm font-medium text-black">Minimum Safe Margin Bonuses</h4>
+        <p className="mt-1 text-xs text-gray-500">Extra margin added to the minimum safe price for riskier jobs.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <NumberField label="High risk bonus %" value={t.safeMarginRiskBonusPercent} min={0} max={15} onChange={(v) => set("safeMarginRiskBonusPercent", v)} helperText="Added to the minimum safe margin for High risk jobs" tooltip="Extra margin buffer applied specifically to High risk jobs when calculating the minimum safe price. A High risk job has more chance of overruns, callbacks, or complications — this bonus ensures you have enough cushion to absorb those without going underwater." />
+          <NumberField label="Small job bonus %" value={t.safeMarginSmallBonusPercent} min={0} max={15} onChange={(v) => set("safeMarginSmallBonusPercent", v)} helperText="Added to the minimum safe margin for Small jobs" tooltip="Small jobs (under ~$3k) have proportionally higher fixed costs — driving there, setup, minimum crew time. This bonus raises the minimum safe price so even small jobs cover those unavoidable costs." />
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h4 className="text-sm font-medium text-black">Warning Thresholds</h4>
+        <p className="mt-1 text-xs text-gray-500">Trigger advisory messages in the Calculator.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <NumberField label="Warn margin low %" value={t.warningMarginLowPercent} min={0} max={80} onChange={(v) => set("warningMarginLowPercent", v)} helperText={'Advisory shown when Better margin falls below this'} tooltip="If the Better (middle) option's margin falls below this number, the Calculator shows an advisory warning. It doesn't block pricing — it's a nudge to reconsider. Lower this if the warnings are too frequent; raise it if you want a stricter alert." />
+          <NumberField label="Warn margin high %" value={t.warningMarginHighPercent} min={0} max={90} onChange={(v) => set("warningMarginHighPercent", v)} helperText={'Advisory shown when any margin is unusually high'} tooltip="If any pricing option's margin exceeds this, the app flags it. Very high margins can mean you're overpriced and losing bids you could have won. A warning here is a sanity check — not a hard stop." />
+          <NumberField label="Warn commission %" value={t.warningCommissionPercent} min={0} max={30} onChange={(v) => set("warningCommissionPercent", v)} helperText="Advisory if sales commission exceeds this % of price" tooltip="If the sales commission you enter in the Calculator exceeds this % of the sale price, the app warns you. Helps prevent high commissions from silently eroding your margin." />
+          <NumberField label="Warn fees % of profit" value={t.warningFeeProfitPercent} min={0} max={50} onChange={(v) => set("warningFeeProfitPercent", v)} helperText="Advisory if financing/card fees eat more than this % of profit" tooltip="If financing or credit card fees consume more than this percentage of your gross profit, the app warns you. Example: at 10%, if your profit is $1,000 but fees are $120, you'll see a warning — the fees are too large relative to what you're keeping." />
+        </div>
+      </div>
+    </SettingsSection>
+  );
+}
+
+const TRADE_KEYS = ["Roofing", "Siding", "Painting", "Drywall", "Gutters", "Remodeling"] as const;
+
+function ContentDefaultsSection({ settings, setSettings }: SectionProps) {
+  const content = settings.contentDefaults ?? defaultSettings.contentDefaults;
+
+  return (
+    <SettingsSection
+      title="Content Defaults"
+      description="Default service items and scope templates loaded when creating quotes per trade."
+      footer="Trade services appear as suggestion checkboxes in the quote sidebar. Scope templates are pre-written text options the wizard can insert. One item per line."
+    >
+      <div>
+        <h4 className="text-sm font-medium text-black">Trade Service Items</h4>
+        <p className="mt-1 text-xs text-gray-500">One item per line. These are the suggested services shown in the quote sidebar per trade.</p>
+        <div className="mt-4 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {TRADE_KEYS.map((trade) => (
+            <label key={trade} className="block text-sm font-medium">
+              {trade}
+              <textarea
+                value={(content.tradeServices[trade] ?? []).join("\n")}
+                onChange={(e) =>
+                  setSettings((c) => ({
+                    ...c,
+                    contentDefaults: {
+                      ...(c.contentDefaults ?? defaultSettings.contentDefaults),
+                      tradeServices: {
+                        ...(c.contentDefaults ?? defaultSettings.contentDefaults).tradeServices,
+                        [trade]: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                      },
+                    },
+                  }))
+                }
+                className="mt-2 min-h-40 w-full resize-none rounded-md border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#ff5c35]"
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-10">
+        <h4 className="text-sm font-medium text-black">Scope Templates</h4>
+        <p className="mt-1 text-xs text-gray-500">One template per line. The wizard shows these as quick-select options for the scope of work.</p>
+        <div className="mt-4 grid gap-6 md:grid-cols-2">
+          {TRADE_KEYS.map((trade) => (
+            <label key={trade} className="block text-sm font-medium">
+              {trade}
+              <textarea
+                value={(content.scopeTemplates[trade] ?? []).join("\n---\n")}
+                onChange={(e) =>
+                  setSettings((c) => ({
+                    ...c,
+                    contentDefaults: {
+                      ...(c.contentDefaults ?? defaultSettings.contentDefaults),
+                      scopeTemplates: {
+                        ...(c.contentDefaults ?? defaultSettings.contentDefaults).scopeTemplates,
+                        [trade]: e.target.value.split("\n---\n").map((s) => s.trim()).filter(Boolean),
+                      },
+                    },
+                  }))
+                }
+                className="mt-2 min-h-48 w-full resize-none rounded-md border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#ff5c35]"
+              />
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-gray-400">Separate each template with a line containing only <code>---</code></p>
+      </div>
+    </SettingsSection>
   );
 }
 
@@ -1640,6 +2137,16 @@ function mergeSettings(settings: AppSettings): AppSettings {
     pricingDefaults: {
       ...defaultSettings.pricingDefaults,
       ...settings.pricingDefaults,
+      tradeAdjustments: { ...defaultSettings.pricingDefaults.tradeAdjustments, ...settings.pricingDefaults?.tradeAdjustments },
+      sizeAdjustments: { ...defaultSettings.pricingDefaults.sizeAdjustments, ...settings.pricingDefaults?.sizeAdjustments },
+      riskAdjustments: { ...defaultSettings.pricingDefaults.riskAdjustments, ...settings.pricingDefaults?.riskAdjustments },
+      strategyAdjustments: { ...defaultSettings.pricingDefaults.strategyAdjustments, ...settings.pricingDefaults?.strategyAdjustments },
+      companyAdjustments: { ...defaultSettings.pricingDefaults.companyAdjustments, ...settings.pricingDefaults?.companyAdjustments },
+    },
+    pricingThresholds: { ...defaultSettings.pricingThresholds, ...settings.pricingThresholds },
+    contentDefaults: {
+      tradeServices: { ...defaultSettings.contentDefaults.tradeServices, ...settings.contentDefaults?.tradeServices },
+      scopeTemplates: { ...defaultSettings.contentDefaults.scopeTemplates, ...settings.contentDefaults?.scopeTemplates },
     },
     marketLocation: {
       ...defaultSettings.marketLocation,
@@ -1751,6 +2258,367 @@ function updatePreference<K extends keyof AppSettings["appPreferences"]>(
     ...current,
     appPreferences: { ...current.appPreferences, [key]: value },
   }));
+}
+
+type ProposalTab = "templates" | "content" | "settings";
+
+function ProposalsSection({ settings, setSettings }: SectionProps) {
+  const [tab, setTab] = useState<ProposalTab>("templates");
+
+  const tabs: { id: ProposalTab; label: string; description: string }[] = [
+    { id: "templates", label: "Templates", description: "Full proposal documents sent to clients" },
+    { id: "content",   label: "Content Snippets", description: "Service lists and scope text for the quote builder" },
+    { id: "settings",  label: "Settings", description: "Proposal format, expiration, and display options" },
+  ];
+
+  return (
+    <div>
+      {/* Tab bar */}
+      <div className="mb-6 flex gap-1 rounded-xl border border-[#d9e2ec] bg-[#f5f8fa] p-1">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+              tab === t.id
+                ? "bg-white text-[#213343] shadow-sm"
+                : "text-gray-400 hover:text-gray-700"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {/* Tab description */}
+      <p className="mb-6 text-sm text-gray-400">
+        {tabs.find((t) => t.id === tab)?.description}
+      </p>
+
+      {tab === "templates" && <TemplatesSection />}
+      {tab === "content"   && <ContentDefaultsSection settings={settings} setSettings={setSettings} />}
+      {tab === "settings"  && <ProposalSettingsSection settings={settings} setSettings={setSettings} />}
+    </div>
+  );
+}
+
+const TEMPLATE_SECTION_KEYS = [
+  "cover",
+  "executiveSummary",
+  "existingConditions",
+  "scopeOfWork",
+  "materialsSpecs",
+  "timeline",
+  "pricing",
+  "warranty",
+  "terms",
+  "acceptance",
+] as const;
+
+const TEMPLATE_SECTION_LABELS: Record<string, string> = {
+  cover: "Cover",
+  executiveSummary: "Summary",
+  existingConditions: "Conditions",
+  scopeOfWork: "Scope",
+  materialsSpecs: "Materials",
+  timeline: "Timeline",
+  pricing: "Pricing",
+  warranty: "Warranty",
+  terms: "Terms",
+  acceptance: "Acceptance",
+};
+
+function ProposalThumbnail({ template }: { template: ProposalTemplate }) {
+  const enabledSections = TEMPLATE_SECTION_KEYS.filter(
+    (k) => template[k].enabled
+  );
+
+  return (
+    <div className="relative w-full overflow-hidden bg-white" style={{ aspectRatio: "3/4" }}>
+      {/* Cover area */}
+      <div className="relative flex flex-col bg-[#1a2733]" style={{ height: "38%" }}>
+        <div className="h-[3px] w-full bg-[#ff5c35]" />
+        <div className="flex flex-1 flex-col justify-center px-4 pb-2 pt-3">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-[#ff5c35]/80">
+            Proposal
+          </p>
+          <p className="mt-0.5 truncate text-[11px] font-bold text-white">
+            {template.trade}
+          </p>
+          {template.cover.tagline && (
+            <p className="mt-0.5 line-clamp-1 text-[7px] text-white/40">
+              {template.cover.tagline}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center justify-between border-t border-white/10 px-4 py-1.5">
+          <div className="h-[3px] w-10 rounded-full bg-white/10" />
+          <div className="h-[3px] w-5 rounded-full bg-white/10" />
+        </div>
+      </div>
+
+      {/* Content wireframe */}
+      <div className="flex flex-col gap-2 bg-white px-4 py-3" style={{ height: "62%" }}>
+        {/* Section 1 — heading + lines */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <div className="h-[3px] w-[3px] rounded-full bg-[#ff5c35]" />
+            <div className="h-[3px] w-14 rounded-full bg-[#213343]/20" />
+          </div>
+          <div className="h-[2px] w-full rounded-full bg-gray-100" />
+          <div className="h-[2px] w-4/5 rounded-full bg-gray-100" />
+          <div className="h-[2px] w-3/5 rounded-full bg-gray-100" />
+        </div>
+
+        {/* Section 2 — 2-col grid */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="rounded bg-[#f5f8fa] p-1.5">
+            <div className="mb-1 h-[3px] w-8 rounded-full bg-[#213343]/15" />
+            <div className="h-[2px] w-full rounded-full bg-gray-100" />
+            <div className="mt-0.5 h-[2px] w-3/4 rounded-full bg-gray-100" />
+          </div>
+          <div className="rounded bg-[#f5f8fa] p-1.5">
+            <div className="mb-1 h-[3px] w-6 rounded-full bg-[#213343]/15" />
+            <div className="h-[2px] w-full rounded-full bg-gray-100" />
+            <div className="mt-0.5 h-[2px] w-2/3 rounded-full bg-gray-100" />
+          </div>
+        </div>
+
+        {/* Section 3 — table rows */}
+        <div className="space-y-0.5">
+          {[90, 75, 85, 60].map((w, i) => (
+            <div key={i} className="flex items-center gap-1">
+              <div className="h-[2px] w-[2px] rounded-full bg-[#ff5c35]/50 shrink-0" />
+              <div
+                className="h-[2px] rounded-full bg-gray-100"
+                style={{ width: `${w}%` }}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Footer line */}
+        <div className="mt-auto flex items-center justify-between border-t border-gray-100 pt-1.5">
+          <div className="h-[2px] w-12 rounded-full bg-gray-100" />
+          <div className="h-[2px] w-6 rounded-full bg-gray-100" />
+        </div>
+      </div>
+
+      {/* Enabled section count badge */}
+      <div className="absolute bottom-2 right-2 rounded bg-[#213343]/80 px-1.5 py-0.5">
+        <p className="text-[7px] font-semibold text-white">
+          {enabledSections.length}/10
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TemplatesSection() {
+  const [savedTemplates, setSavedTemplates] = useLocalStorageState<ProposalTemplate[]>(
+    storageKeys.proposalTemplates,
+    []
+  );
+  const templates = useMemo(
+    () => mergeProposalTemplates(savedTemplates),
+    [savedTemplates]
+  );
+  const [editingTemplate, setEditingTemplate] = useState<ProposalTemplate | null>(null);
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [newTradeName, setNewTradeName] = useState("");
+  const [newTradeError, setNewTradeError] = useState("");
+
+  function handleSave(updated: ProposalTemplate) {
+    setSavedTemplates((prev) => {
+      const existing = prev.findIndex(
+        (t) => t.trade === updated.trade && t.id === updated.id
+      );
+      if (existing >= 0) {
+        const next = [...prev];
+        next[existing] = updated;
+        return next;
+      }
+      return [...prev, updated];
+    });
+    setEditingTemplate(null);
+  }
+
+  function handleDelete(template: ProposalTemplate) {
+    setSavedTemplates((prev) => prev.filter((t) => t.id !== template.id));
+  }
+
+  function handleCreateNew() {
+    const name = newTradeName.trim();
+    if (!name) { setNewTradeError("Enter a name for your template."); return; }
+    if (name.length < 2) { setNewTradeError("Name must be at least 2 characters."); return; }
+    const id = `custom-${Math.random().toString(36).slice(2, 10)}`;
+    const fresh: ProposalTemplate = {
+      ...blankTemplate(name),
+      id,
+      name: `${name} Proposal`,
+    };
+    setShowNewModal(false);
+    setNewTradeName("");
+    setNewTradeError("");
+    setEditingTemplate(fresh);
+  }
+
+  return (
+    <>
+      <SettingsSection
+        title="Proposal Templates"
+        description="Customize the 10-section proposal document for each trade. Click any card to open the editor, or create a new template for any service you offer."
+      >
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {/* Existing templates */}
+          {templates.map((template) => {
+            const savedEntry = savedTemplates.find((t) => t.id === template.id);
+            const isModified = Boolean(savedEntry?.lastModified);
+            const isCustom = !["default-roofing", "default-siding", "default-painting", "default-drywall", "default-gutters", "default-remodeling", "default-general-contractor"].includes(template.id);
+
+            return (
+              <div
+                key={template.id}
+                className="group overflow-hidden rounded-xl border border-[#d9e2ec] bg-white transition duration-200 hover:border-[#213343] hover:shadow-lg"
+              >
+                {/* Document thumbnail — clickable */}
+                <button
+                  onClick={() => setEditingTemplate(template)}
+                  className="relative w-full text-left focus:outline-none"
+                >
+                  <ProposalThumbnail template={template} />
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#213343]/0 transition-colors duration-200 group-hover:bg-[#213343]/60">
+                    <div className="flex translate-y-2 items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#213343] opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+                      <Pencil className="h-3 w-3" />
+                      Edit Template
+                    </div>
+                  </div>
+                </button>
+
+                {/* Card footer */}
+                <div className="border-t border-[#d9e2ec] px-4 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#213343]">
+                        {template.trade}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {isModified
+                          ? `Modified ${savedEntry?.lastModified}`
+                          : "Default template"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {isCustom && (
+                        <button
+                          onClick={() => handleDelete(template)}
+                          title="Delete custom template"
+                          className="rounded p-1 text-gray-300 transition hover:bg-red-50 hover:text-red-400"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
+                      {(isModified || isCustom) && (
+                        <span className="rounded-full bg-[#fff1ea] px-2 py-0.5 text-[10px] font-semibold text-[#ff5c35]">
+                          {isCustom ? "Custom" : "Edited"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Section dots */}
+                  <div className="mt-3 flex items-center gap-1">
+                    {TEMPLATE_SECTION_KEYS.map((k) => (
+                      <div
+                        key={k}
+                        title={TEMPLATE_SECTION_LABELS[k]}
+                        className={`h-1.5 flex-1 rounded-full transition ${
+                          template[k].enabled ? "bg-[#ff5c35]" : "bg-[#e9eef2]"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-gray-400">
+                    {TEMPLATE_SECTION_KEYS.filter((k) => template[k].enabled).length} of 10 sections active
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* New template card */}
+          <button
+            onClick={() => setShowNewModal(true)}
+            className="group flex min-h-65 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-[#d9e2ec] bg-white text-center transition duration-200 hover:border-[#ff5c35] hover:bg-[#fff9f7]"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-dashed border-gray-200 transition group-hover:border-[#ff5c35] group-hover:bg-[#fff1ea]">
+              <Plus className="h-5 w-5 text-gray-300 transition group-hover:text-[#ff5c35]" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-400 transition group-hover:text-[#213343]">
+                New Template
+              </p>
+              <p className="mt-1 text-xs text-gray-300 transition group-hover:text-gray-500">
+                Any trade or service
+              </p>
+            </div>
+          </button>
+        </div>
+      </SettingsSection>
+
+      {/* New template modal */}
+      {showNewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-2xl">
+            <h3 className="text-lg font-bold text-[#213343]">New Proposal Template</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Give your template a name — this becomes the trade or service type label.
+            </p>
+            <div className="mt-5">
+              <label className="mb-1.5 block text-sm font-medium text-[#213343]">
+                Trade / Service Name
+              </label>
+              <input
+                autoFocus
+                value={newTradeName}
+                onChange={(e) => { setNewTradeName(e.target.value); setNewTradeError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateNew()}
+                placeholder="e.g. HVAC, Landscaping, Concrete…"
+                className="w-full rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm outline-none focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
+              />
+              {newTradeError && (
+                <p className="mt-1.5 text-xs text-red-500">{newTradeError}</p>
+              )}
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => { setShowNewModal(false); setNewTradeName(""); setNewTradeError(""); }}
+                className="flex-1 rounded-lg border border-[#d9e2ec] py-2.5 text-sm text-gray-500 transition hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateNew}
+                className="flex-1 rounded-lg bg-[#ff5c35] py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
+              >
+                Create Template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingTemplate && (
+        <TemplateEditorPanel
+          template={editingTemplate}
+          open={true}
+          onClose={() => setEditingTemplate(null)}
+          onSave={handleSave}
+        />
+      )}
+    </>
+  );
 }
 
 function DataSection() {

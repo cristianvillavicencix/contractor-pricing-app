@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Calculator, Clock3, DollarSign, X } from "lucide-react";
+import { Calculator, Clock3, DollarSign, Settings, X } from "lucide-react";
 
 type Operator = "+" | "-" | "x" | "/";
 type HistoryItem = {
@@ -24,6 +24,8 @@ export function FloatingCalculatorButton() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isMoneyMode, setIsMoneyMode] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [decimals, setDecimals] = useState(2);
   const [copied, setCopied] = useState(false);
   const shouldHide = pathname.startsWith("/quotes/preview");
 
@@ -141,7 +143,7 @@ export function FloatingCalculatorButton() {
     if (storedValue !== null && operator) {
       const result = calculate(storedValue, currentValue, operator);
       setStoredValue(result);
-      setDisplay(formatCalculatorNumber(result));
+      setDisplay(formatCalculatorNumber(result, decimals));
     } else {
       setStoredValue(currentValue);
     }
@@ -155,11 +157,11 @@ export function FloatingCalculatorButton() {
 
     const currentValue = Number(display);
     const result = calculate(storedValue, currentValue, operator);
-    const formattedResult = formatCalculatorNumber(result);
+    const formattedResult = formatCalculatorNumber(result, decimals);
 
     setDisplay(formattedResult);
     addHistory(
-      `${formatCalculatorNumber(storedValue)} ${operator} ${formatCalculatorNumber(currentValue)}`,
+      `${formatCalculatorNumber(storedValue, decimals)} ${operator} ${formatCalculatorNumber(currentValue, decimals)}`,
       formattedResult
     );
     setStoredValue(null);
@@ -238,7 +240,7 @@ export function FloatingCalculatorButton() {
                         {item.expression}
                       </span>
                       <span className="font-medium text-[#213343]">
-                        {displayValue(Number(item.result), isMoneyMode)}
+                        {displayValue(Number(item.result), isMoneyMode, decimals)}
                       </span>
                     </button>
                   ))}
@@ -287,6 +289,18 @@ export function FloatingCalculatorButton() {
                   <Clock3 className="h-4 w-4" />
                 </button>
                 <button
+                  onClick={() => setIsSettingsOpen((current) => !current)}
+                  className={`flex h-8 w-8 items-center justify-center rounded-md transition hover:bg-[#f6f8fb] ${
+                    isSettingsOpen
+                      ? "text-[#ff5c35]"
+                      : "text-gray-400 hover:text-[#213343]"
+                  }`}
+                  aria-label="Calculator settings"
+                  title="Settings"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+                <button
                   onClick={() => setIsOpen(false)}
                   className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]"
                   aria-label="Close calculator"
@@ -295,6 +309,30 @@ export function FloatingCalculatorButton() {
                 </button>
               </div>
             </div>
+
+            {isSettingsOpen && (
+              <div className="mb-3 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Decimal Places
+                </p>
+                <div className="flex gap-1.5">
+                  {[0, 2, 4, 8].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDecimals(d)}
+                      className={`flex-1 rounded py-1.5 text-xs font-semibold transition ${
+                        decimals === d
+                          ? "bg-[#ff5c35] text-white"
+                          : "border border-[#d9e2ec] bg-white text-[#213343] hover:bg-[#f6f8fb]"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button
               onClick={copyResult}
@@ -306,7 +344,7 @@ export function FloatingCalculatorButton() {
               </p>
               <p className="mt-1 h-4 text-xs text-gray-400">
                 {storedValue !== null && operator
-                  ? `${displayValue(storedValue, isMoneyMode)} ${operator}`
+                  ? `${displayValue(storedValue, isMoneyMode, decimals)} ${operator}`
                   : copied
                     ? "Copied"
                     : "Click number to copy"}
@@ -411,9 +449,9 @@ function calculate(left: number, right: number, operator: Operator) {
   return left / right;
 }
 
-function formatCalculatorNumber(value: number) {
+function formatCalculatorNumber(value: number, decimals = 2) {
   if (!Number.isFinite(value)) return "0";
-  return Number(value.toFixed(8)).toString();
+  return Number(value.toFixed(decimals)).toString();
 }
 
 function formatCalculatorCurrency(value: number) {
@@ -426,10 +464,10 @@ function formatCalculatorCurrency(value: number) {
   }).format(value);
 }
 
-function displayValue(value: number, isMoneyMode: boolean) {
+function displayValue(value: number, isMoneyMode: boolean, decimals = 2) {
   return isMoneyMode
     ? formatCalculatorCurrency(value)
-    : formatCalculatorNumber(value);
+    : formatCalculatorNumber(value, decimals);
 }
 
 function isEditableElement(target: EventTarget | null) {

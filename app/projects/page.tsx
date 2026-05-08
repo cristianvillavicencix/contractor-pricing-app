@@ -295,7 +295,7 @@ export default function ProjectsPage() {
     <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
       <AppSidebar />
 
-      <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
+      <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>

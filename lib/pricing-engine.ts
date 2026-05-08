@@ -59,8 +59,26 @@ export type PricingEngineInput = {
   };
   pricingRules?: {
     baseMargins: Record<PriceOptionName, number>;
-    stateAdjustments: Record<ProjectState, number>;
+    stateAdjustments: Partial<Record<ProjectState, number>>;
+    tradeAdjustments?: Partial<Record<Trade, number>>;
+    sizeAdjustments?: Partial<Record<ProjectSize, number>>;
+    riskAdjustments?: Partial<Record<RiskLevel, number>>;
+    strategyAdjustments?: Partial<Record<Strategy, number>>;
+    companyAdjustments?: Partial<Record<CompanyLevel, number>>;
     minimumSafeMargin?: number;
+    thresholds?: {
+      riskyMargin: number;
+      tightMargin: number;
+      safePriceCushion: number;
+      warningMarginLow: number;
+      warningMarginHigh: number;
+      warningCommission: number;
+      warningFeeProfit: number;
+      safeMarginRiskBonus: number;
+      safeMarginSmallBonus: number;
+      marginClampMin: number;
+      marginClampMax: number;
+    };
   };
 };
 
@@ -104,13 +122,27 @@ export type PricingEngineResult = {
   };
 };
 
+const defaultThresholds = {
+  riskyMargin: 0.25,
+  tightMargin: 0.35,
+  safePriceCushion: 1.08,
+  warningMarginLow: 0.30,
+  warningMarginHigh: 0.55,
+  warningCommission: 0.08,
+  warningFeeProfit: 0.10,
+  safeMarginRiskBonus: 0.03,
+  safeMarginSmallBonus: 0.02,
+  marginClampMin: 0.15,
+  marginClampMax: 0.65,
+};
+
 const baseMargins: Record<PriceOptionName, number> = {
   Good: 0.28,
   Better: 0.35,
   Best: 0.42,
 };
 
-const stateAdjustments: Record<ProjectState, number> = {
+const stateAdjustments: Partial<Record<ProjectState, number>> = {
   Connecticut: 0,
   "New York": 0.03,
   "New Jersey": 0.02,
@@ -174,17 +206,18 @@ export function calculatePricingEngine(
     baseMargins,
     stateAdjustments,
   };
+  const t = rules.thresholds ?? defaultThresholds;
   const minimumSafeMargin =
     (input.pricingRules?.minimumSafeMargin ?? 0.2) +
-    (input.setup.riskLevel === "High" ? 0.03 : 0) +
-    (input.setup.projectSize === "Small" ? 0.02 : 0);
+    (input.setup.riskLevel === "High" ? t.safeMarginRiskBonus : 0) +
+    (input.setup.projectSize === "Small" ? t.safeMarginSmallBonus : 0);
   const adjustments = {
-    state: rules.stateAdjustments[input.setup.state],
-    trade: tradeAdjustments[input.setup.trade],
-    company: companyAdjustments[input.setup.companyLevel],
-    size: sizeAdjustments[input.setup.projectSize],
-    risk: riskAdjustments[input.setup.riskLevel],
-    strategy: strategyAdjustments[input.setup.strategy],
+    state: rules.stateAdjustments[input.setup.state] ?? 0,
+    trade: (rules.tradeAdjustments ?? tradeAdjustments)[input.setup.trade] ?? 0,
+    company: (rules.companyAdjustments ?? companyAdjustments)[input.setup.companyLevel] ?? 0,
+    size: (rules.sizeAdjustments ?? sizeAdjustments)[input.setup.projectSize] ?? 0,
+    risk: (rules.riskAdjustments ?? riskAdjustments)[input.setup.riskLevel] ?? 0,
+    strategy: (rules.strategyAdjustments ?? strategyAdjustments)[input.setup.strategy] ?? 0,
   };
 
   const breakevenPrice = solveSalePrice({
@@ -214,8 +247,8 @@ export function calculatePricingEngine(
           adjustments.size +
           adjustments.risk +
           adjustments.strategy,
-        0.15,
-        0.65
+        t.marginClampMin,
+        t.marginClampMax
       );
       const solved = solveSalePrice({
         fixedCostBeforeSaleBasedFees,
@@ -248,7 +281,7 @@ export function calculatePricingEngine(
         financingFeeCost: solved.financingFeeCost,
         taxCost: solved.taxCost,
         finalMargin,
-        status: getOptionStatus(solved.salePrice, minimumSafePrice, margin),
+        status: getOptionStatus(solved.salePrice, minimumSafePrice, margin, t),
         recommended: name === "Better",
       };
     }
@@ -263,8 +296,9 @@ export function calculatePricingEngine(
     minimumSafePrice,
     input,
     options,
+    thresholds: t,
   });
-  const projectStatus = getProjectStatus(good, better, minimumSafePrice);
+  const projectStatus = getProjectStatus(good, better, minimumSafePrice, t);
 
   return {
     baseCost,
@@ -373,20 +407,22 @@ function getTaxPercent(input: PricingEngineInput) {
 function getOptionStatus(
   salePrice: number,
   minimumSafePrice: number,
-  margin: number
+  margin: number,
+  t: typeof defaultThresholds
 ): PricingEngineOption["status"] {
-  if (salePrice < minimumSafePrice || margin < 0.25) return "Risky";
-  if (margin < 0.35 || salePrice < minimumSafePrice * 1.08) return "Tight";
+  if (salePrice < minimumSafePrice || margin < t.riskyMargin) return "Risky";
+  if (margin < t.tightMargin || salePrice < minimumSafePrice * t.safePriceCushion) return "Tight";
   return "Safe";
 }
 
 function getProjectStatus(
   good: PricingEngineOption,
   better: PricingEngineOption,
-  minimumSafePrice: number
+  minimumSafePrice: number,
+  t: typeof defaultThresholds
 ): PricingEngineResult["projectStatus"] {
-  if (better.margin < 0.25 || good.salePrice < minimumSafePrice) return "Red";
-  if (better.margin >= 0.25 && better.margin < 0.35) return "Yellow";
+  if (better.margin < t.riskyMargin || good.salePrice < minimumSafePrice) return "Red";
+  if (better.margin >= t.riskyMargin && better.margin < t.tightMargin) return "Yellow";
   return "Green";
 }
 
@@ -416,6 +452,7 @@ function getWarnings({
   minimumSafePrice,
   input,
   options,
+  thresholds: t,
 }: {
   baseCost: number;
   good: PricingEngineOption;
@@ -423,6 +460,7 @@ function getWarnings({
   minimumSafePrice: number;
   input: PricingEngineInput;
   options: PricingEngineOption[];
+  thresholds: typeof defaultThresholds;
 }) {
   const warnings: string[] = [];
   const feeCost =
@@ -432,18 +470,17 @@ function getWarnings({
   if (good.salePrice < minimumSafePrice) {
     warnings.push("Good price is below Minimum Safe Price.");
   }
-  if (better.margin < 0.3) warnings.push("Better margin is below 30%.");
-  if (
-    input.commission.includeCommission &&
-    better.commissionCost > better.salePrice * 0.08
-  ) {
-    warnings.push("Commission is higher than 8% of sale price.");
+  if (better.margin < t.warningMarginLow) {
+    warnings.push(`Better margin is below ${Math.round(t.warningMarginLow * 100)}%.`);
   }
-  if (feeCost > better.netProfit * 0.1) {
-    warnings.push("Fees reduce profit by more than 10%.");
+  if (input.commission.includeCommission && better.commissionCost > better.salePrice * t.warningCommission) {
+    warnings.push(`Commission is higher than ${Math.round(t.warningCommission * 100)}% of sale price.`);
   }
-  if (options.some((option) => option.finalMargin > 0.55)) {
-    warnings.push("Final margin is higher than 55%.");
+  if (feeCost > better.netProfit * t.warningFeeProfit) {
+    warnings.push(`Fees reduce profit by more than ${Math.round(t.warningFeeProfit * 100)}%.`);
+  }
+  if (options.some((option) => option.finalMargin > t.warningMarginHigh)) {
+    warnings.push(`Final margin is higher than ${Math.round(t.warningMarginHigh * 100)}%.`);
   }
   if (
     input.businessCosts.minimumJobPrice > 0 &&

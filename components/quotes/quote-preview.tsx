@@ -1,7 +1,7 @@
 "use client";
 
 import type { CoverLayout, QuoteDocument } from "@/lib/pdf-generator";
-import { formatMoney, pricingDescriptions } from "@/lib/pdf-generator";
+import { formatMoney } from "@/lib/pdf-generator";
 
 export function QuotePreview({
   doc,
@@ -118,7 +118,7 @@ export function QuotePreview({
                     {formatMoney(price)}
                   </p>
                   <p className="mt-2 text-xs leading-relaxed text-[#9CA3AF]">
-                    {pricingDescriptions[name]}
+                    {doc.pricingDescriptions[name]}
                   </p>
                 </div>
               );

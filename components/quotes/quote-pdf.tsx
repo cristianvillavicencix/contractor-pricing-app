@@ -11,7 +11,7 @@ import {
   pdf,
 } from "@react-pdf/renderer";
 import type { CoverLayout, QuoteDocument } from "@/lib/pdf-generator";
-import { formatMoney, pricingDescriptions } from "@/lib/pdf-generator";
+import { formatMoney } from "@/lib/pdf-generator";
 
 Font.register({
   family: "Inter",
@@ -64,6 +64,13 @@ const s = StyleSheet.create({
   proposalDate: { fontSize: 8, color: c.mid, marginTop: 3 },
   // Section
   section: { marginBottom: 20 },
+  pageTitle: {
+    fontSize: 18,
+    fontFamily: "Helvetica-Bold",
+    color: c.black,
+    marginBottom: 16,
+  },
+  pageIntro: { fontSize: 9, color: c.mid, lineHeight: 1.6, marginBottom: 16 },
   sectionLabel: {
     fontSize: 7,
     fontFamily: "Helvetica-Bold",
@@ -157,6 +164,9 @@ const s = StyleSheet.create({
     marginBottom: 20,
   },
   textBlockContent: { fontSize: 8, color: c.dark, lineHeight: 1.7 },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  photo: { width: "31%", height: 120, objectFit: "cover", borderRadius: 4 },
+  photoCaption: { fontSize: 7.5, color: c.mid, lineHeight: 1.4, marginTop: 5 },
   // Signature
   signatureGrid: { flexDirection: "row", gap: 20, marginBottom: 20 },
   signatureBox: { flex: 1 },
@@ -191,7 +201,7 @@ function CoverPage({
 }) {
   if (coverLayout === "full") {
     return (
-      <Page size="LETTER" style={{ padding: 0, backgroundColor: c.black }}>
+      <Page size="A4" style={{ padding: 0, backgroundColor: c.black }}>
         <View style={{ position: "relative", width: "100%", height: "100%" }}>
           <Image
             src={coverImageUrl}
@@ -243,7 +253,7 @@ function CoverPage({
 
   if (coverLayout === "half") {
     return (
-      <Page size="LETTER" style={{ padding: 0, backgroundColor: c.white }}>
+      <Page size="A4" style={{ padding: 0, backgroundColor: c.white }}>
         <Image
           src={coverImageUrl}
           style={{ width: "100%", height: 320, objectFit: "cover" }}
@@ -275,7 +285,7 @@ function CoverPage({
   // square
   return (
     <Page
-      size="LETTER"
+      size="A4"
       style={{
         padding: 0,
         backgroundColor: c.white,
@@ -349,37 +359,17 @@ function QuotePDFDocument({
   const companyMeta = [doc.companyPhone, doc.companyEmail, doc.companyWebsite]
     .filter(Boolean)
     .join("  ·  ");
+  const visible = (section: string) => doc.sectionOverrides[section] ?? true;
 
   return (
     <Document>
-      {/* Cover page — full single page */}
-      {coverImageUrl && (
+      {coverImageUrl && visible("cover") && (
         <CoverPage doc={doc} coverImageUrl={coverImageUrl} coverLayout={coverLayout} />
       )}
 
-      <Page size="LETTER" style={s.page}>
-        {/* Header */}
-        <View style={s.header}>
-          <View>
-            {doc.companyLogoUrl ? (
-              <Image
-                src={doc.companyLogoUrl}
-                style={{ height: 28, width: 100, objectFit: "contain", marginBottom: 8, objectPositionX: 0 }}
-              />
-            ) : null}
-            <Text style={s.companyName}>{doc.companyName}</Text>
-            {companyMeta ? <Text style={s.companyMeta}>{companyMeta}</Text> : null}
-          </View>
-          <View style={s.proposalMetaRight}>
-            <Text style={s.companyName}>{doc.proposalTitle}</Text>
-            <Text style={s.proposalNumber}>{doc.proposalNumber}</Text>
-            <Text style={s.proposalDate}>
-              Created {doc.dateCreated}  ·  Expires {doc.expiresAt}
-            </Text>
-          </View>
-        </View>
-
-        {/* Customer + Project */}
+      <Page size="A4" style={s.page}>
+        <PdfHeader doc={doc} companyMeta={companyMeta} />
+        <Text style={s.pageTitle}>Proposal Overview</Text>
         <View style={s.infoGrid}>
           <View style={s.infoBox}>
             <Text style={s.infoBoxLabel}>PREPARED FOR</Text>
@@ -404,16 +394,8 @@ function QuotePDFDocument({
           </View>
         </View>
 
-        {/* Scope */}
-        <View style={s.section}>
-          <Text style={s.sectionLabel}>Scope of Work</Text>
-          <View style={s.scopeBox}>
-            <ScopeLines text={doc.scopeSummary} />
-          </View>
-        </View>
-
-        {/* Pricing */}
-        <View style={s.section}>
+        {visible("pricing") && (
+          <View style={s.section}>
           <Text style={s.sectionLabel}>Pricing Options</Text>
           <View style={s.pricingGrid}>
             {(["Good", "Better", "Best"] as const).map((name) => {
@@ -436,16 +418,77 @@ function QuotePDFDocument({
                     <Text style={s.pricingCardName}>{name}</Text>
                   )}
                   <Text style={s.pricingCardPrice}>{formatMoney(price)}</Text>
-                  <Text style={s.pricingCardDesc}>{pricingDescriptions[name]}</Text>
+                  <Text style={s.pricingCardDesc}>{doc.pricingDescriptions[name]}</Text>
                 </View>
               );
             })}
           </View>
-        </View>
+          </View>
+        )}
 
-        {/* Included Services */}
-        {doc.includedServices.length > 0 && (
-          <View style={s.section}>
+        <PdfFooter doc={doc} />
+      </Page>
+
+      {visible("scopeOfWork") && (
+        <Page size="A4" style={s.page}>
+          <PdfHeader doc={doc} companyMeta={companyMeta} />
+          <Text style={s.pageTitle}>Scope of Work</Text>
+          <View style={s.scopeBox}>
+            <ScopeLines text={doc.scopeSummary} />
+          </View>
+          <PdfFooter doc={doc} />
+        </Page>
+      )}
+
+      {visible("existingConditions") &&
+        chunkPdfPhotos(
+          doc.existingPhotos,
+          doc.sectionLayouts.existingConditionPhotos ?? "twoColumns"
+        ).map((photoGroup, pageIndex) => {
+          const photoLayout =
+            doc.sectionLayouts.existingConditionPhotos ?? "twoColumns";
+
+          return (
+            <Page key={`photos-${pageIndex}`} size="A4" style={s.page}>
+              <PdfHeader doc={doc} companyMeta={companyMeta} />
+              <Text style={s.pageTitle}>Existing Conditions</Text>
+              <Text style={s.pageIntro}>
+                Photos and site observations included with this proposal.
+              </Text>
+              <View
+                style={
+                  photoLayout === "one" || photoLayout === "twoStacked"
+                    ? { gap: 12 }
+                    : s.photoGrid
+                }
+              >
+                {photoGroup.map((photo, index) => {
+                  const globalIndex = getPdfPhotoGlobalIndex(
+                    pageIndex,
+                    index,
+                    photoLayout
+                  );
+                  const caption =
+                    doc.existingPhotoCaptions[globalIndex] ||
+                    `Photo ${globalIndex + 1}`;
+
+                  return (
+                    <View key={`${pageIndex}-${index}`} style={getPdfPhotoWrapStyle(photoLayout)}>
+                      <Image src={photo} style={getPdfPhotoStyle(photoLayout)} />
+                      <Text style={s.photoCaption}>{caption}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <PdfFooter doc={doc} />
+            </Page>
+          );
+        })}
+
+      {doc.includedServices.length > 0 && visible("scopeOfWork") && (
+        <Page size="A4" style={s.page}>
+          <PdfHeader doc={doc} companyMeta={companyMeta} />
+          <Text style={s.pageTitle}>Included Services</Text>
             <Text style={s.sectionLabel}>Included Services</Text>
             <View style={s.dotGrid}>
               {doc.includedServices.map((service) => (
@@ -455,28 +498,40 @@ function QuotePDFDocument({
                 </View>
               ))}
             </View>
-          </View>
-        )}
+          <PdfFooter doc={doc} />
+        </Page>
+      )}
 
-        {/* Warranty */}
-        <View style={s.section}>
+      {visible("warranty") && (
+        <Page size="A4" style={s.page}>
+          <PdfHeader doc={doc} companyMeta={companyMeta} />
+          <Text style={s.pageTitle}>Warranty</Text>
           <Text style={s.sectionLabel}>Warranty</Text>
           <View style={s.textBlock}>
             <Text style={s.textBlockContent}>{doc.warrantyText}</Text>
           </View>
-        </View>
+          <PdfFooter doc={doc} />
+        </Page>
+      )}
 
-        {/* Terms */}
-        <View style={s.section}>
+      {visible("terms") && (
+        <Page size="A4" style={s.page}>
+          <PdfHeader doc={doc} companyMeta={companyMeta} />
+          <Text style={s.pageTitle}>Terms & Conditions</Text>
           <Text style={s.sectionLabel}>Terms & Conditions</Text>
           <View style={s.textBlock}>
             <Text style={s.textBlockContent}>{doc.termsText}</Text>
           </View>
-        </View>
+          <PdfFooter doc={doc} />
+        </Page>
+      )}
 
-        {/* Certifications */}
-        {doc.certifications.length > 0 && (
-          <View style={s.section}>
+      {(doc.certifications.length > 0 || visible("acceptance")) && (
+        <Page size="A4" style={s.page}>
+          <PdfHeader doc={doc} companyMeta={companyMeta} />
+          <Text style={s.pageTitle}>Authorization</Text>
+          {doc.certifications.length > 0 && (
+            <View style={s.section}>
             <Text style={s.sectionLabel}>Certifications & Credentials</Text>
             <View style={s.dotGrid}>
               {doc.certifications.map((cert) => (
@@ -486,11 +541,11 @@ function QuotePDFDocument({
                 </View>
               ))}
             </View>
-          </View>
-        )}
+            </View>
+          )}
 
-        {/* Signatures */}
-        <View style={s.section}>
+          {visible("acceptance") && (
+            <View style={s.section}>
           <Text style={s.sectionLabel}>Authorization</Text>
           <View style={s.signatureGrid}>
             <View style={s.signatureBox}>
@@ -506,23 +561,111 @@ function QuotePDFDocument({
               </Text>
             </View>
           </View>
-        </View>
-
-        {/* Footer */}
-        <View style={s.footer} fixed>
-          <Text style={s.footerText}>
-            {doc.companyTagline || doc.companyFooterText || doc.companyName}
-          </Text>
-          <Text
-            style={s.pageNumber}
-            render={({ pageNumber, totalPages }) =>
-              `Page ${pageNumber} of ${totalPages}`
-            }
-          />
-        </View>
-      </Page>
+            </View>
+          )}
+          <PdfFooter doc={doc} />
+        </Page>
+      )}
     </Document>
   );
+}
+
+function PdfHeader({
+  doc,
+  companyMeta,
+}: {
+  doc: QuoteDocument;
+  companyMeta: string;
+}) {
+  return (
+    <View style={s.header}>
+      <View>
+        {doc.companyLogoUrl ? (
+          <Image
+            src={doc.companyLogoUrl}
+            style={{
+              height: 28,
+              width: 100,
+              objectFit: "contain",
+              marginBottom: 8,
+              objectPositionX: 0,
+            }}
+          />
+        ) : null}
+        <Text style={s.companyName}>{doc.companyName}</Text>
+        {companyMeta ? <Text style={s.companyMeta}>{companyMeta}</Text> : null}
+      </View>
+      <View style={s.proposalMetaRight}>
+        <Text style={s.companyName}>{doc.proposalTitle}</Text>
+        <Text style={s.proposalNumber}>{doc.proposalNumber}</Text>
+        <Text style={s.proposalDate}>
+          Created {doc.dateCreated}  ·  Expires {doc.expiresAt}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function PdfFooter({ doc }: { doc: QuoteDocument }) {
+  return (
+    <View style={s.footer} fixed>
+      <Text style={s.footerText}>
+        {doc.companyTagline || doc.companyFooterText || doc.companyName}
+      </Text>
+      <Text
+        style={s.pageNumber}
+        render={({ pageNumber, totalPages }) =>
+          `Page ${pageNumber} of ${totalPages}`
+        }
+      />
+    </View>
+  );
+}
+
+function chunkPdfPhotos(photos: string[], photoLayout: string) {
+  const perPage =
+    photoLayout === "one" ? 1 : photoLayout === "grid" ? 4 : 2;
+  const groups: string[][] = [];
+
+  for (let index = 0; index < photos.length; index += perPage) {
+    groups.push(photos.slice(index, index + perPage));
+  }
+
+  return groups;
+}
+
+function getPdfPhotoStyle(photoLayout: string) {
+  if (photoLayout === "one") {
+    return { width: "100%", height: 500, objectFit: "cover" as const };
+  }
+
+  if (photoLayout === "twoStacked") {
+    return { width: "100%", height: 240, objectFit: "cover" as const };
+  }
+
+  if (photoLayout === "grid") {
+    return { width: "48%", height: 170, objectFit: "cover" as const };
+  }
+
+  return { width: "48%", height: 360, objectFit: "cover" as const };
+}
+
+function getPdfPhotoWrapStyle(photoLayout: string) {
+  if (photoLayout === "one" || photoLayout === "twoStacked") {
+    return { width: "100%" };
+  }
+
+  return { width: "48%" };
+}
+
+function getPdfPhotoGlobalIndex(
+  pageIndex: number,
+  index: number,
+  photoLayout: string
+) {
+  const perPage =
+    photoLayout === "one" ? 1 : photoLayout === "grid" ? 4 : 2;
+  return pageIndex * perPage + index;
 }
 
 export async function downloadQuotePDF(

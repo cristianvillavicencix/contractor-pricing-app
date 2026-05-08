@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import {
   projectSizeOptions,
   riskLevelOptions,
@@ -59,7 +60,22 @@ export function ProjectForm({
   const [error, setError] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const isDirty =
+    form.projectName.trim() !== "" ||
+    form.customerName.trim() !== "" ||
+    form.address.trim() !== "" ||
+    form.notes.trim() !== "";
+
+  function handleAttemptClose() {
+    if (isDirty) {
+      setShowConfirm(true);
+    } else {
+      onCancel();
+    }
+  }
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -151,7 +167,7 @@ export function ProjectForm({
 
   return (
     <div
-      onClick={onCancel}
+      onClick={handleAttemptClose}
       className="fixed inset-0 z-50 bg-[#213343]/20 px-4 py-6 backdrop-blur-sm sm:px-6"
     >
       <div
@@ -282,9 +298,33 @@ export function ProjectForm({
           <p className="px-5 pb-2 text-sm text-red-600 sm:px-6">{error}</p>
         ) : null}
 
+        {/* Discard confirmation */}
+        {showConfirm && (
+          <div className="mx-5 mb-3 flex items-start gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 sm:mx-6">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-yellow-900">Discard unsaved changes?</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={onCancel}
+                  className="rounded-md bg-yellow-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-yellow-800"
+                >
+                  Yes, discard
+                </button>
+                <button
+                  onClick={() => setShowConfirm(false)}
+                  className="rounded-md border border-yellow-300 px-3 py-1.5 text-xs font-medium text-yellow-800 transition hover:bg-yellow-100"
+                >
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 border-t border-[#d9e2ec] p-5 sm:p-6">
           <button
-            onClick={onCancel}
+            onClick={handleAttemptClose}
             className="rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
           >
             Cancel

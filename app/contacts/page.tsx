@@ -87,7 +87,7 @@ export default function ContactsPage() {
     <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
       <AppSidebar />
 
-      <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
+      <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header>
             <p className="text-sm font-medium text-gray-500">Contacts</p>
@@ -174,15 +174,39 @@ export default function ContactsPage() {
                 className="w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
               />
 
-              <div className="mt-5 overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white">
-                <div className="grid min-w-[760px] grid-cols-[1.4fr_1fr_1fr_1.3fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+              {/* Mobile cards */}
+              <div className="mt-4 space-y-2 sm:hidden">
+                {filteredContacts.map((contact) => (
+                  <button
+                    key={contact.id}
+                    onClick={() => setSelectedContactId(contact.id)}
+                    className="w-full rounded-lg border border-[#d9e2ec] bg-white p-4 text-left transition hover:bg-[#f6f8fb]"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-black">{contact.name}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{contact.customerType}</p>
+                      </div>
+                      <span className="shrink-0 text-xs text-gray-400">{contact.createdAt}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600">
+                      {contact.phone && <span>{contact.phone}</span>}
+                      {contact.email && <span className="truncate">{contact.email}</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="mt-5 hidden overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white sm:block">
+                <div className="grid min-w-190 grid-cols-[1.4fr_1fr_1fr_1.3fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
                   <span>Name</span>
                   <span>Type</span>
                   <span>Phone</span>
                   <span>Email</span>
                   <span>Created</span>
                 </div>
-                <div className="min-w-[760px] divide-y divide-gray-100">
+                <div className="min-w-190 divide-y divide-gray-100">
                   {filteredContacts.map((contact) => (
                     <button
                       key={contact.id}
@@ -190,20 +214,12 @@ export default function ContactsPage() {
                       className="grid w-full grid-cols-[1.4fr_1fr_1fr_1.3fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                     >
                       <div className="min-w-0">
-                        <p className="truncate font-medium text-black">
-                          {contact.name}
-                        </p>
-                        <p className="mt-1 truncate text-gray-500">
-                          {contact.address || "No address"}
-                        </p>
+                        <p className="truncate font-medium text-black">{contact.name}</p>
+                        <p className="mt-1 truncate text-gray-500">{contact.address || "No address"}</p>
                       </div>
                       <span>{contact.customerType}</span>
-                      <span className="text-gray-600">
-                        {contact.phone || "No phone"}
-                      </span>
-                      <span className="truncate text-gray-600">
-                        {contact.email || "No email"}
-                      </span>
+                      <span className="text-gray-600">{contact.phone || "No phone"}</span>
+                      <span className="truncate text-gray-600">{contact.email || "No email"}</span>
                       <span>{contact.createdAt}</span>
                     </button>
                   ))}

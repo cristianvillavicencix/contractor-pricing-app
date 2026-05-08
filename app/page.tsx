@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { ArrowRight, TrendingUp } from "lucide-react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   formatMargin,
@@ -14,6 +16,15 @@ import {
 import { useLocalStorageState } from "@/lib/use-local-storage";
 
 export default function DashboardPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(storageKeys.onboarding) !== "completed") {
+        router.replace("/onboarding");
+      }
+    } catch { /* SSR */ }
+  }, [router]);
   const [projects] = useLocalStorageState<Project[]>(
     storageKeys.projects,
     initialProjects
@@ -25,7 +36,6 @@ export default function DashboardPage() {
     (p) => p.status !== "Won" && p.status !== "Lost"
   );
   const wonProjects = projects.filter((p) => p.status === "Won");
-  const quotedProjects = projects.filter((p) => p.status === "Quoted");
   const pendingQuotes = quotes.filter(
     (q) => q.status === "Draft" || q.status === "Sent"
   );
@@ -33,7 +43,7 @@ export default function DashboardPage() {
   const winRate =
     quotes.length > 0 ? acceptedQuotes.length / quotes.length : 0;
 
-  const pipelineValue = quotedProjects.reduce((sum, p) => {
+  const pipelineValue = activeProjects.reduce((sum, p) => {
     const matchedQuote = quotes
       .filter((q) => q.projectId === p.id)
       .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))[0];
@@ -62,7 +72,7 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
       <AppSidebar />
 
-      <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
+      <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
@@ -88,7 +98,7 @@ export default function DashboardPage() {
             <MetricCard
               label="Pipeline Value"
               value={formatMoney(pipelineValue)}
-              detail={`${quotedProjects.length} quoted project${quotedProjects.length !== 1 ? "s" : ""}`}
+              detail={`${activeProjects.length} active project${activeProjects.length !== 1 ? "s" : ""}`}
               accent
             />
             <MetricCard

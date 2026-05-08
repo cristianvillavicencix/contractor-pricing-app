@@ -64,7 +64,7 @@ export default function QuotesPage() {
     <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
       <AppSidebar />
 
-      <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
+      <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
@@ -101,42 +101,73 @@ export default function QuotesPage() {
           </section>
 
           {filteredQuotes.length > 0 ? (
-            <section className="mt-6 overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white">
-              <div className="grid min-w-215 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
-                <span>Quote</span>
-                <span>Status</span>
-                <span>Selected</span>
-                <span>Sale Price</span>
-                <span>Profit</span>
-                <span>Margin</span>
-              </div>
-              <div className="min-w-215 divide-y divide-gray-100">
+            <section className="mt-6">
+              {/* Mobile cards */}
+              <div className="space-y-2 sm:hidden">
                 {filteredQuotes.map((quote) => {
                   const selected = getSelectedResult(quote);
                   return (
                     <button
                       key={quote.id}
                       onClick={() => setSelectedQuoteId(quote.id)}
-                      className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                      className="w-full rounded-lg border border-[#d9e2ec] bg-white p-4 text-left transition hover:bg-[#f6f8fb]"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium text-black">
-                          {quote.projectName}
-                        </p>
-                        <p className="mt-1 truncate text-gray-500">
-                          {quote.customerName} · expires {quote.expiresAt}
-                        </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-black">{quote.projectName}</p>
+                          <p className="mt-0.5 truncate text-xs text-gray-500">{quote.customerName}</p>
+                        </div>
+                        <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
+                          quote.status === "Accepted" ? "bg-green-50 text-green-700" :
+                          quote.status === "Sent" ? "bg-blue-50 text-blue-700" :
+                          quote.status === "Declined" ? "bg-red-50 text-red-700" :
+                          "bg-gray-100 text-gray-600"
+                        }`}>{quote.status}</span>
                       </div>
-                      <span className="text-gray-600">{quote.status}</span>
-                      <span>{quote.selectedOption}</span>
-                      <span className="font-medium">
-                        {formatMoney(selected.salePrice)}
-                      </span>
-                      <span>{formatMoney(selected.profit)}</span>
-                      <span>{formatMargin(selected.margin)}</span>
+                      <div className="mt-2.5 flex items-center gap-3 text-sm">
+                        <span className="font-semibold">{formatMoney(selected.salePrice)}</span>
+                        <span className="text-gray-400">·</span>
+                        <span className="text-gray-600">{formatMargin(selected.margin)} margin</span>
+                        <span className="text-gray-400">·</span>
+                        <span className="text-gray-500">{quote.selectedOption}</span>
+                      </div>
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white sm:block">
+                <div className="grid min-w-215 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+                  <span>Quote</span>
+                  <span>Status</span>
+                  <span>Selected</span>
+                  <span>Sale Price</span>
+                  <span>Profit</span>
+                  <span>Margin</span>
+                </div>
+                <div className="min-w-215 divide-y divide-gray-100">
+                  {filteredQuotes.map((quote) => {
+                    const selected = getSelectedResult(quote);
+                    return (
+                      <button
+                        key={quote.id}
+                        onClick={() => setSelectedQuoteId(quote.id)}
+                        className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-black">{quote.projectName}</p>
+                          <p className="mt-1 truncate text-gray-500">{quote.customerName} · expires {quote.expiresAt}</p>
+                        </div>
+                        <span className="text-gray-600">{quote.status}</span>
+                        <span>{quote.selectedOption}</span>
+                        <span className="font-medium">{formatMoney(selected.salePrice)}</span>
+                        <span>{formatMoney(selected.profit)}</span>
+                        <span>{formatMargin(selected.margin)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </section>
           ) : (

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronUp, FolderPlus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, FolderPlus, RotateCcw, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   defaultSettings,
@@ -19,10 +19,15 @@ import {
   storageKeys,
   strategyOptions,
   tradeOptions,
+  TYPICAL_COSTS,
   type AppSettings,
+  type CompanyLevel,
   type Contact,
   type Project,
+  type ProjectSize,
   type ProjectState,
+  type RiskLevel,
+  type Strategy,
   type Trade,
 } from "@/lib/app-data";
 import {
@@ -36,6 +41,17 @@ import {
   useLocalStorageState,
   writeLocalStorage,
 } from "@/lib/use-local-storage";
+
+const STATE_ABBR: Record<string, string> = {
+  Alabama: "AL", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO",
+  Connecticut: "CT", Florida: "FL", Georgia: "GA", Idaho: "ID", Illinois: "IL",
+  Indiana: "IN", Iowa: "IA", Kansas: "KS", Kentucky: "KY", Louisiana: "LA",
+  Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN", Mississippi: "MS",
+  Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV", "New Jersey": "NJ",
+  "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", Ohio: "OH", Oklahoma: "OK",
+  Oregon: "OR", Pennsylvania: "PA", "South Carolina": "SC", Tennessee: "TN", Texas: "TX",
+  Utah: "UT", Virginia: "VA", Washington: "WA", "West Virginia": "WV", Wisconsin: "WI",
+};
 
 const defaultInput: PricingEngineInput = {
   costs: {
@@ -141,20 +157,45 @@ function createInputFromSettings(
 }
 
 function getPricingRules(settings: AppSettings): PricingEngineInput["pricingRules"] {
+  const pd = settings.pricingDefaults;
   return {
     baseMargins: {
-      Good: settings.pricingDefaults.goodMargin / 100,
-      Better: settings.pricingDefaults.betterMargin / 100,
-      Best: settings.pricingDefaults.bestMargin / 100,
+      Good: pd.goodMargin / 100,
+      Better: pd.betterMargin / 100,
+      Best: pd.bestMargin / 100,
     },
-    minimumSafeMargin: settings.pricingDefaults.minimumSafeMargin / 100,
-    stateAdjustments: {
-      Connecticut: settings.marketLocation.stateAdjustments.Connecticut / 100,
-      "New York": settings.marketLocation.stateAdjustments.NewYork / 100,
-      "New Jersey": settings.marketLocation.stateAdjustments.NewJersey / 100,
-      Florida: settings.marketLocation.stateAdjustments.Florida / 100,
-      Texas: settings.marketLocation.stateAdjustments.Texas / 100,
-    },
+    minimumSafeMargin: pd.minimumSafeMargin / 100,
+    stateAdjustments: Object.fromEntries(
+      stateOptions.map((s) => [s, (settings.marketLocation.stateAdjustments[s] ?? 0) / 100])
+    ) as Record<ProjectState, number>,
+    tradeAdjustments: Object.fromEntries(
+      tradeOptions.map((t) => [t, (pd.tradeAdjustments[t] ?? 0) / 100])
+    ) as Record<Trade, number>,
+    sizeAdjustments: Object.fromEntries(
+      projectSizeOptions.map((s) => [s, (pd.sizeAdjustments[s] ?? 0) / 100])
+    ) as Record<ProjectSize, number>,
+    riskAdjustments: Object.fromEntries(
+      riskLevelOptions.map((r) => [r, (pd.riskAdjustments[r] ?? 0) / 100])
+    ) as Record<RiskLevel, number>,
+    strategyAdjustments: Object.fromEntries(
+      strategyOptions.map((s) => [s, (pd.strategyAdjustments[s] ?? 0) / 100])
+    ) as Record<Strategy, number>,
+    companyAdjustments: Object.fromEntries(
+      companyLevelOptions.map((c) => [c, (pd.companyAdjustments[c] ?? 0) / 100])
+    ) as Record<CompanyLevel, number>,
+    thresholds: settings.pricingThresholds ? {
+      riskyMargin: settings.pricingThresholds.riskyMarginPercent / 100,
+      tightMargin: settings.pricingThresholds.tightMarginPercent / 100,
+      safePriceCushion: 1 + settings.pricingThresholds.safePriceCushionPercent / 100,
+      warningMarginLow: settings.pricingThresholds.warningMarginLowPercent / 100,
+      warningMarginHigh: settings.pricingThresholds.warningMarginHighPercent / 100,
+      warningCommission: settings.pricingThresholds.warningCommissionPercent / 100,
+      warningFeeProfit: settings.pricingThresholds.warningFeeProfitPercent / 100,
+      safeMarginRiskBonus: settings.pricingThresholds.safeMarginRiskBonusPercent / 100,
+      safeMarginSmallBonus: settings.pricingThresholds.safeMarginSmallBonusPercent / 100,
+      marginClampMin: settings.pricingThresholds.marginClampMinPercent / 100,
+      marginClampMax: settings.pricingThresholds.marginClampMaxPercent / 100,
+    } : undefined,
   };
 }
 
@@ -168,18 +209,21 @@ type ProjectDraft = {
   city: string;
 };
 
+const emptyDraft: ProjectDraft = {
+  contactId: "",
+  projectName: "",
+  customerName: "",
+  customerPhone: "",
+  customerEmail: "",
+  address: "",
+  city: "",
+};
+
 export default function PricingPage() {
   const router = useRouter();
   const [showProjectModal, setShowProjectModal] = useState(false);
-  const [projectDraft, setProjectDraft] = useState<ProjectDraft>({
-    contactId: "",
-    projectName: "",
-    customerName: "",
-    customerPhone: "",
-    customerEmail: "",
-    address: "",
-    city: "",
-  });
+  const [showModalConfirm, setShowModalConfirm] = useState(false);
+  const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyDraft);
   const [projectError, setProjectError] = useState("");
   const [settings] = useLocalStorageState<AppSettings>(
     storageKeys.settings,
@@ -206,6 +250,35 @@ export default function PricingPage() {
   const result = useMemo(() => calculatePricingEngine(input), [input]);
   const baseCost = result.baseCost;
   const hasResults = baseCost > 0;
+
+  // Cost breakdown percentages
+  const matAmt = input.costs.material;
+  const labAmt = input.costs.labor;
+  const othAmt = baseCost - matAmt - labAmt;
+  const matPct = baseCost > 0 ? Math.round((matAmt / baseCost) * 100) : 0;
+  const labPct = baseCost > 0 ? Math.round((labAmt / baseCost) * 100) : 0;
+  const othPct = baseCost > 0 ? Math.max(0, 100 - matPct - labPct) : 0;
+
+  // Modal dirty check
+  const isModalDirty =
+    projectDraft.projectName.trim() !== "" ||
+    projectDraft.customerName.trim() !== "" ||
+    projectDraft.address.trim() !== "";
+
+  function handleAttemptCloseModal() {
+    if (isModalDirty) {
+      setShowModalConfirm(true);
+    } else {
+      closeModal();
+    }
+  }
+
+  function closeModal() {
+    setShowProjectModal(false);
+    setShowModalConfirm(false);
+    setProjectDraft(emptyDraft);
+    setProjectError("");
+  }
 
   function reset() {
     setInput(createInputFromSettings(mergedSettings));
@@ -267,9 +340,7 @@ export default function PricingPage() {
       createdAt: getTodayLabel(),
     };
     writeLocalStorage(storageKeys.projects, [newProject, ...existing]);
-    setShowProjectModal(false);
-    setProjectDraft({ contactId: "", projectName: "", customerName: "", customerPhone: "", customerEmail: "", address: "", city: "" });
-    setProjectError("");
+    closeModal();
     router.push(`/projects?projectId=${newProject.id}`);
   }
 
@@ -319,9 +390,7 @@ export default function PricingPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-gray-500">Calculator</p>
-              <h2 className="mt-1 text-2xl font-semibold tracking-tight">
-                Quick Pricing
-              </h2>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight">Quick Pricing</h2>
               {sourceProject && (
                 <p className="mt-1 text-sm text-gray-500">
                   From project:{" "}
@@ -349,12 +418,47 @@ export default function PricingPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[380px_1fr]">
+          <div className="mt-6 grid gap-6 xl:grid-cols-[400px_1fr]">
             {/* ── Left: inputs ── */}
             <div className="space-y-4">
-              {/* Cost inputs */}
+              {/* Job setup + costs in one card */}
               <div className="rounded-lg border border-[#d9e2ec] bg-white p-5">
-                <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                {/* Job Setup — always visible */}
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Job Setup
+                </p>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                  <CompactSelect
+                    label="Trade"
+                    value={input.setup.trade}
+                    options={tradeOptions}
+                    onChange={(v) => updateSetup("trade", v as PricingEngineInput["setup"]["trade"])}
+                  />
+                  <CompactSelect
+                    label="State"
+                    value={input.setup.state}
+                    options={stateOptions}
+                    displayMap={STATE_ABBR}
+                    onChange={(v) => updateSetup("state", v as PricingEngineInput["setup"]["state"])}
+                  />
+                  <CompactSelect
+                    label="Size"
+                    value={input.setup.projectSize}
+                    options={projectSizeOptions}
+                    onChange={(v) => updateSetup("projectSize", v as PricingEngineInput["setup"]["projectSize"])}
+                  />
+                  <CompactSelect
+                    label="Risk"
+                    value={input.setup.riskLevel}
+                    options={riskLevelOptions}
+                    onChange={(v) => updateSetup("riskLevel", v as PricingEngineInput["setup"]["riskLevel"])}
+                  />
+                </div>
+
+                <div className="my-4 border-t border-[#f0f4f8]" />
+
+                {/* Cost inputs */}
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                   Project Costs
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -366,41 +470,97 @@ export default function PricingPage() {
                   <MoneyInput label="Subcontractor" value={input.costs.subcontractor} onChange={(v) => updateCost("subcontractor", v)} />
                   <MoneyInput label="Miscellaneous" value={input.costs.miscellaneous} onChange={(v) => updateCost("miscellaneous", v)} className="sm:col-span-2" />
                 </div>
+
+                {/* Cost summary + breakdown */}
                 {baseCost > 0 && (
-                  <div className="mt-4 flex items-center justify-between border-t border-[#f0f4f8] pt-3">
-                    <span className="text-sm text-gray-500">Total Cost</span>
-                    <span className="text-base font-semibold">{formatMoney(baseCost)}</span>
+                  <div className="mt-4 border-t border-[#f0f4f8] pt-3 space-y-3">
+                    {/* Total row */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-500">Total Direct Cost</span>
+                      <span className="text-base font-semibold">{formatMoney(baseCost)}</span>
+                    </div>
+
+                    {/* Stacked breakdown bar */}
+                    {(matAmt > 0 || labAmt > 0) && (
+                      <div>
+                        <div className="flex h-2 overflow-hidden rounded-full bg-[#f0f4f8]">
+                          {matPct > 0 && (
+                            <div
+                              style={{ width: `${matPct}%` }}
+                              className="bg-blue-400 transition-all"
+                            />
+                          )}
+                          {labPct > 0 && (
+                            <div
+                              style={{ width: `${labPct}%` }}
+                              className="bg-orange-400 transition-all"
+                            />
+                          )}
+                          {othPct > 0 && (
+                            <div
+                              style={{ width: `${othPct}%` }}
+                              className="bg-gray-300 transition-all"
+                            />
+                          )}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+                          {matAmt > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
+                              Materials {matPct}%
+                            </span>
+                          )}
+                          {labAmt > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block h-2 w-2 rounded-full bg-orange-400" />
+                              Labor {labPct}%
+                            </span>
+                          )}
+                          {othAmt > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
+                              Other {othPct}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Typical cost hint */}
+                    <TypicalCostHint
+                      trade={input.setup.trade}
+                      size={input.setup.projectSize}
+                      baseCost={baseCost}
+                    />
                   </div>
                 )}
               </div>
 
-              {/* Advanced accordion */}
+              {/* Business Rules (Advanced) */}
               <div className="rounded-lg border border-[#d9e2ec] bg-white">
                 <button
                   onClick={() => setAdvancedOpen((v) => !v)}
                   className="flex w-full items-center justify-between px-5 py-3.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
                 >
-                  <span>Advanced Options</span>
-                  {advancedOpen ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                  <span>Business Rules</span>
+                  {advancedOpen
+                    ? <ChevronUp className="h-4 w-4 text-gray-400" />
+                    : <ChevronDown className="h-4 w-4 text-gray-400" />}
                 </button>
                 {advancedOpen && (
-                  <div className="border-t border-[#d9e2ec] px-5 pb-5 pt-4 space-y-5">
-                    {/* Setup */}
+                  <div className="space-y-5 border-t border-[#d9e2ec] px-5 pb-5 pt-4">
+                    {/* Strategy + Company Level */}
                     <div>
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Project Setup</p>
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Pricing Strategy</p>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <SelectInput label="Trade" value={input.setup.trade} options={tradeOptions} onChange={(v) => updateSetup("trade", v as PricingEngineInput["setup"]["trade"])} />
-                        <SelectInput label="State" value={input.setup.state} options={stateOptions} onChange={(v) => updateSetup("state", v as PricingEngineInput["setup"]["state"])} />
-                        <SelectInput label="Company Level" value={input.setup.companyLevel} options={companyLevelOptions} onChange={(v) => updateSetup("companyLevel", v as PricingEngineInput["setup"]["companyLevel"])} />
-                        <SelectInput label="Project Size" value={input.setup.projectSize} options={projectSizeOptions} onChange={(v) => updateSetup("projectSize", v as PricingEngineInput["setup"]["projectSize"])} />
-                        <SelectInput label="Risk Level" value={input.setup.riskLevel} options={riskLevelOptions} onChange={(v) => updateSetup("riskLevel", v as PricingEngineInput["setup"]["riskLevel"])} />
                         <SelectInput label="Strategy" value={input.setup.strategy} options={strategyOptions} onChange={(v) => updateSetup("strategy", v as PricingEngineInput["setup"]["strategy"])} />
+                        <SelectInput label="Company Level" value={input.setup.companyLevel} options={companyLevelOptions} onChange={(v) => updateSetup("companyLevel", v as PricingEngineInput["setup"]["companyLevel"])} />
                       </div>
                     </div>
 
                     {/* Business costs */}
                     <div>
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Business Costs</p>
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Overhead & Fees</p>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <SelectInput label="Overhead Method" value={input.businessCosts.overheadAllocationMethod} options={["Percentage", "Flat Per Project", "Project Duration", "Ignore For Now"]} onChange={(v) => updateBiz("overheadAllocationMethod", v as PricingEngineInput["businessCosts"]["overheadAllocationMethod"])} />
                         <NumberInput label="Minimum Job $" value={input.businessCosts.minimumJobPrice} onChange={(v) => updateBiz("minimumJobPrice", v)} />
@@ -450,8 +610,9 @@ export default function PricingPage() {
             {/* ── Right: results ── */}
             <div className="space-y-4">
               {!hasResults ? (
-                <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-[#d9e2ec] bg-white">
-                  <p className="text-sm text-gray-400">Enter costs to see pricing</p>
+                <div className="flex h-52 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-[#d9e2ec] bg-white">
+                  <p className="text-sm font-medium text-gray-500">Enter your costs to see pricing</p>
+                  <p className="text-xs text-gray-400">Trade: {input.setup.trade} · {input.setup.projectSize} · {input.setup.state}</p>
                 </div>
               ) : (
                 <>
@@ -464,14 +625,27 @@ export default function PricingPage() {
 
                   {/* Reference row */}
                   <div className="grid gap-4 sm:grid-cols-3">
-                    <RefBox label="Base Cost" value={formatMoney(baseCost)} sub={`Mat ${formatMoney(input.costs.material)} · Labor ${formatMoney(input.costs.labor)}`} />
-                    <RefBox label="Breakeven" value={formatMoney(result.breakevenPrice)} sub={`Overhead ${formatMoney(result.overheadCost)} · Burden ${formatMoney(result.laborBurdenCost)}`} />
-                    <RefBox label="Min Safe Price" value={formatMoney(result.minimumSafePrice)} sub={`${formatMargin(result.minimumSafeMargin)} min · Floor ${formatMoney(input.businessCosts.minimumJobPrice)}`} />
+                    <RefBox
+                      label="Base Cost"
+                      value={formatMoney(baseCost)}
+                      sub={`Mat ${formatMoney(input.costs.material)} · Labor ${formatMoney(input.costs.labor)}`}
+                    />
+                    <RefBox
+                      label="Breakeven"
+                      value={formatMoney(result.breakevenPrice)}
+                      sub={`Overhead ${formatMoney(result.overheadCost)} · Burden ${formatMoney(result.laborBurdenCost)}`}
+                    />
+                    <RefBox
+                      label="Min Safe Price"
+                      value={formatMoney(result.minimumSafePrice)}
+                      sub={`${formatMargin(result.minimumSafeMargin)} min · Floor ${formatMoney(input.businessCosts.minimumJobPrice)}`}
+                    />
                   </div>
 
+                  {/* Cost Protection */}
                   <div className="rounded-lg border border-[#d9e2ec] bg-white p-4">
                     <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Cost Protection
+                      Cost Protection (added to base)
                     </p>
                     <div className="grid gap-2 text-sm sm:grid-cols-2">
                       <Row label="Labor burden" value={formatMoney(result.laborBurdenCost)} />
@@ -507,7 +681,7 @@ export default function PricingPage() {
       {/* Create Project Modal */}
       {showProjectModal && (
         <div
-          onClick={() => setShowProjectModal(false)}
+          onClick={handleAttemptCloseModal}
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#213343]/30 px-4 backdrop-blur-sm"
         >
           <div
@@ -518,11 +692,11 @@ export default function PricingPage() {
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">Create Project</h3>
                 <p className="mt-0.5 text-sm text-gray-500">
-                  Saves this pricing as a new project · {input.setup.trade} · {input.setup.state}
+                  {input.setup.trade} · {input.setup.state} · {input.setup.projectSize} · Total cost {formatMoney(result.baseCost)}
                 </p>
               </div>
               <button
-                onClick={() => setShowProjectModal(false)}
+                onClick={handleAttemptCloseModal}
                 className="rounded-md p-1.5 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-black"
               >
                 <X className="h-4 w-4" />
@@ -546,58 +720,45 @@ export default function PricingPage() {
                   ))}
                 </select>
               </label>
-              <ModalField
-                label="Project name *"
-                value={projectDraft.projectName}
-                placeholder="e.g. Roof replacement"
-                onChange={(v) => setProjectDraft((d) => ({ ...d, projectName: v }))}
-                className="sm:col-span-2"
-              />
-              <ModalField
-                label="Customer name *"
-                value={projectDraft.customerName}
-                placeholder="Full name"
-                onChange={(v) => setProjectDraft((d) => ({ ...d, customerName: v }))}
-              />
-              <ModalField
-                label="Customer phone"
-                value={projectDraft.customerPhone}
-                placeholder="(000) 000-0000"
-                onChange={(v) => setProjectDraft((d) => ({ ...d, customerPhone: v }))}
-              />
-              <ModalField
-                label="Customer email"
-                value={projectDraft.customerEmail}
-                placeholder="email@example.com"
-                onChange={(v) => setProjectDraft((d) => ({ ...d, customerEmail: v }))}
-              />
-              <ModalField
-                label="Address"
-                value={projectDraft.address}
-                placeholder="Street address"
-                onChange={(v) => setProjectDraft((d) => ({ ...d, address: v }))}
-              />
-              <ModalField
-                label="City"
-                value={projectDraft.city}
-                placeholder="City"
-                onChange={(v) => setProjectDraft((d) => ({ ...d, city: v }))}
-              />
-
-              {/* Pre-filled summary */}
-              <div className="sm:col-span-2 rounded-lg border border-[#d9e2ec] bg-[#f6f8fb] px-4 py-3 text-xs text-gray-500">
-                <span className="font-semibold text-gray-700">Pre-filled from calculator: </span>
-                Trade: {input.setup.trade} · State: {input.setup.state} · Size: {input.setup.projectSize} · Risk: {input.setup.riskLevel} · Total cost: {formatMoney(result.baseCost)}
-              </div>
+              <ModalField label="Project name *" value={projectDraft.projectName} placeholder="e.g. Roof replacement" onChange={(v) => setProjectDraft((d) => ({ ...d, projectName: v }))} className="sm:col-span-2" />
+              <ModalField label="Customer name *" value={projectDraft.customerName} placeholder="Full name" onChange={(v) => setProjectDraft((d) => ({ ...d, customerName: v }))} />
+              <ModalField label="Customer phone" value={projectDraft.customerPhone} placeholder="(000) 000-0000" onChange={(v) => setProjectDraft((d) => ({ ...d, customerPhone: v }))} />
+              <ModalField label="Customer email" value={projectDraft.customerEmail} placeholder="email@example.com" onChange={(v) => setProjectDraft((d) => ({ ...d, customerEmail: v }))} />
+              <ModalField label="Address" value={projectDraft.address} placeholder="Street address" onChange={(v) => setProjectDraft((d) => ({ ...d, address: v }))} />
+              <ModalField label="City" value={projectDraft.city} placeholder="City" onChange={(v) => setProjectDraft((d) => ({ ...d, city: v }))} />
             </div>
 
             {projectError && (
               <p className="px-6 pb-2 text-sm text-red-600">{projectError}</p>
             )}
 
+            {/* Discard confirmation */}
+            {showModalConfirm && (
+              <div className="mx-6 mb-4 flex items-start gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-yellow-900">Discard unsaved changes?</p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={closeModal}
+                      className="rounded-md bg-yellow-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-yellow-800"
+                    >
+                      Yes, discard
+                    </button>
+                    <button
+                      onClick={() => setShowModalConfirm(false)}
+                      className="rounded-md border border-yellow-300 px-3 py-1.5 text-xs font-medium text-yellow-800 transition hover:bg-yellow-100"
+                    >
+                      Keep editing
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-end gap-3 border-t border-[#d9e2ec] px-6 py-4">
               <button
-                onClick={() => { setShowProjectModal(false); setProjectError(""); }}
+                onClick={handleAttemptCloseModal}
                 className="rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
               >
                 Cancel
@@ -616,6 +777,48 @@ export default function PricingPage() {
   );
 }
 
+/* ── Typical cost hint ── */
+function TypicalCostHint({ trade, size, baseCost }: { trade: string; size: string; baseCost: number }) {
+  const hint = TYPICAL_COSTS[trade as Trade]?.[size as ProjectSize];
+  if (!hint) return null;
+
+  const isLow = baseCost < hint.low * 0.7;
+  const isHigh = baseCost > hint.high * 1.5;
+
+  return (
+    <div className="flex items-center justify-between gap-2 text-[11px]">
+      <span className="text-gray-400">
+        Typical {trade} ({size}): {formatMoney(hint.low)}–{formatMoney(hint.high)}
+        <span className="mx-1 text-gray-300">·</span>
+        {hint.note}
+      </span>
+      {isLow && (
+        <span className="shrink-0 font-semibold text-yellow-600">↓ Below range</span>
+      )}
+      {isHigh && (
+        <span className="shrink-0 font-semibold text-orange-600">↑ Above range</span>
+      )}
+    </div>
+  );
+}
+
+/* ── Compact select for job setup ── */
+function CompactSelect({ label, value, options, onChange, displayMap }: { label: string; value: string; options: readonly string[]; onChange: (v: string) => void; displayMap?: Record<string, string> }) {
+  return (
+    <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-2.5 py-2 text-sm font-normal normal-case tracking-normal text-[#213343] outline-none transition focus:border-[#111111]"
+      >
+        {options.map((o) => <option key={o} value={o}>{displayMap ? displayMap[o] ?? o : o}</option>)}
+      </select>
+    </label>
+  );
+}
+
+/* ── Modal field ── */
 function ModalField({ label, value, placeholder, onChange, className = "" }: { label: string; value: string; placeholder?: string; onChange: (v: string) => void; className?: string }) {
   return (
     <label className={`block text-xs font-medium text-gray-600 ${className}`}>

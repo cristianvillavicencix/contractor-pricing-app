@@ -37,6 +37,10 @@ export type QuoteDocument = {
   termsText: string;
   includedServices: string[];
   certifications: string[];
+  existingPhotos: string[];
+  existingPhotoCaptions: string[];
+  sectionOverrides: Partial<Record<string, boolean>>;
+  sectionLayouts: Partial<Record<string, string>>;
   certificationDocuments: {
     credentialName: string;
     fileName: string;
@@ -49,6 +53,8 @@ export type QuoteDocument = {
   betterPrice: number;
   bestPrice: number;
   selectedOption: "Good" | "Better" | "Best";
+  pricingDescriptions: Record<"Good" | "Better" | "Best", string>;
+  tradeServiceSuggestions: string[];
 };
 
 export const defaultCertifications = [
@@ -72,6 +78,15 @@ export const pricingDescriptions: Record<"Good" | "Better" | "Best", string> = {
   Better: "Recommended option with balanced value and quality.",
   Best: "Premium option for enhanced service and long-term value.",
 };
+
+export function getPricingDescriptions(settings: AppSettings): Record<"Good" | "Better" | "Best", string> {
+  const merged = mergeAppSettings(settings);
+  return {
+    Good: merged.proposalSettings.goodDescription || pricingDescriptions.Good,
+    Better: merged.proposalSettings.betterDescription || pricingDescriptions.Better,
+    Best: merged.proposalSettings.bestDescription || pricingDescriptions.Best,
+  };
+}
 
 export function buildQuoteDocument(
   quote: Quote,
@@ -116,8 +131,12 @@ export function buildQuoteDocument(
     warrantyText:
       quote.warrantyText || mergedSettings.proposalSettings.defaultWarrantyText,
     termsText: quote.termsText || mergedSettings.proposalSettings.defaultTerms,
-    includedServices: quote.includedServices ?? defaultIncludedServices,
+    includedServices: quote.includedServices ?? mergedSettings.proposalSettings.defaultIncludedServices ?? defaultIncludedServices,
     certifications,
+    existingPhotos: [],
+    existingPhotoCaptions: [],
+    sectionOverrides: quote.sectionOverrides ?? {},
+    sectionLayouts: quote.sectionLayouts ?? {},
     certificationDocuments: mergedSettings.proposalSettings.showCertifications
       ? getEnabledCompanyCredentialDocuments(mergedSettings).filter((document) =>
           certifications.includes(document.credentialName)
@@ -128,6 +147,8 @@ export function buildQuoteDocument(
     betterPrice: quote.better.salePrice,
     bestPrice: quote.best.salePrice,
     selectedOption: quote.selectedOption,
+    pricingDescriptions: getPricingDescriptions(settings),
+    tradeServiceSuggestions: mergedSettings.contentDefaults.tradeServices[quote.trade ?? ""] ?? [],
   };
 }
 

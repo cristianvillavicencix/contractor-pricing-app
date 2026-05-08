@@ -200,15 +200,12 @@ export function ProjectDetailPanel({
           Best: mergedSettings.pricingDefaults.bestMargin / 100,
         },
         minimumSafeMargin: mergedSettings.pricingDefaults.minimumSafeMargin / 100,
-        stateAdjustments: {
-          Connecticut:
-            mergedSettings.marketLocation.stateAdjustments.Connecticut / 100,
-          "New York": mergedSettings.marketLocation.stateAdjustments.NewYork / 100,
-          "New Jersey":
-            mergedSettings.marketLocation.stateAdjustments.NewJersey / 100,
-          Florida: mergedSettings.marketLocation.stateAdjustments.Florida / 100,
-          Texas: mergedSettings.marketLocation.stateAdjustments.Texas / 100,
-        },
+        stateAdjustments: Object.fromEntries(
+          stateOptions.map((s) => [
+            s,
+            (mergedSettings.marketLocation.stateAdjustments[s] ?? 0) / 100,
+          ])
+        ) as Record<import("@/lib/app-data").ProjectState, number>,
       },
     }),
     [

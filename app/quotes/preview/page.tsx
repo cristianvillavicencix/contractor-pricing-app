@@ -1,30 +1,35 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
   Download,
+  Edit3,
+  ExternalLink,
   Eye,
   EyeOff,
+  FileText,
+  GripVertical,
   ImagePlus,
+  Plus,
   Printer,
+  Trash2,
   X,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { QuotePreview } from "@/components/quotes/quote-preview";
 import {
   buildQuoteDocument,
   defaultIncludedServices,
-  TRADE_SERVICES,
   type CoverLayout,
   type QuoteDocument,
 } from "@/lib/pdf-generator";
 import { ScopeWizard } from "@/components/quotes/scope-wizard";
 import {
   defaultSettings,
+  formatMoney,
   getEnabledCompanyCredentialDocuments,
   getEnabledCompanyCredentials,
   mergeAppSettings,
@@ -34,10 +39,34 @@ import {
   type Quote,
 } from "@/lib/app-data";
 import { readLocalStorage, writeLocalStorage } from "@/lib/use-local-storage";
+import {
+  mergeProposalTemplates,
+  PROPOSAL_SECTIONS,
+  type CustomSection,
+  type MaterialItem,
+  type TimelinePhase,
+  type ProposalTemplate,
+} from "@/lib/proposal-templates";
+import { ProposalDocument } from "@/components/proposals/proposal-document";
+import type {
+  SectionLayouts,
+  SectionOverrides,
+} from "@/components/proposals/proposal-document";
+import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
 
 type ServiceItem = { name: string; visible: boolean };
+type QuotePhotos = {
+  coverImageUrl: string | null;
+  existingPhotos: string[];
+  existingPhotoCaptions?: string[];
+  coverLayout?: CoverLayout;
+};
 
 const SERVICES_COLLAPSE_AT = 6;
+
+function quotePhotosKey(id: string) {
+  return `contractor-pricing-app:quote-photos:${id}`;
+}
 
 const COVER_LAYOUTS: { id: CoverLayout; label: string }[] = [
   { id: "full", label: "Full" },
@@ -66,7 +95,7 @@ function QuotePreviewContent() {
     quote?.termsText ?? settings.proposalSettings.defaultTerms
   );
   const [services, setServices] = useState<ServiceItem[]>(() =>
-    (quote?.includedServices ?? defaultIncludedServices).map((name) => ({
+    (quote?.includedServices ?? settings.proposalSettings.defaultIncludedServices ?? defaultIncludedServices).map((name) => ({
       name,
       visible: true,
     }))
@@ -77,24 +106,86 @@ function QuotePreviewContent() {
       visible: true,
     }))
   );
+  const [sectionOverrides, setSectionOverrides] = useState<SectionOverrides>(
+    () => quote?.sectionOverrides ?? {}
+  );
+  const [sectionLayouts, setSectionLayouts] = useState<SectionLayouts>(
+    () => quote?.sectionLayouts ?? {}
+  );
+  const [sectionOrder, setSectionOrder] = useState<string[]>(
+    () => quote?.sectionOrder ?? PROPOSAL_SECTIONS.map((s) => s.id)
+  );
+  const [customSections, setCustomSections] = useState<CustomSection[]>(
+    () => quote?.customSections ?? []
+  );
 
   const [showAllServices, setShowAllServices] = useState(false);
   const [newService, setNewService] = useState("");
   const [newCert, setNewCert] = useState("");
-  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(() => {
+    if (!quoteId) return null;
+    return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), { coverImageUrl: null, existingPhotos: [] }).coverImageUrl;
+  });
   const [coverLayout, setCoverLayout] = useState<CoverLayout>(
-    settings.branding.proposalCoverLayout
+    () => {
+      if (!quoteId) return settings.branding.proposalCoverLayout;
+      return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), {
+        coverImageUrl: null,
+        existingPhotos: [],
+      }).coverLayout ?? settings.branding.proposalCoverLayout;
+    }
   );
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"edit" | "preview">("preview");
+  const [dragSectionIndex, setDragSectionIndex] = useState<number | null>(null);
+  const [dragOverSectionIndex, setDragOverSectionIndex] = useState<number | null>(null);
+  const isInitialized = useRef(false);
 
   // Collapsible panel state
   const [showScope, setShowScope] = useState(false);
   const [showServices, setShowServices] = useState(true);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showCerts, setShowCerts] = useState(true);
+  const [activeProposalSection, setActiveProposalSection] = useState<
+    string | null
+  >("cover");
 
+  // Proposal modal + photos + template editor
+  const [showProposalModal, setShowProposalModal] = useState(false);
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [existingPhotos, setExistingPhotos] = useState<string[]>(() => {
+    if (!quoteId) return [];
+    return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), { coverImageUrl: null, existingPhotos: [] }).existingPhotos;
+  });
+  const [existingPhotoCaptions, setExistingPhotoCaptions] = useState<string[]>(
+    () => {
+      if (!quoteId) return [];
+      return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), {
+        coverImageUrl: null,
+        existingPhotos: [],
+      }).existingPhotoCaptions ?? [];
+    }
+  );
+
+  const [proposalTemplate, setProposalTemplate] = useState<ProposalTemplate>(
+    () => {
+      const savedTemplates = readLocalStorage<ProposalTemplate[]>(
+        storageKeys.proposalTemplates,
+        []
+      );
+      const proposalTemplates = mergeProposalTemplates(savedTemplates);
+      return (
+        proposalTemplates.find((template) => template.trade === quote?.trade) ??
+        proposalTemplates[0]
+      );
+    }
+  );
+
+  const photoUploadRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
 
   if (!quote) {
     return (
@@ -118,6 +209,10 @@ function QuotePreviewContent() {
     certifications: settings.proposalSettings.showCertifications
       ? certs.filter((c) => c.visible).map((c) => c.name)
       : [],
+    existingPhotos,
+    existingPhotoCaptions,
+    sectionOverrides,
+    sectionLayouts,
     certificationDocuments: settings.proposalSettings.showCertifications
       ? getEnabledCompanyCredentialDocuments(settings).filter((document) =>
           certs.some(
@@ -126,10 +221,57 @@ function QuotePreviewContent() {
         )
       : [],
   };
+  const proposalQuote: Quote = {
+    ...quote,
+    scopeSummary: scope,
+    warrantyText: warranty,
+    termsText: terms,
+    includedServices: services.filter((s) => s.visible).map((s) => s.name),
+    certifications: certs.filter((c) => c.visible).map((c) => c.name),
+    sectionOverrides,
+    sectionLayouts,
+    sectionOrder,
+    customSections,
+  };
 
-  const tradeSuggestions = (TRADE_SERVICES[doc.trade] ?? []).filter(
+  const tradeSuggestions = (settings.contentDefaults.tradeServices[doc.trade] ?? doc.tradeServiceSuggestions ?? []).filter(
     (s) => !services.some((item) => item.name === s)
   );
+
+  useEffect(() => {
+    if (!activeProposalSection) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const container = previewScrollRef.current;
+      const target = container?.querySelector<HTMLElement>(
+        `[data-proposal-section="${activeProposalSection}"]`
+      );
+
+      target?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeProposalSection, sectionLayouts, sectionOverrides]);
+
+  // Mark dirty whenever any proposal content changes (skip first render)
+  useEffect(() => {
+    if (!isInitialized.current) { isInitialized.current = true; return; }
+    setIsDirty(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, warranty, terms, services, certs, sectionOverrides, sectionLayouts,
+      sectionOrder, customSections, existingPhotos, coverImageUrl, coverLayout, proposalTemplate]);
+
+  // Warn before closing/refreshing with unsaved changes
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
 
   function handleSave() {
     if (!quote) return;
@@ -143,10 +285,23 @@ function QuotePreviewContent() {
             termsText: terms,
             includedServices: services.filter((s) => s.visible).map((s) => s.name),
             certifications: certs.filter((c) => c.visible).map((c) => c.name),
+            sectionOverrides,
+            sectionLayouts,
+            sectionOrder,
+            customSections,
           }
         : q
     );
     writeLocalStorage(storageKeys.quotes, updated);
+    // Persist photos separately (base64 can be large — keep out of main quotes array)
+    writeLocalStorage<QuotePhotos>(quotePhotosKey(quote.id), {
+      coverImageUrl: coverImageUrl ?? null,
+      existingPhotos,
+      existingPhotoCaptions,
+      coverLayout,
+    });
+    persistTemplate(proposalTemplate);
+    setIsDirty(false);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
   }
@@ -171,6 +326,108 @@ function QuotePreviewContent() {
     };
     reader.readAsDataURL(file);
     e.target.value = "";
+  }
+
+  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const result = ev.target?.result;
+        if (typeof result === "string") setExistingPhotos((prev) => [...prev, result]);
+        if (typeof result === "string") {
+          setExistingPhotoCaptions((prev) => [...prev, ""]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  }
+
+  function handleTemplateSave(updated: ProposalTemplate) {
+    setProposalTemplate(updated);
+    persistTemplate(updated);
+    setShowTemplateEditor(false);
+  }
+
+  function persistTemplate(updated: ProposalTemplate) {
+    const all = readLocalStorage<ProposalTemplate[]>(storageKeys.proposalTemplates, []);
+    const idx = all.findIndex((t) => t.id === updated.id);
+    const next = idx >= 0 ? all.map((t, i) => (i === idx ? updated : t)) : [...all, updated];
+    writeLocalStorage(storageKeys.proposalTemplates, next);
+  }
+
+  function updateTemplate<K extends keyof ProposalTemplate>(
+    key: K,
+    value: ProposalTemplate[K]
+  ) {
+    setProposalTemplate((current) => ({
+      ...current,
+      [key]: value,
+      lastModified: new Date().toISOString().slice(0, 10),
+    }));
+  }
+
+  function moveSectionUp(index: number) {
+    if (index <= 0) return;
+    setSectionOrder((prev) => {
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next;
+    });
+  }
+
+  function moveSectionDown(index: number) {
+    setSectionOrder((prev) => {
+      if (index >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next;
+    });
+  }
+
+  function addCustomSection() {
+    const id = `custom-${Math.random().toString(36).slice(2, 8)}`;
+    const section: CustomSection = { id, title: "Custom Section", content: "", enabled: true };
+    setCustomSections((prev) => [...prev, section]);
+    setSectionOrder((prev) => [...prev, id]);
+    setActiveProposalSection(id);
+  }
+
+  function removeCustomSection(id: string) {
+    setCustomSections((prev) => prev.filter((s) => s.id !== id));
+    setSectionOrder((prev) => prev.filter((sid) => sid !== id));
+  }
+
+  function isSectionVisible(sectionId: string) {
+    const custom = customSections.find((s) => s.id === sectionId);
+    if (custom) return sectionOverrides[sectionId] ?? custom.enabled;
+
+    const section = proposalTemplate?.[sectionId as keyof ProposalTemplate];
+    const templateEnabled =
+      typeof section === "object" &&
+      section !== null &&
+      "enabled" in section &&
+      typeof section.enabled === "boolean"
+        ? section.enabled
+        : true;
+
+    return sectionOverrides[sectionId] ?? templateEnabled;
+  }
+
+  function toggleSection(sectionId: string) {
+    setSectionOverrides((current) => ({
+      ...current,
+      [sectionId]: !isSectionVisible(sectionId),
+    }));
+  }
+
+  function getSectionLayout(sectionId: string) {
+    return sectionLayouts[sectionId] ?? defaultSectionLayout(sectionId);
+  }
+
+  function setSectionLayout(sectionId: string, value: string) {
+    setSectionLayouts((current) => ({ ...current, [sectionId]: value }));
   }
 
   function toggleService(name: string) {
@@ -203,16 +460,29 @@ function QuotePreviewContent() {
     setServices((prev) => [...prev, { name, visible: true }]);
   }
 
+  function removeExistingPhoto(index: number) {
+    setExistingPhotos((prev) => prev.filter((_, idx) => idx !== index));
+    setExistingPhotoCaptions((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function updateExistingPhotoCaption(index: number, value: string) {
+    setExistingPhotoCaptions((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  }
+
   const displayedServices = showAllServices
     ? services
     : services.slice(0, SERVICES_COLLAPSE_AT);
   const hiddenCount = services.length - SERVICES_COLLAPSE_AT;
 
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343]">
+    <div className="h-screen overflow-hidden bg-[#f5f8fa] text-[#213343]">
       {/* Toolbar */}
       <div className="print:hidden sticky top-0 z-10 border-b border-[#d9e2ec] bg-white">
-        <div className="mx-auto flex max-w-285 items-center justify-between gap-4 px-5 py-3 sm:px-8">
+        <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4 px-5 py-3 sm:px-8">
           <Link
             href="/quotes"
             className="flex items-center gap-2 text-sm font-medium text-gray-500 transition hover:text-black"
@@ -223,14 +493,53 @@ function QuotePreviewContent() {
           <p className="hidden text-sm text-gray-500 sm:block">
             {doc.proposalNumber} · {quote.customerName}
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+              className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition ${
+                isSaved
+                  ? "border-green-200 bg-green-50 text-green-700"
+                  : isDirty
+                  ? "border-[#ff5c35] bg-[#fff1ea] text-[#ff5c35]"
+                  : "border-[#d9e2ec] hover:bg-[#f6f8fb]"
+              }`}
             >
-              {isSaved ? <Check className="h-4 w-4 text-green-600" /> : null}
-              <span className="hidden sm:inline">{isSaved ? "Saved!" : "Save"}</span>
+              {isSaved ? <Check className="h-4 w-4" /> : null}
+              <span className="hidden sm:inline">
+                {isSaved ? "Saved!" : isDirty ? "Save changes" : "Save"}
+              </span>
+              <span className="sm:hidden">
+                {isSaved ? "✓" : isDirty ? "●" : "Save"}
+              </span>
             </button>
+            <button
+              onClick={() => setShowProposalModal(true)}
+              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+              title="View full proposal document"
+            >
+              <FileText className="h-4 w-4" />
+              <span className="hidden sm:inline">Preview Proposal</span>
+            </button>
+            <button
+              onClick={() => setShowTemplateEditor(true)}
+              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+              title="Edit proposal template"
+            >
+              <Edit3 className="h-4 w-4" />
+              <span className="hidden sm:inline">Edit Template</span>
+            </button>
+            {quote.id && (
+              <Link
+                href={`/proposal/${quote.id}/accept`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 rounded-md border border-[#ff5c35] px-4 py-2 text-sm font-medium text-[#ff5c35] transition hover:bg-[#fff1ea]"
+                title="Open client acceptance portal"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span className="hidden sm:inline">Client Portal</span>
+              </Link>
+            )}
             <button
               onClick={() => window.print()}
               className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
@@ -252,258 +561,816 @@ function QuotePreviewContent() {
         </div>
       </div>
 
+      {/* Mobile tab bar */}
+      <div className="print:hidden sticky top-16.25 z-10 flex border-b border-[#d9e2ec] bg-white lg:hidden">
+        <button
+          onClick={() => setMobileTab("preview")}
+          className={`flex-1 py-2.5 text-sm font-medium transition ${mobileTab === "preview" ? "border-b-2 border-[#ff5c35] text-[#213343]" : "text-gray-400"}`}
+        >
+          Preview
+        </button>
+        <button
+          onClick={() => setMobileTab("edit")}
+          className={`flex-1 py-2.5 text-sm font-medium transition ${mobileTab === "edit" ? "border-b-2 border-[#ff5c35] text-[#213343]" : "text-gray-400"}`}
+        >
+          Edit
+        </button>
+      </div>
+
       {/* Layout */}
-      <div className="mx-auto max-w-285 gap-8 px-5 py-8 sm:px-8 lg:flex lg:items-start">
+      <div className="mx-auto flex h-[calc(100vh-65px)] max-w-[1680px] gap-10 overflow-hidden px-5 py-6 sm:px-8 lg:h-[calc(100vh-65px)]">
         {/* ── Editor sidebar ── */}
-        <aside className="print:hidden mb-8 w-full shrink-0 space-y-5 lg:mb-0 lg:w-72">
+        <aside className={`print:hidden h-full shrink-0 overflow-y-auto pr-1 lg:block lg:w-90 xl:w-105 ${mobileTab === "edit" ? "block w-full" : "hidden"}`}>
+          <div className="space-y-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
               Edit Proposal
             </p>
             <p className="mt-1 text-xs text-gray-400">
-              Updates apply to the preview and PDF.
+              Open a section, adjust its content, and use the eye to show or hide it.
             </p>
           </div>
-
-          {/* Cover Photo */}
-          <div>
-            <p className="mb-2 text-sm font-medium">Cover Photo</p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleCoverUpload}
-              className="hidden"
-            />
-            {coverImageUrl ? (
-              <div className="space-y-2">
-                <div className="relative overflow-hidden rounded border border-[#d9e2ec]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={coverImageUrl} alt="Cover" className="h-36 w-full object-cover" />
-                  <button
-                    onClick={() => setCoverImageUrl(null)}
-                    className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition hover:bg-black"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <div className="flex gap-1">
-                  {COVER_LAYOUTS.map(({ id, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => setCoverLayout(id)}
-                      className={`flex-1 rounded border py-1.5 text-xs font-medium transition ${
-                        coverLayout === id
-                          ? "border-[#111111] bg-[#111111] text-white"
-                          : "border-[#d9e2ec] hover:bg-[#f6f8fb]"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full rounded border border-[#d9e2ec] py-1.5 text-xs font-medium text-gray-500 transition hover:bg-[#f6f8fb]"
-                >
-                  Replace Photo
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-[#d9e2ec] py-5 text-sm text-gray-400 transition hover:border-[#111111] hover:text-[#111111]"
-              >
-                <ImagePlus className="h-4 w-4" />
-                Upload cover photo
-              </button>
-            )}
-          </div>
-
-          {/* Scope of Work */}
-          <div>
-            <p className="mb-2 text-sm font-medium">Scope of Work</p>
-            <ScopeWizard
-              trade={doc.trade || "Roofing"}
-              onGenerate={(text) => {
-                setScope(text);
-                setShowScope(true);
-              }}
-            />
-            <button
-              onClick={() => setShowScope((v) => !v)}
-              className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-400 transition hover:text-[#213343]"
-            >
-              <ChevronDown
-                className={`h-3 w-3 transition-transform ${showScope ? "" : "-rotate-90"}`}
-              />
-              Edit text manually
-            </button>
-            {showScope && (
-              <textarea
-                value={scope}
-                onChange={(e) => setScope(e.target.value)}
-                rows={5}
-                placeholder="Describe the scope of this project…"
-                className="mt-1.5 w-full resize-none rounded border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
-              />
-            )}
-          </div>
-
-          {/* Included Services */}
-          <div className="space-y-1.5">
-            <CollapseHeader
-              label="Included Services"
-              open={showServices}
-              onToggle={() => setShowServices((v) => !v)}
-            />
-            {showServices && (
-              <div className="space-y-1">
-                {displayedServices.map((item) => (
-                  <div
-                    key={item.name}
-                    className={`flex items-center justify-between gap-2 rounded border px-3 py-1.5 text-sm transition ${
-                      item.visible
-                        ? "border-[#d9e2ec]"
-                        : "border-[#e9ecef] bg-[#f6f8fb]"
-                    }`}
-                  >
-                    <span className={item.visible ? "text-[#213343]" : "text-gray-400"}>
-                      {item.name}
-                    </span>
-                    <button
-                      onClick={() => toggleService(item.name)}
-                      title={item.visible ? "Hide" : "Show"}
-                      className="shrink-0 text-gray-400 transition hover:text-[#213343]"
-                    >
-                      {item.visible ? (
-                        <Eye className="h-3.5 w-3.5" />
-                      ) : (
-                        <EyeOff className="h-3.5 w-3.5 opacity-40" />
-                      )}
-                    </button>
-                  </div>
-                ))}
-
-                {services.length > SERVICES_COLLAPSE_AT && (
-                  <button
-                    onClick={() => setShowAllServices((v) => !v)}
-                    className="w-full pt-0.5 text-left text-xs text-gray-400 transition hover:text-[#213343]"
-                  >
-                    {showAllServices ? "Show less ↑" : `Show ${hiddenCount} more ↓`}
-                  </button>
-                )}
-
-                <div className="flex gap-1.5 pt-0.5">
-                  <input
-                    value={newService}
-                    onChange={(e) => setNewService(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addService()}
-                    placeholder="Add service…"
-                    className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
-                  />
-                  <button
-                    onClick={addService}
-                    className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Trade suggestions — nested collapsible */}
-            {tradeSuggestions.length > 0 && (
-              <div className="pt-1">
-                <button
-                  onClick={() => setShowSuggestions((v) => !v)}
-                  className="flex w-full items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition hover:text-[#213343]"
-                >
-                  <ChevronDown
-                    className={`h-3 w-3 transition-transform ${showSuggestions ? "" : "-rotate-90"}`}
-                  />
-                  Suggestions · {doc.trade}
-                </button>
-                {showSuggestions && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {tradeSuggestions.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => addSuggestion(s)}
-                        className="rounded border border-[#d9e2ec] px-2 py-1 text-[11px] text-gray-500 transition hover:border-[#111111] hover:text-[#111111]"
-                      >
-                        + {s}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Certifications */}
-          <div className="space-y-1.5">
-            <CollapseHeader
-              label="Certifications"
-              open={showCerts}
-              onToggle={() => setShowCerts((v) => !v)}
-            />
-            {showCerts && (
-              <div className="space-y-1">
-                {certs.map((cert) => (
-                  <label
-                    key={cert.name}
-                    className="flex cursor-pointer items-center justify-between rounded border border-[#d9e2ec] px-3 py-1.5 text-sm transition hover:bg-[#f6f8fb]"
-                  >
-                    <span className={cert.visible ? "text-[#213343]" : "text-gray-400"}>
-                      {cert.name}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={cert.visible}
-                      onChange={() => toggleCert(cert.name)}
-                      className="h-3.5 w-3.5 accent-[#111111]"
-                    />
-                  </label>
-                ))}
-                <div className="flex gap-1.5 pt-0.5">
-                  <input
-                    value={newCert}
-                    onChange={(e) => setNewCert(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addCert()}
-                    placeholder="Add certification…"
-                    className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
-                  />
-                  <button
-                    onClick={addCert}
-                    className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <EditTextarea label="Warranty" value={warranty} onChange={setWarranty} />
-
-          <EditTextarea
-            label="Terms & Conditions"
-            value={terms}
-            onChange={setTerms}
-            rows={5}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleCoverUpload}
+            className="hidden"
           />
+          <input
+            ref={photoUploadRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handlePhotoUpload}
+            className="hidden"
+          />
+
+          <div className="space-y-2">
+            {sectionOrder.map((sectionId, index) => {
+              const builtIn = PROPOSAL_SECTIONS.find((s) => s.id === sectionId);
+              const custom = customSections.find((s) => s.id === sectionId);
+              if (!builtIn && !custom) return null;
+
+              const panelLabel = builtIn?.label ?? custom?.title ?? "Custom Section";
+              const panelDescription = builtIn?.description ?? "Custom content for your proposal";
+              const sectionVisible = isSectionVisible(sectionId);
+              const open = activeProposalSection === sectionId;
+              const isDragging = dragSectionIndex === index;
+              const isDragOver = dragOverSectionIndex === index;
+
+              return (
+                <div
+                  key={sectionId}
+                  draggable
+                  onDragStart={() => setDragSectionIndex(index)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverSectionIndex(index); }}
+                  onDrop={() => {
+                    if (dragSectionIndex === null || dragSectionIndex === index) return;
+                    setSectionOrder((current) => {
+                      const next = [...current];
+                      const [moved] = next.splice(dragSectionIndex, 1);
+                      next.splice(index, 0, moved);
+                      return next;
+                    });
+                    setDragSectionIndex(null);
+                    setDragOverSectionIndex(null);
+                  }}
+                  onDragEnd={() => { setDragSectionIndex(null); setDragOverSectionIndex(null); }}
+                  className={`transition-opacity ${isDragging ? "opacity-40" : "opacity-100"} ${isDragOver && dragSectionIndex !== index ? "ring-2 ring-[#ff5c35] ring-offset-1 rounded" : ""}`}
+                >
+                <ProposalSectionPanel
+                  label={panelLabel}
+                  description={panelDescription}
+                  open={open}
+                  visible={sectionVisible}
+                  onOpen={() => setActiveProposalSection((current) => current === sectionId ? null : sectionId)}
+                  onToggleVisible={() => toggleSection(sectionId)}
+                >
+                  {sectionId === "cover" && (
+                    <div className="space-y-3">
+                      <EditTextarea
+                        label="Cover Tagline"
+                        value={proposalTemplate.cover.tagline}
+                        onChange={(value) =>
+                          updateTemplate("cover", {
+                            ...proposalTemplate.cover,
+                            tagline: value,
+                          })
+                        }
+                        rows={2}
+                      />
+                      {coverImageUrl ? (
+                        <>
+                          <div className="relative overflow-hidden rounded border border-[#d9e2ec]">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={coverImageUrl}
+                              alt="Cover"
+                              className="h-36 w-full object-cover"
+                            />
+                            <button
+                              onClick={() => setCoverImageUrl(null)}
+                              className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition hover:bg-black"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full rounded border border-[#d9e2ec] py-1.5 text-xs font-medium text-gray-500 transition hover:bg-[#f6f8fb]"
+                          >
+                            Replace Photo
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-[#d9e2ec] py-5 text-sm text-gray-400 transition hover:border-[#111111] hover:text-[#111111]"
+                        >
+                          <ImagePlus className="h-4 w-4" />
+                          Upload cover photo
+                        </button>
+                      )}
+                      <div className="flex gap-1">
+                        {COVER_LAYOUTS.map(({ id, label }) => (
+                          <button
+                            key={id}
+                            onClick={() => setCoverLayout(id)}
+                            className={`flex-1 rounded border py-1.5 text-xs font-medium transition ${
+                              coverLayout === id
+                                ? "border-[#111111] bg-[#111111] text-white"
+                                : "border-[#d9e2ec] hover:bg-[#f6f8fb]"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {sectionId === "executiveSummary" && (
+                    <div className="space-y-3">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[
+                          { value: "stacked", label: "Rows" },
+                          { value: "columns", label: "Columns" },
+                          { value: "compact", label: "Compact" },
+                        ]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <CompactInput
+                        label="Problem Heading"
+                        value={proposalTemplate.executiveSummary.problemHeading}
+                        onChange={(value) =>
+                          updateTemplate("executiveSummary", {
+                            ...proposalTemplate.executiveSummary,
+                            problemHeading: value,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Problem Text"
+                        value={proposalTemplate.executiveSummary.problemText}
+                        onChange={(value) =>
+                          updateTemplate("executiveSummary", {
+                            ...proposalTemplate.executiveSummary,
+                            problemText: value,
+                          })
+                        }
+                      />
+                      <CompactInput
+                        label="Solution Heading"
+                        value={proposalTemplate.executiveSummary.solutionHeading}
+                        onChange={(value) =>
+                          updateTemplate("executiveSummary", {
+                            ...proposalTemplate.executiveSummary,
+                            solutionHeading: value,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Solution Text"
+                        value={proposalTemplate.executiveSummary.solutionText}
+                        onChange={(value) =>
+                          updateTemplate("executiveSummary", {
+                            ...proposalTemplate.executiveSummary,
+                            solutionText: value,
+                          })
+                        }
+                      />
+                      <CompactInput
+                        label="Value Heading"
+                        value={proposalTemplate.executiveSummary.valueHeading}
+                        onChange={(value) =>
+                          updateTemplate("executiveSummary", {
+                            ...proposalTemplate.executiveSummary,
+                            valueHeading: value,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Value Text"
+                        value={proposalTemplate.executiveSummary.valueText}
+                        onChange={(value) =>
+                          updateTemplate("executiveSummary", {
+                            ...proposalTemplate.executiveSummary,
+                            valueText: value,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {sectionId === "existingConditions" && (
+                    <div className="space-y-3">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[
+                          { value: "list", label: "Rows" },
+                          { value: "columns", label: "Columns" },
+                        ]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <EditTextarea
+                        label="Intro Text"
+                        value={proposalTemplate.existingConditions.introText}
+                        onChange={(value) =>
+                          updateTemplate("existingConditions", {
+                            ...proposalTemplate.existingConditions,
+                            introText: value,
+                          })
+                        }
+                      />
+                      <WorkItemsList
+                        label="Condition Items"
+                        placeholder="Add condition item..."
+                        items={proposalTemplate.existingConditions.checklistItems}
+                        onChange={(items) => updateTemplate("existingConditions", { ...proposalTemplate.existingConditions, checklistItems: items })}
+                      />
+                      <LayoutPicker
+                        label="Photo Layout"
+                        value={getSectionLayout("existingConditionPhotos")}
+                        options={[
+                          { value: "one", label: "1 / Page" },
+                          { value: "twoStacked", label: "2 / Page" },
+                          { value: "twoColumns", label: "2 Col" },
+                          { value: "grid", label: "Grid" },
+                        ]}
+                        onChange={(value) =>
+                          setSectionLayout("existingConditionPhotos", value)
+                        }
+                      />
+                      <p className="mb-2 text-xs text-gray-400">
+                        Add inspection or before photos for this proposal.
+                      </p>
+                      {existingPhotos.length > 0 && (
+                        <div className="mb-2 space-y-2">
+                          {existingPhotos.map((src, i) => (
+                            <div
+                              key={`${src}-${i}`}
+                              className="grid grid-cols-[72px_1fr_auto] items-start gap-2 rounded border border-[#d9e2ec] bg-white p-2"
+                            >
+                              <div className="relative">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={src}
+                                  alt={`Photo ${i + 1}`}
+                                  className="h-16 w-full rounded border border-[#d9e2ec] object-cover"
+                                />
+                              </div>
+                              <textarea
+                                value={existingPhotoCaptions[i] ?? ""}
+                                onChange={(event) =>
+                                  updateExistingPhotoCaption(i, event.target.value)
+                                }
+                                rows={2}
+                                placeholder={`Description for photo ${i + 1}...`}
+                                className="min-h-16 w-full resize-none rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none transition focus:border-[#111111]"
+                              />
+                              <button
+                                onClick={() => removeExistingPhoto(i)}
+                                className="rounded p-1 text-gray-400 transition hover:bg-red-50 hover:text-red-500"
+                                type="button"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => photoUploadRef.current?.click()}
+                        className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-[#d9e2ec] py-3 text-xs text-gray-400 transition hover:border-[#111111] hover:text-[#111111]"
+                      >
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        Upload photos
+                      </button>
+                    </div>
+                  )}
+
+                  {sectionId === "scopeOfWork" && (
+                    <div className="space-y-4">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[
+                          { value: "numbered", label: "Rows" },
+                          { value: "compact", label: "2 Col" },
+                        ]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <div>
+                        <EditTextarea
+                          label="Scope Intro"
+                          value={proposalTemplate.scopeOfWork.introText}
+                          onChange={(value) =>
+                            updateTemplate("scopeOfWork", {
+                              ...proposalTemplate.scopeOfWork,
+                              introText: value,
+                            })
+                          }
+                          rows={3}
+                        />
+                        <ScopeWizard
+                          trade={doc.trade || "Roofing"}
+                          onGenerate={(text) => {
+                            setScope(text);
+                            setShowScope(true);
+                          }}
+                        />
+                        <button
+                          onClick={() => setShowScope((v) => !v)}
+                          className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-400 transition hover:text-[#213343]"
+                        >
+                          <ChevronDown
+                            className={`h-3 w-3 transition-transform ${
+                              showScope ? "" : "-rotate-90"
+                            }`}
+                          />
+                          Edit text manually
+                        </button>
+                        {showScope && (
+                          <textarea
+                            value={scope}
+                            onChange={(e) => setScope(e.target.value)}
+                            rows={5}
+                            placeholder="Describe the scope of this project..."
+                            className="mt-1.5 w-full resize-none rounded border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
+                          />
+                        )}
+                        <WorkItemsList
+                          items={proposalTemplate.scopeOfWork.items}
+                          onChange={(items) =>
+                            updateTemplate("scopeOfWork", {
+                              ...proposalTemplate.scopeOfWork,
+                              items,
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-1.5 border-t border-[#eef2f6] pt-3">
+                        <CollapseHeader
+                          label="Included Services shown in Scope"
+                          open={showServices}
+                          onToggle={() => setShowServices((v) => !v)}
+                        />
+                        <p className="text-xs leading-relaxed text-gray-400">
+                          These appear in the proposal after the detailed work items.
+                        </p>
+                        {showServices && (
+                          <div className="space-y-1">
+                            {displayedServices.map((item) => (
+                              <VisibilityRow
+                                key={item.name}
+                                label={item.name}
+                                visible={item.visible}
+                                onToggle={() => toggleService(item.name)}
+                              />
+                            ))}
+
+                            {services.length > SERVICES_COLLAPSE_AT && (
+                              <button
+                                onClick={() => setShowAllServices((v) => !v)}
+                                className="w-full pt-0.5 text-left text-xs text-gray-400 transition hover:text-[#213343]"
+                              >
+                                {showAllServices
+                                  ? "Show less"
+                                  : `Show ${hiddenCount} more`}
+                              </button>
+                            )}
+
+                            <div className="flex gap-1.5 pt-0.5">
+                              <input
+                                value={newService}
+                                onChange={(e) => setNewService(e.target.value)}
+                                onKeyDown={(e) =>
+                                  e.key === "Enter" && addService()
+                                }
+                                placeholder="Add service..."
+                                className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
+                              />
+                              <button
+                                onClick={addService}
+                                className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {tradeSuggestions.length > 0 && (
+                          <div className="pt-1">
+                            <button
+                              onClick={() => setShowSuggestions((v) => !v)}
+                              className="flex w-full items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition hover:text-[#213343]"
+                            >
+                              <ChevronDown
+                                className={`h-3 w-3 transition-transform ${
+                                  showSuggestions ? "" : "-rotate-90"
+                                }`}
+                              />
+                              Suggestions · {doc.trade}
+                            </button>
+                            {showSuggestions && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {tradeSuggestions.map((suggestion) => (
+                                  <button
+                                    key={suggestion}
+                                    onClick={() => addSuggestion(suggestion)}
+                                    className="rounded border border-[#d9e2ec] px-2 py-1 text-[11px] text-gray-500 transition hover:border-[#111111] hover:text-[#111111]"
+                                  >
+                                    + {suggestion}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {sectionId === "materialsSpecs" && (
+                    <div className="space-y-3">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[{ value: "table", label: "Table" }, { value: "cards", label: "Cards" }, { value: "list", label: "List" }]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <EditTextarea
+                        label="Materials Intro"
+                        value={proposalTemplate.materialsSpecs.introText}
+                        onChange={(value) => updateTemplate("materialsSpecs", { ...proposalTemplate.materialsSpecs, introText: value })}
+                      />
+                      <MaterialsTableEditor
+                        items={proposalTemplate.materialsSpecs.items}
+                        onChange={(items) => updateTemplate("materialsSpecs", { ...proposalTemplate.materialsSpecs, items })}
+                      />
+                    </div>
+                  )}
+
+                  {sectionId === "timeline" && (
+                    <div className="space-y-3">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[
+                          { value: "steps", label: "Steps" },
+                          { value: "compact", label: "2-Col" },
+                          { value: "bars", label: "Bars" },
+                          { value: "cards", label: "Cards" },
+                        ]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <CompactInput
+                        label="Estimated Days"
+                        value={String(proposalTemplate.timeline.estimatedDays)}
+                        onChange={(value) => updateTemplate("timeline", { ...proposalTemplate.timeline, estimatedDays: Number(value) || 1 })}
+                      />
+                      <EditTextarea
+                        label="Timeline Intro"
+                        value={proposalTemplate.timeline.introText}
+                        onChange={(value) => updateTemplate("timeline", { ...proposalTemplate.timeline, introText: value })}
+                      />
+                      <PhasesEditor
+                        phases={proposalTemplate.timeline.phases}
+                        onChange={(phases) => updateTemplate("timeline", { ...proposalTemplate.timeline, phases })}
+                      />
+                    </div>
+                  )}
+
+                  {sectionId === "pricing" && (
+                    <div className="space-y-2 text-sm">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[
+                          { value: "cards", label: "Cards" },
+                          { value: "list", label: "Rows" },
+                        ]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <p className="text-xs text-gray-400">
+                        Customer-facing prices. Internal margin and profit are hidden.
+                      </p>
+                      <MiniPriceRow label="Good" value={formatMoney(doc.goodPrice)} />
+                      <MiniPriceRow
+                        label="Better"
+                        value={formatMoney(doc.betterPrice)}
+                        recommended
+                      />
+                      <MiniPriceRow label="Best" value={formatMoney(doc.bestPrice)} />
+                      <EditTextarea
+                        label="Pricing Intro"
+                        value={proposalTemplate.pricing.introText}
+                        onChange={(value) =>
+                          updateTemplate("pricing", {
+                            ...proposalTemplate.pricing,
+                            introText: value,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Allowances & Exclusions"
+                        value={proposalTemplate.pricing.allowancesText}
+                        onChange={(value) =>
+                          updateTemplate("pricing", {
+                            ...proposalTemplate.pricing,
+                            allowancesText: value,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Financing Text"
+                        value={proposalTemplate.pricing.financingText}
+                        onChange={(value) =>
+                          updateTemplate("pricing", {
+                            ...proposalTemplate.pricing,
+                            financingText: value,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {sectionId === "warranty" && (
+                    <div className="space-y-3">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[{ value: "columns", label: "2 Columns" }, { value: "stacked", label: "Stacked" }]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <CompactInput
+                        label="Workmanship Years"
+                        value={String(proposalTemplate.warranty.workmanshipYears)}
+                        onChange={(value) =>
+                          updateTemplate("warranty", {
+                            ...proposalTemplate.warranty,
+                            workmanshipYears: Number(value) || 1,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Warranty Text"
+                        value={warranty}
+                        onChange={setWarranty}
+                      />
+                      <EditTextarea
+                        label="Manufacturer Warranty"
+                        value={proposalTemplate.warranty.manufacturerText}
+                        onChange={(value) =>
+                          updateTemplate("warranty", {
+                            ...proposalTemplate.warranty,
+                            manufacturerText: value,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {sectionId === "terms" && (
+                    <div className="space-y-3">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[{ value: "text", label: "Text" }, { value: "bullets", label: "Bullets" }]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <EditTextarea label="Terms & Conditions" value={terms} onChange={setTerms} rows={6} />
+                    </div>
+                  )}
+
+                  {sectionId === "acceptance" && (
+                    <div className="space-y-4">
+                      <LayoutPicker
+                        value={getSectionLayout(sectionId)}
+                        options={[{ value: "standard", label: "Standard" }, { value: "compact", label: "Compact" }]}
+                        onChange={(value) => setSectionLayout(sectionId, value)}
+                      />
+                      <EditTextarea
+                        label="Acceptance Text"
+                        value={proposalTemplate.acceptance.contractIntroText}
+                        onChange={(value) =>
+                          updateTemplate("acceptance", {
+                            ...proposalTemplate.acceptance,
+                            contractIntroText: value,
+                          })
+                        }
+                      />
+                      <EditTextarea
+                        label="Payment Schedule"
+                        value={proposalTemplate.acceptance.paymentScheduleText}
+                        onChange={(value) =>
+                          updateTemplate("acceptance", {
+                            ...proposalTemplate.acceptance,
+                            paymentScheduleText: value,
+                          })
+                        }
+                      />
+                      <CompactInput
+                        label="Payment Portal URL"
+                        value={proposalTemplate.acceptance.paymentLinkUrl}
+                        onChange={(value) =>
+                          updateTemplate("acceptance", {
+                            ...proposalTemplate.acceptance,
+                            paymentLinkUrl: value,
+                          })
+                        }
+                      />
+                      <div className="space-y-1.5">
+                        <CollapseHeader
+                          label="Certifications"
+                          open={showCerts}
+                          onToggle={() => setShowCerts((v) => !v)}
+                        />
+                        {showCerts && (
+                          <div className="space-y-1">
+                            {certs.map((cert) => (
+                              <VisibilityRow
+                                key={cert.name}
+                                label={cert.name}
+                                visible={cert.visible}
+                                onToggle={() => toggleCert(cert.name)}
+                              />
+                            ))}
+                            <div className="flex gap-1.5 pt-0.5">
+                              <input
+                                value={newCert}
+                                onChange={(e) => setNewCert(e.target.value)}
+                                onKeyDown={(e) =>
+                                  e.key === "Enter" && addCert()
+                                }
+                                placeholder="Add certification..."
+                                className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
+                              />
+                              <button
+                                onClick={addCert}
+                                className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <Link
+                        href={`/proposal/${quote.id}/accept`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 rounded border border-[#ff5c35] px-3 py-2 text-xs font-medium text-[#ff5c35] transition hover:bg-[#fff1ea]"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open Client Portal
+                      </Link>
+                    </div>
+                  )}
+                  {custom && (
+                    <div className="space-y-3">
+                      <CompactInput
+                        label="Section Title"
+                        value={custom.title}
+                        onChange={(value) => setCustomSections((prev) => prev.map((s) => s.id === custom.id ? { ...s, title: value } : s))}
+                      />
+                      <EditTextarea
+                        label="Content"
+                        value={custom.content}
+                        onChange={(value) => setCustomSections((prev) => prev.map((s) => s.id === custom.id ? { ...s, content: value } : s))}
+                        rows={6}
+                        placeholder="Enter your custom section text here..."
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeCustomSection(custom.id)}
+                        className="flex w-full items-center justify-center gap-1.5 rounded border border-red-200 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete Section
+                      </button>
+                    </div>
+                  )}
+                </ProposalSectionPanel>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={addCustomSection}
+              className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-[#d9e2ec] py-2.5 text-xs text-gray-400 transition hover:border-[#213343] hover:text-[#213343]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Custom Section
+            </button>
+          </div>
+          </div>
         </aside>
 
         {/* ── Document preview ── */}
-        <div className="min-w-0 flex-1">
-          <QuotePreview
-            doc={doc}
-            coverImageUrl={coverImageUrl}
-            coverLayout={coverLayout}
-          />
+        <div ref={previewScrollRef} className={`min-w-0 flex-1 overflow-y-auto pr-1 ${mobileTab === "edit" ? "hidden lg:block" : "block"}`}>
+          <div className="mx-auto max-w-260 space-y-6">
+            <div className="print:hidden rounded border border-[#d9e2ec] bg-white px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Live Proposal Preview
+              </p>
+              <p className="mt-1 text-sm text-gray-500">
+                This updates as you edit. Each separated page represents how the client proposal is organized.
+              </p>
+            </div>
+            <div className="rounded border border-[#d9e2ec] bg-[#e9eef4] px-8 py-8 shadow-inner">
+              <div className="[&_.proposal-document]:space-y-10 [&_.proposal-document]:bg-transparent [&_.proposal-document>footer]:mx-auto [&_.proposal-document>footer]:max-w-198.5 [&_.proposal-document>footer]:border [&_.proposal-document>footer]:border-[#d3dde8] [&_.proposal-document>footer]:bg-white [&_.proposal-document>footer]:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_30px_rgba(15,23,42,0.08)] [&_.proposal-document>section]:mx-auto [&_.proposal-document>section]:aspect-210/297 [&_.proposal-document>section]:w-full [&_.proposal-document>section]:max-w-198.5 [&_.proposal-document>section]:overflow-hidden [&_.proposal-document>section]:border [&_.proposal-document>section]:border-[#d3dde8] [&_.proposal-document>section]:bg-white [&_.proposal-document>section]:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_30px_rgba(15,23,42,0.08)]">
+              <ProposalDocument
+                template={proposalTemplate}
+                quote={proposalQuote}
+                settings={settings}
+                photos={existingPhotos}
+                photoCaptions={existingPhotoCaptions}
+                coverPhotoUrl={coverImageUrl}
+                coverLayout={coverLayout}
+                proposalNumber={doc.proposalNumber}
+                sectionOverrides={sectionOverrides}
+                sectionLayouts={sectionLayouts}
+                sectionOrder={sectionOrder}
+                customSections={customSections}
+              />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* ── Full Proposal Preview Modal ── */}
+      {showProposalModal && proposalTemplate && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#d9e2ec] bg-white px-6 py-3 shadow-sm print:hidden">
+            <p className="text-sm font-semibold text-[#213343]">
+              Full Proposal — {doc.proposalNumber} · {quote.customerName}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm transition hover:bg-gray-50"
+              >
+                <Printer className="h-4 w-4" />
+                Print
+              </button>
+              <button
+                onClick={() => setShowProposalModal(false)}
+                className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm transition hover:bg-gray-50"
+              >
+                <X className="h-4 w-4" />
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="mx-auto max-w-5xl py-8">
+            <ProposalDocument
+              template={proposalTemplate}
+              quote={proposalQuote}
+              settings={settings}
+              photos={existingPhotos}
+              photoCaptions={existingPhotoCaptions}
+              coverPhotoUrl={coverImageUrl}
+              coverLayout={coverLayout}
+              proposalNumber={doc.proposalNumber}
+              sectionOverrides={sectionOverrides}
+              sectionLayouts={sectionLayouts}
+              sectionOrder={sectionOrder}
+              customSections={customSections}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Template Editor Panel ── */}
+      {proposalTemplate && (
+        <TemplateEditorPanel
+          template={proposalTemplate}
+          open={showTemplateEditor}
+          onClose={() => setShowTemplateEditor(false)}
+          onSave={handleTemplateSave}
+        />
+      )}
     </div>
   );
 }
@@ -524,6 +1391,500 @@ function CollapseHeader({
         className={`h-4 w-4 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
       />
     </button>
+  );
+}
+
+function ProposalSectionPanel({
+  label,
+  description,
+  open,
+  visible,
+  onOpen,
+  onToggleVisible,
+  children,
+}: {
+  label: string;
+  description: string;
+  open: boolean;
+  visible: boolean;
+  onOpen: () => void;
+  onToggleVisible: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`overflow-hidden rounded border transition ${
+        open ? "border-[#213343] bg-white" : "border-[#d9e2ec] bg-white"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 px-2 py-2">
+        <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-300 active:cursor-grabbing" />
+        <button onClick={onOpen} className="min-w-0 flex-1 text-left" type="button">
+          <div className="flex items-center gap-1.5">
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
+            />
+            <span className={`truncate text-sm font-medium ${visible ? "text-[#213343]" : "text-gray-400"}`}>
+              {label}
+            </span>
+          </div>
+          {open && (
+            <p className="mt-1 pl-5 text-xs leading-relaxed text-gray-400">{description}</p>
+          )}
+        </button>
+        <button
+          onClick={onToggleVisible}
+          title={visible ? "Hide section" : "Show section"}
+          className="shrink-0 rounded p-1 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]"
+          type="button"
+        >
+          {visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5 opacity-40" />}
+        </button>
+      </div>
+      {open && <div className="border-t border-[#eef2f6] px-3 py-3">{children}</div>}
+    </div>
+  );
+}
+
+function VisibilityRow({
+  label,
+  visible,
+  onToggle,
+}: {
+  label: string;
+  visible: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-2 rounded border px-3 py-1.5 text-sm transition ${
+        visible ? "border-[#d9e2ec]" : "border-[#e9ecef] bg-[#f6f8fb]"
+      }`}
+    >
+      <span className={visible ? "text-[#213343]" : "text-gray-400"}>
+        {label}
+      </span>
+      <button
+        onClick={onToggle}
+        title={visible ? "Hide" : "Show"}
+        className="shrink-0 text-gray-400 transition hover:text-[#213343]"
+        type="button"
+      >
+        {visible ? (
+          <Eye className="h-3.5 w-3.5" />
+        ) : (
+          <EyeOff className="h-3.5 w-3.5 opacity-40" />
+        )}
+      </button>
+    </div>
+  );
+}
+
+function defaultSectionLayout(sectionId: string) {
+  if (sectionId === "executiveSummary") return "stacked";
+  if (sectionId === "existingConditions") return "list";
+  if (sectionId === "existingConditionPhotos") return "twoColumns";
+  if (sectionId === "scopeOfWork") return "numbered";
+  if (sectionId === "materialsSpecs") return "table";
+  if (sectionId === "timeline") return "steps";
+  if (sectionId === "pricing") return "cards";
+  if (sectionId === "warranty") return "columns";
+  if (sectionId === "terms") return "text";
+  if (sectionId === "acceptance") return "standard";
+  return "default";
+}
+
+function LayoutPicker({
+  label = "Layout",
+  value,
+  options,
+  onChange,
+}: {
+  label?: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-400">
+        {label}
+      </p>
+      <div className="flex gap-1">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={`flex-1 rounded border py-1.5 text-xs font-medium transition ${
+              value === option.value
+                ? "border-[#111111] bg-[#111111] text-white"
+                : "border-[#d9e2ec] text-gray-500 hover:bg-[#f6f8fb]"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MiniPriceRow({
+  label,
+  value,
+  recommended = false,
+}: {
+  label: string;
+  value: string;
+  recommended?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded border border-[#d9e2ec] px-3 py-2">
+      <span className="text-gray-500">
+        {label}
+        {recommended ? (
+          <span className="ml-2 rounded bg-[#111111] px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            Rec
+          </span>
+        ) : null}
+      </span>
+      <span className="font-semibold text-[#213343]">{value}</span>
+    </div>
+  );
+}
+
+function CompactInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded border border-[#d9e2ec] px-3 py-2 text-sm outline-none transition focus:border-[#111111]"
+      />
+    </label>
+  );
+}
+
+function MaterialsTableEditor({
+  items,
+  onChange,
+}: {
+  items: MaterialItem[];
+  onChange: (items: MaterialItem[]) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<MaterialItem | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newDraft, setNewDraft] = useState<Omit<MaterialItem, "id">>({ category: "", product: "", brand: "", warranty: "", notes: "" });
+
+  function startEdit(item: MaterialItem) {
+    setEditingId(item.id);
+    setDraft({ ...item });
+  }
+
+  function commitEdit() {
+    if (!editingId || !draft) return;
+    onChange(items.map((item) => (item.id === editingId ? draft : item)));
+    setEditingId(null);
+    setDraft(null);
+  }
+
+  function removeItem(id: string) {
+    onChange(items.filter((item) => item.id !== id));
+    if (editingId === id) { setEditingId(null); setDraft(null); }
+  }
+
+  function addItem() {
+    if (!newDraft.product.trim()) return;
+    const id = Math.random().toString(36).slice(2, 8);
+    onChange([...items, { id, ...newDraft }]);
+    setNewDraft({ category: "", product: "", brand: "", warranty: "", notes: "" });
+    setAdding(false);
+  }
+
+  const FIELDS: Array<{ key: keyof Omit<MaterialItem, "id">; placeholder: string }> = [
+    { key: "category", placeholder: "Category" },
+    { key: "product", placeholder: "Product" },
+    { key: "brand", placeholder: "Brand" },
+    { key: "warranty", placeholder: "Warranty" },
+    { key: "notes", placeholder: "Notes" },
+  ];
+
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-medium">Materials</p>
+      <div className="space-y-1.5">
+        {items.map((item) => (
+          <div key={item.id} className="overflow-hidden rounded border border-[#d9e2ec]">
+            {editingId === item.id && draft ? (
+              <div className="space-y-1.5 p-2">
+                {FIELDS.map(({ key, placeholder }) => (
+                  <input
+                    key={key}
+                    value={draft[key]}
+                    onChange={(e) => setDraft((d) => d ? { ...d, [key]: e.target.value } : d)}
+                    placeholder={placeholder}
+                    className="w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none focus:border-[#111111]"
+                  />
+                ))}
+                <div className="flex justify-end gap-1.5 pt-0.5">
+                  <button onClick={() => { setEditingId(null); setDraft(null); }} className="rounded border border-[#d9e2ec] px-3 py-1 text-xs transition hover:bg-gray-50">Cancel</button>
+                  <button onClick={commitEdit} className="rounded bg-[#111111] px-3 py-1 text-xs text-white transition hover:bg-[#333]">Save</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-2 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-[#213343]">{item.category}{item.product ? ` — ${item.product}` : ""}</p>
+                  <p className="truncate text-[10px] text-gray-400">{[item.brand, item.warranty].filter(Boolean).join(" · ")}</p>
+                </div>
+                <div className="flex shrink-0 gap-0.5">
+                  <button onClick={() => startEdit(item)} className="rounded p-1 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]">
+                    <Edit3 className="h-3 w-3" />
+                  </button>
+                  <button onClick={() => removeItem(item.id)} className="rounded p-1 text-gray-400 transition hover:bg-red-50 hover:text-red-500">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {adding ? (
+        <div className="mt-2 space-y-1.5 rounded border border-[#d9e2ec] p-2">
+          {FIELDS.map(({ key, placeholder }) => (
+            <input
+              key={key}
+              value={newDraft[key]}
+              onChange={(e) => setNewDraft((d) => ({ ...d, [key]: e.target.value }))}
+              placeholder={placeholder}
+              className="w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none focus:border-[#111111]"
+            />
+          ))}
+          <div className="flex justify-end gap-1.5 pt-0.5">
+            <button onClick={() => setAdding(false)} className="rounded border border-[#d9e2ec] px-3 py-1 text-xs transition hover:bg-gray-50">Cancel</button>
+            <button onClick={addItem} disabled={!newDraft.product.trim()} className="rounded bg-[#111111] px-3 py-1 text-xs text-white transition hover:bg-[#333] disabled:opacity-50">Add</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-[#d9e2ec] py-1.5 text-xs text-gray-400 transition hover:border-[#111111] hover:text-[#111111]">
+          <Plus className="h-3 w-3" />
+          Add Material
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PhasesEditor({
+  phases,
+  onChange,
+}: {
+  phases: TimelinePhase[];
+  onChange: (phases: TimelinePhase[]) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+
+  function startEdit(phase: TimelinePhase) {
+    setEditingId(phase.id);
+    setEditName(phase.name);
+    setEditDesc(phase.description);
+  }
+
+  function commitEdit() {
+    if (!editingId) return;
+    onChange(phases.map((p) => p.id === editingId ? { ...p, name: editName, description: editDesc } : p));
+    setEditingId(null);
+  }
+
+  function removePhase(id: string) {
+    onChange(phases.filter((p) => p.id !== id));
+    if (editingId === id) setEditingId(null);
+  }
+
+  function addPhase() {
+    if (!newName.trim()) return;
+    const id = Math.random().toString(36).slice(2, 8);
+    onChange([...phases, { id, name: newName, description: newDesc }]);
+    setNewName("");
+    setNewDesc("");
+  }
+
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-medium">Timeline Phases</p>
+      <div className="space-y-1.5">
+        {phases.map((phase, i) => (
+          <div key={phase.id} className="overflow-hidden rounded border border-[#d9e2ec]">
+            {editingId === phase.id ? (
+              <div className="space-y-1.5 p-2">
+                <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Phase name" className="w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none focus:border-[#111111]" />
+                <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} rows={3} placeholder="Description" className="w-full resize-none rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none focus:border-[#111111]" />
+                <div className="flex justify-end gap-1.5 pt-0.5">
+                  <button onClick={() => setEditingId(null)} className="rounded border border-[#d9e2ec] px-3 py-1 text-xs transition hover:bg-gray-50">Cancel</button>
+                  <button onClick={commitEdit} className="rounded bg-[#111111] px-3 py-1 text-xs text-white transition hover:bg-[#333]">Save</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 p-2">
+                <span className="mt-0.5 w-4 shrink-0 text-center text-[10px] font-bold text-[#ff5c35]">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-[#213343]">{phase.name}</p>
+                  {phase.description && <p className="mt-0.5 line-clamp-2 text-[10px] text-gray-400">{phase.description}</p>}
+                </div>
+                <div className="flex shrink-0 gap-0.5">
+                  <button onClick={() => startEdit(phase)} className="rounded p-1 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]">
+                    <Edit3 className="h-3 w-3" />
+                  </button>
+                  <button onClick={() => removePhase(phase.id)} className="rounded p-1 text-gray-400 transition hover:bg-red-50 hover:text-red-500">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 space-y-1.5">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addPhase()} placeholder="New phase name..." className="w-full rounded border border-[#d9e2ec] px-3 py-1.5 text-xs outline-none focus:border-[#111111]" />
+        {newName && (
+          <textarea value={newDesc} onChange={(e) => setNewDesc(e.target.value)} rows={2} placeholder="Description (optional)..." className="w-full resize-none rounded border border-[#d9e2ec] px-3 py-1.5 text-xs outline-none focus:border-[#111111]" />
+        )}
+        <button onClick={addPhase} disabled={!newName.trim()} className="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-[#d9e2ec] py-1.5 text-xs text-gray-400 transition hover:border-[#111111] hover:text-[#111111] disabled:opacity-50">
+          <Plus className="h-3 w-3" />
+          Add Phase
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WorkItemsList({
+  items,
+  onChange,
+  label = "Detailed Work Items",
+  placeholder = "Add work item...",
+}: {
+  items: string[];
+  onChange: (items: string[]) => void;
+  label?: string;
+  placeholder?: string;
+}) {
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [newItem, setNewItem] = useState("");
+
+  function startEdit(index: number) {
+    setEditingIndex(index);
+    setEditingValue(items[index]);
+  }
+
+  function commitEdit(index: number) {
+    const trimmed = editingValue.trim();
+    if (!trimmed) {
+      onChange(items.filter((_, i) => i !== index));
+    } else {
+      const next = [...items];
+      next[index] = trimmed;
+      onChange(next);
+    }
+    setEditingIndex(null);
+    setEditingValue("");
+  }
+
+  function removeItem(index: number) {
+    onChange(items.filter((_, i) => i !== index));
+    if (editingIndex === index) setEditingIndex(null);
+  }
+
+  function addItem() {
+    const trimmed = newItem.trim();
+    if (!trimmed) return;
+    onChange([...items, trimmed]);
+    setNewItem("");
+  }
+
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-medium">{label}</p>
+      <div className="space-y-1">
+        {items.map((item, i) => (
+          <div key={i} className="flex items-start gap-1.5">
+            <span className="mt-2 w-4 shrink-0 text-center text-[10px] font-semibold text-[#ff5c35]">
+              {i + 1}
+            </span>
+            {editingIndex === i ? (
+              <textarea
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onBlur={() => commitEdit(i)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    commitEdit(i);
+                  }
+                  if (e.key === "Escape") setEditingIndex(null);
+                }}
+                autoFocus
+                rows={2}
+                className="flex-1 resize-none rounded border border-[#111111] px-2 py-1.5 text-xs outline-none w-full"
+              />
+            ) : (
+              <div className="flex flex-1 items-start gap-1">
+                <button
+                  type="button"
+                  onClick={() => startEdit(i)}
+                  className="flex-1 rounded border border-transparent px-2 py-1.5 text-left text-xs text-[#213343] transition hover:border-[#d9e2ec] hover:bg-[#f6f8fb]"
+                >
+                  {item}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeItem(i)}
+                  className="mt-0.5 shrink-0 rounded p-1 text-gray-400 transition hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex gap-1.5">
+        <input
+          value={newItem}
+          onChange={(e) => setNewItem(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addItem()}
+          placeholder={placeholder}
+          className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-xs outline-none focus:border-[#111111]"
+        />
+        <button
+          type="button"
+          onClick={addItem}
+          className="rounded border border-[#d9e2ec] px-3 py-1.5 text-xs font-medium transition hover:bg-[#f6f8fb]"
+        >
+          Add
+        </button>
+      </div>
+    </div>
   );
 }
 

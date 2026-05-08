@@ -11,11 +11,14 @@ export type Trade =
 export type SettingsTrade = Trade | "General Contractor";
 
 export type ProjectState =
-  | "Connecticut"
-  | "New York"
-  | "New Jersey"
-  | "Florida"
-  | "Texas";
+  | "Alabama" | "Arizona" | "Arkansas" | "California" | "Colorado"
+  | "Connecticut" | "Florida" | "Georgia" | "Idaho" | "Illinois"
+  | "Indiana" | "Iowa" | "Kansas" | "Kentucky" | "Louisiana"
+  | "Maryland" | "Massachusetts" | "Michigan" | "Minnesota" | "Mississippi"
+  | "Missouri" | "Montana" | "Nebraska" | "Nevada" | "New Jersey"
+  | "New Mexico" | "New York" | "North Carolina" | "Ohio" | "Oklahoma"
+  | "Oregon" | "Pennsylvania" | "South Carolina" | "Tennessee" | "Texas"
+  | "Utah" | "Virginia" | "Washington" | "West Virginia" | "Wisconsin";
 
 export type CompanyLevel =
   | "Solo Owner"
@@ -146,6 +149,10 @@ export type Quote = {
   termsText?: string;
   includedServices?: string[];
   certifications?: string[];
+  sectionOverrides?: Partial<Record<string, boolean>>;
+  sectionLayouts?: Partial<Record<string, string>>;
+  sectionOrder?: string[];
+  customSections?: Array<{ id: string; title: string; content: string; enabled: boolean }>;
   good: PricingResult;
   better: PricingResult;
   best: PricingResult;
@@ -176,6 +183,11 @@ export type AppSettings = {
     defaultStrategy: Strategy;
     defaultRiskLevel: RiskLevel;
     defaultProjectSize: ProjectSize;
+    tradeAdjustments: Record<Trade, number>;
+    sizeAdjustments: Record<ProjectSize, number>;
+    riskAdjustments: Record<RiskLevel, number>;
+    strategyAdjustments: Record<Strategy, number>;
+    companyAdjustments: Record<CompanyLevel, number>;
   };
   marketLocation: {
     defaultState: ProjectState;
@@ -184,13 +196,7 @@ export type AppSettings = {
     marketCompetitiveness: "Low" | "Medium" | "High";
     customerPriceSensitivity: "Low" | "Medium" | "High";
     serviceAreaNotes: string;
-    stateAdjustments: {
-      Connecticut: number;
-      NewYork: number;
-      NewJersey: number;
-      Florida: number;
-      Texas: number;
-    };
+    stateAdjustments: Partial<Record<ProjectState, number>>;
   };
   costRules: {
     monthlyOverhead: number;
@@ -232,6 +238,27 @@ export type AppSettings = {
     showLicenseNumber: boolean;
     showInsuranceBadges: boolean;
     credentialPlacement: ProposalCredentialPlacement;
+    goodDescription: string;
+    betterDescription: string;
+    bestDescription: string;
+    defaultIncludedServices: string[];
+  };
+  pricingThresholds: {
+    riskyMarginPercent: number;
+    tightMarginPercent: number;
+    safePriceCushionPercent: number;
+    warningMarginLowPercent: number;
+    warningMarginHighPercent: number;
+    warningCommissionPercent: number;
+    warningFeeProfitPercent: number;
+    safeMarginRiskBonusPercent: number;
+    safeMarginSmallBonusPercent: number;
+    marginClampMinPercent: number;
+    marginClampMaxPercent: number;
+  };
+  contentDefaults: {
+    tradeServices: Record<string, string[]>;
+    scopeTemplates: Record<string, string[]>;
   };
   branding: {
     logoUrl: string;
@@ -262,6 +289,8 @@ export const storageKeys = {
   projectForPricing: "contractor-pricing-app:project-for-pricing",
   proposalCounter: "contractor-pricing-app:proposal-counter",
   scopeTemplates: "contractor-pricing-app:scope-templates",
+  onboarding: "contractor-pricing-app:onboarding",
+  proposalTemplates: "contractor-pricing-app:proposal-templates",
 } as const;
 
 export const tradeOptions: Trade[] = [
@@ -279,11 +308,14 @@ export const settingsTradeOptions: SettingsTrade[] = [
 ];
 
 export const stateOptions: ProjectState[] = [
-  "Connecticut",
-  "New York",
-  "New Jersey",
-  "Florida",
-  "Texas",
+  "Alabama", "Arizona", "Arkansas", "California", "Colorado",
+  "Connecticut", "Florida", "Georgia", "Idaho", "Illinois",
+  "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
+  "Missouri", "Montana", "Nebraska", "Nevada", "New Jersey",
+  "New Mexico", "New York", "North Carolina", "Ohio", "Oklahoma",
+  "Oregon", "Pennsylvania", "South Carolina", "Tennessee", "Texas",
+  "Utah", "Virginia", "Washington", "West Virginia", "Wisconsin",
 ];
 
 export const companyLevelOptions: CompanyLevel[] = [
@@ -354,6 +386,11 @@ export const defaultSettings: AppSettings = {
     defaultStrategy: "Balanced",
     defaultRiskLevel: "Medium",
     defaultProjectSize: "Medium",
+    tradeAdjustments: { Roofing: 2, Siding: 1, Painting: 0, Drywall: -1, Gutters: 1, Remodeling: 3 },
+    sizeAdjustments: { Small: 5, Medium: 0, Large: -4 },
+    riskAdjustments: { Low: -1, Medium: 0, High: 5 },
+    strategyAdjustments: { Competitive: -2, Balanced: 0, Premium: 3 },
+    companyAdjustments: { "Solo Owner": -3, "Small Crew": 0, "Established Company": 3, "Premium Company": 5 },
   },
   marketLocation: {
     defaultState: "Connecticut",
@@ -363,12 +400,22 @@ export const defaultSettings: AppSettings = {
     customerPriceSensitivity: "Medium",
     serviceAreaNotes: "",
     stateAdjustments: {
-      Connecticut: 0,
-      NewYork: 3,
-      NewJersey: 2,
-      Florida: -2,
-      Texas: -1,
-    },
+      // Premium markets — high labor + permit costs, market supports higher prices
+      California: 5, Massachusetts: 4, "New York": 3, Washington: 3,
+      // Above-average markets
+      Colorado: 2, Maryland: 2, "New Jersey": 2, Virginia: 2,
+      Arizona: 1, Georgia: 1, Illinois: 1, Minnesota: 1, Nevada: 1,
+      "North Carolina": 1, Oregon: 1, Pennsylvania: 1,
+      // Baseline
+      Connecticut: 0, Michigan: 0, Ohio: 0, Wisconsin: 0,
+      // Below-average — competitive or lower cost-of-living
+      Idaho: -1, Indiana: -1, Missouri: -1, "New Mexico": -1,
+      "South Carolina": -1, Tennessee: -1, Texas: -1, Utah: -1,
+      Alabama: -2, Florida: -2, Iowa: -2, Kansas: -2, Kentucky: -2, Louisiana: -2,
+      Montana: -2, Nebraska: -2, Oklahoma: -2, "West Virginia": -2,
+      // Highly competitive / rural
+      Arkansas: -3, Mississippi: -3,
+    } satisfies Partial<Record<ProjectState, number>>,
   },
   costRules: {
     monthlyOverhead: 5000,
@@ -408,6 +455,65 @@ export const defaultSettings: AppSettings = {
     showLicenseNumber: true,
     showInsuranceBadges: true,
     credentialPlacement: "Before Signatures",
+    goodDescription: "Competitive option for budget-conscious customers.",
+    betterDescription: "Recommended option with balanced value and quality.",
+    bestDescription: "Premium option for enhanced service and long-term value.",
+    defaultIncludedServices: ["Materials", "Labor", "Cleanup", "Disposal", "Warranty", "Licensed & Insured"],
+  },
+  pricingThresholds: {
+    riskyMarginPercent: 25,
+    tightMarginPercent: 35,
+    safePriceCushionPercent: 8,
+    warningMarginLowPercent: 30,
+    warningMarginHighPercent: 55,
+    warningCommissionPercent: 8,
+    warningFeeProfitPercent: 10,
+    safeMarginRiskBonusPercent: 3,
+    safeMarginSmallBonusPercent: 2,
+    marginClampMinPercent: 15,
+    marginClampMaxPercent: 65,
+  },
+  contentDefaults: {
+    tradeServices: {
+      Roofing: ["Remove & Dispose of Old Roofing","Install Underlayment","Install Ice & Water Shield","Install Shingles","Install Ridge Cap","Flash Valleys & Penetrations","Install Drip Edge","Inspect & Replace Decking","Ventilation","Gutters & Downspouts"],
+      Siding: ["Remove Old Siding","Install House Wrap / Moisture Barrier","Install New Siding","Corner Trim","Window & Door Trim","Soffit & Fascia","Caulking & Sealing","Paint Touch-up"],
+      Painting: ["Pressure Washing","Surface Prep & Sanding","Priming","Interior Painting","Exterior Painting","Trim & Detail Work","Ceiling Painting","Touch-up & Final Walk"],
+      Drywall: ["Tear-out & Demo","Install New Drywall","Tape & Mud","Sand & Finish","Texture Matching","Prime"],
+      Gutters: ["Remove Old Gutters","Install Seamless Gutters","Install Downspouts","Leaf Guards","Seal & Test"],
+      Remodeling: ["Demolition","Framing","Plumbing Rough-in","Electrical Rough-in","Insulation","Drywall","Flooring","Trim & Molding","Painting","Final Cleanup"],
+    },
+    scopeTemplates: {
+      Roofing: [
+        "Remove and dispose of existing roofing materials. Install new underlayment, ice & water shield, and architectural shingles. Flash all valleys, penetrations, and perimeter. Install ridge cap and ventilation. Final clean-up included.",
+        "Full roof replacement including tear-off, new decking inspection and repair where needed, synthetic underlayment, and premium architectural shingles. All flashing replaced. 5-year workmanship warranty.",
+        "Roof repair and spot replacement. Address damaged or missing shingles, re-flash affected areas, and reseal penetrations. Includes debris removal and site clean-up.",
+      ],
+      Siding: [
+        "Remove existing siding and trim. Install moisture barrier and house wrap. Install new fiber cement siding with matching corner trim, window wraps, and caulking. Paint-ready finish.",
+        "Full re-siding including removal, new sheathing wrap, premium vinyl siding installation, corner trim, soffit, and fascia. All seams caulked and sealed.",
+        "Partial siding repair and replacement. Match existing profile and color as closely as possible. Includes caulking, priming, and touch-up paint.",
+      ],
+      Painting: [
+        "Power wash all surfaces. Scrape, sand, and prime as needed. Apply two coats of premium exterior paint on all siding, trim, doors, and shutters. Final walk-through included.",
+        "Interior painting of all walls and ceilings. Protect floors and furnishings. Patch nail holes and minor imperfections. Apply two coats of low-VOC paint throughout. Clean-up included.",
+        "Full interior and exterior paint package. Includes surface prep, spot priming, two finish coats on all surfaces, trim work, and final punch-list touch-ups.",
+      ],
+      Drywall: [
+        "Tear out damaged drywall sections. Install new 5/8\" drywall, tape, mud, and sand to a Level 5 finish. Ready for primer and paint.",
+        "Install new drywall on all walls and ceilings. Tape, bed, and sand to smooth finish. Includes texture matching where applicable.",
+        "Patch and repair drywall damage. Match existing texture, prime patched areas, and prepare for final paint.",
+      ],
+      Gutters: [
+        "Remove existing gutters and downspouts. Install new seamless aluminum gutters sized for roof area. Add downspout extensions to direct water away from foundation. Seal all joints.",
+        "Full seamless gutter installation with leaf guards. Install all downspouts and underground drainage extensions. Final test with water.",
+        "Gutter cleaning, resealing, and spot repair. Re-secure any loose sections, reseal end caps and seams, and flush all downspouts.",
+      ],
+      Remodeling: [
+        "Complete kitchen remodel including demo, new cabinets, countertops, backsplash, plumbing fixtures, and electrical updates. Flooring and painting included.",
+        "Bathroom remodel including tile removal, new shower/tub surround, vanity, fixtures, toilet, and tile floor. Permit included where required.",
+        "Basement finishing including framing, insulation, drywall, electrical, lighting, and flooring. Bathroom rough-in optional.",
+      ],
+    },
   },
   branding: {
     logoUrl: "",
@@ -443,6 +549,11 @@ export function mergeAppSettings(settings: AppSettings): AppSettings {
     pricingDefaults: {
       ...defaultSettings.pricingDefaults,
       ...settings.pricingDefaults,
+      tradeAdjustments: { ...defaultSettings.pricingDefaults.tradeAdjustments, ...settings.pricingDefaults?.tradeAdjustments },
+      sizeAdjustments: { ...defaultSettings.pricingDefaults.sizeAdjustments, ...settings.pricingDefaults?.sizeAdjustments },
+      riskAdjustments: { ...defaultSettings.pricingDefaults.riskAdjustments, ...settings.pricingDefaults?.riskAdjustments },
+      strategyAdjustments: { ...defaultSettings.pricingDefaults.strategyAdjustments, ...settings.pricingDefaults?.strategyAdjustments },
+      companyAdjustments: { ...defaultSettings.pricingDefaults.companyAdjustments, ...settings.pricingDefaults?.companyAdjustments },
     },
     marketLocation: {
       ...defaultSettings.marketLocation,
@@ -459,6 +570,14 @@ export function mergeAppSettings(settings: AppSettings): AppSettings {
     proposalSettings: {
       ...defaultSettings.proposalSettings,
       ...settings.proposalSettings,
+    },
+    pricingThresholds: {
+      ...defaultSettings.pricingThresholds,
+      ...settings.pricingThresholds,
+    },
+    contentDefaults: {
+      tradeServices: { ...defaultSettings.contentDefaults.tradeServices, ...settings.contentDefaults?.tradeServices },
+      scopeTemplates: { ...defaultSettings.contentDefaults.scopeTemplates, ...settings.contentDefaults?.scopeTemplates },
     },
     branding: {
       ...defaultSettings.branding,
@@ -648,13 +767,9 @@ export function createPricingInputFromSettings(
       Better: merged.pricingDefaults.betterMargin / 100,
       Best: merged.pricingDefaults.bestMargin / 100,
     },
-    stateAdjustments: {
-      Connecticut: merged.marketLocation.stateAdjustments.Connecticut / 100,
-      "New York": merged.marketLocation.stateAdjustments.NewYork / 100,
-      "New Jersey": merged.marketLocation.stateAdjustments.NewJersey / 100,
-      Florida: merged.marketLocation.stateAdjustments.Florida / 100,
-      Texas: merged.marketLocation.stateAdjustments.Texas / 100,
-    },
+    stateAdjustments: Object.fromEntries(
+      stateOptions.map((s) => [s, (merged.marketLocation.stateAdjustments[s] ?? 0) / 100])
+    ) as Record<ProjectState, number>,
     ...overrides,
   };
 }
@@ -701,7 +816,7 @@ export function calculateProjectPricing(
 }
 
 export function getPricingAdjustment(input: PricingInput) {
-  const defaultStateAdjustments: Record<ProjectState, number> = {
+  const defaultStateAdjustments: Partial<Record<ProjectState, number>> = {
     Connecticut: 0,
     "New York": 0.03,
     "New Jersey": 0.02,
@@ -739,7 +854,7 @@ export function getPricingAdjustment(input: PricingInput) {
   };
   const overhead = (input.overheadPercent / 100) * 0.35;
   const parts = {
-    state: (input.stateAdjustments ?? defaultStateAdjustments)[input.state],
+    state: (input.stateAdjustments ?? defaultStateAdjustments)[input.state] ?? 0,
     trade: tradeAdjustments[input.trade],
     companyLevel: companyAdjustments[input.companyLevel],
     projectSize: sizeAdjustments[input.projectSize],
