@@ -89,7 +89,14 @@ export default function ClientAcceptancePage() {
     );
   }
 
+  const isExpired = isProposalExpired(quote);
+
   function handleSign() {
+    if (isExpired) {
+      setSignatureError("This proposal has expired. Please request an updated proposal before signing.");
+      return;
+    }
+
     const name = signatureName.trim();
     if (!name) {
       setSignatureError("Please type your full name to sign.");
@@ -114,7 +121,9 @@ export default function ClientAcceptancePage() {
     writeLocalStorage(
       storageKeys.quotes,
       quotes.map((item) =>
-        item.id === quote!.id ? { ...item, status: "Accepted" } : item
+        item.id === quote!.id
+          ? { ...item, status: "Accepted", signedAt: record.signedAt, signedBy: name }
+          : item
       )
     );
 
@@ -204,6 +213,7 @@ export default function ClientAcceptancePage() {
             </p>
             <p className="text-xs text-gray-400">
               Proposal {quote.proposalNumber} · For {quote.customerName}
+              {isExpired ? " · Expired" : ""}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -211,7 +221,7 @@ export default function ClientAcceptancePage() {
               <Shield className="h-3.5 w-3.5" />
               Secure
             </span>
-            {state === "viewing" && (
+            {state === "viewing" && !isExpired && (
               <button
                 onClick={() => setState("signing")}
                 className="rounded-lg bg-[#ff5c35] px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-[#e94820]"
@@ -222,6 +232,12 @@ export default function ClientAcceptancePage() {
           </div>
         </div>
       </div>
+
+      {isExpired ? (
+        <div className="border-b border-red-100 bg-red-50 px-6 py-3 text-center text-sm font-medium text-red-700">
+          This proposal expired on {quote.expiresAt}. Please request an updated proposal before signing.
+        </div>
+      ) : null}
 
       {/* Proposal document */}
       <div className="mx-auto max-w-5xl py-8">
@@ -316,4 +332,9 @@ export default function ClientAcceptancePage() {
       )}
     </div>
   );
+}
+
+function isProposalExpired(quote: Quote) {
+  if (!quote.expiresAt || quote.status === "Accepted") return false;
+  return new Date(quote.expiresAt) < new Date();
 }

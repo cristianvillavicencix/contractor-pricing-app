@@ -17,6 +17,7 @@ import {
   formatMoney,
   getTotalCost,
   initialContacts,
+  initialProjects,
   storageKeys,
   statusOptions,
   tradeOptions,
@@ -31,86 +32,6 @@ import {
 } from "@/lib/projects";
 import { useLocalStorageState, writeLocalStorage } from "@/lib/use-local-storage";
 
-const initialProjects: Project[] = [
-  {
-    id: "project-001",
-    projectName: "Architectural roof replacement",
-    customerName: "Maria Alvarez",
-    customerPhone: "(203) 555-0148",
-    customerEmail: "maria@example.com",
-    address: "42 Maple Ridge Road",
-    city: "Stamford",
-    state: "Connecticut",
-    zipCode: "06903",
-    trade: "Roofing",
-    projectSize: "Medium",
-    riskLevel: "Medium",
-    status: "Pricing",
-    notes: "Customer wants a clean Good / Better / Best quote with warranty options.",
-    costs: {
-      materials: 4800,
-      labor: 2400,
-      dumpster: 450,
-      permits: 250,
-      equipment: 0,
-      subcontractor: 0,
-      miscellaneous: 300,
-    },
-    createdAt: "May 1, 2026",
-  },
-  {
-    id: "project-002",
-    projectName: "Cedar siding refresh",
-    customerName: "James Whitaker",
-    customerPhone: "(212) 555-0194",
-    customerEmail: "james@example.com",
-    address: "118 Hudson Street",
-    city: "New York",
-    state: "New York",
-    zipCode: "10013",
-    trade: "Siding",
-    projectSize: "Large",
-    riskLevel: "High",
-    status: "Quoted",
-    notes: "Access is tight. Include buffer for staging and city logistics.",
-    costs: {
-      materials: 9200,
-      labor: 6100,
-      dumpster: 750,
-      permits: 600,
-      equipment: 900,
-      subcontractor: 0,
-      miscellaneous: 500,
-    },
-    createdAt: "Apr 28, 2026",
-  },
-  {
-    id: "project-003",
-    projectName: "Interior repaint package",
-    customerName: "Olivia Grant",
-    customerPhone: "(305) 555-0122",
-    customerEmail: "olivia@example.com",
-    address: "734 Palm Avenue",
-    city: "Orlando",
-    state: "Florida",
-    zipCode: "32801",
-    trade: "Painting",
-    projectSize: "Small",
-    riskLevel: "Low",
-    status: "Draft",
-    notes: "Customer is comparing two painters. Keep Good option competitive.",
-    costs: {
-      materials: 850,
-      labor: 1600,
-      dumpster: 0,
-      permits: 0,
-      equipment: 150,
-      subcontractor: 0,
-      miscellaneous: 200,
-    },
-    createdAt: "Apr 25, 2026",
-  },
-];
 
 type StatusFilter = "All" | ProjectStatus;
 type TradeFilter = "All" | Trade;
@@ -183,9 +104,9 @@ export default function ProjectsPage() {
   function createContact(contact: Omit<Contact, "id" | "createdAt">) {
     const existing = contacts.find(
       (item) =>
-        sameText(item.name, contact.name) ||
-        (Boolean(item.email) && sameText(item.email, contact.email)) ||
-        (Boolean(item.phone) && sameText(item.phone, contact.phone))
+        (Boolean(contact.email) && Boolean(item.email) && sameText(item.email, contact.email)) ||
+        (Boolean(contact.phone) && Boolean(item.phone) && samePhone(item.phone, contact.phone)) ||
+        sameText(item.name, contact.name)
     );
 
     if (existing) return existing;
@@ -461,4 +382,9 @@ function getProjectTab(value: string | null): ProjectDetailTab {
 
 function sameText(left: string, right: string) {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function samePhone(left: string, right: string) {
+  const digits = (s: string) => s.replace(/\D/g, "");
+  return digits(left) === digits(right) && digits(left).length > 0;
 }

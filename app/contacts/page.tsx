@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   formatMargin,
@@ -77,6 +78,17 @@ export default function ContactsPage() {
     ]);
     setForm(emptyContact);
     setError("");
+  }
+
+  function updateContact(updated: Contact) {
+    setContacts((current) =>
+      current.map((c) => (c.id === updated.id ? updated : c))
+    );
+  }
+
+  function deleteContact(id: string) {
+    setContacts((current) => current.filter((c) => c.id !== id));
+    setSelectedContactId(null);
   }
 
   const selectedContact = contacts.find(
@@ -243,10 +255,13 @@ export default function ContactsPage() {
 
       {selectedContact ? (
         <ContactDetailPanel
+          key={selectedContact.id}
           contact={selectedContact}
           projects={getContactProjects(selectedContact, projects)}
           quotes={getContactQuotes(selectedContact, quotes)}
           onClose={() => setSelectedContactId(null)}
+          onUpdate={updateContact}
+          onDelete={() => deleteContact(selectedContact.id)}
           onOpenProject={(projectId) =>
             router.push(`/projects?projectId=${projectId}&projectTab=overview`)
           }
@@ -262,6 +277,8 @@ function ContactDetailPanel({
   projects,
   quotes,
   onClose,
+  onUpdate,
+  onDelete,
   onOpenProject,
   onOpenQuote,
 }: {
@@ -269,9 +286,21 @@ function ContactDetailPanel({
   projects: Project[];
   quotes: Quote[];
   onClose: () => void;
+  onUpdate: (contact: Contact) => void;
+  onDelete: () => void;
   onOpenProject: (projectId: string) => void;
   onOpenQuote: (quoteId: string) => void;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<Contact>(contact);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  function saveEdit() {
+    if (!draft.name.trim()) return;
+    onUpdate(draft);
+    setIsEditing(false);
+  }
+
   return (
     <div
       onClick={onClose}
@@ -290,30 +319,81 @@ function ContactDetailPanel({
               {contact.customerType} · created {contact.createdAt}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsEditing((v) => !v)}
+              className={`rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb] ${isEditing ? "border-[#ff5c35] text-[#ff5c35]" : "border-[#d9e2ec]"}`}
+            >
+              <Pencil className="inline h-3.5 w-3.5" />
+              {isEditing ? " Editing" : " Edit"}
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-2">
-          <DetailBlock label="Phone" value={contact.phone || "No phone"} />
-          <DetailBlock label="Email" value={contact.email || "No email"} />
-          <DetailBlock
-            label="Address"
-            value={contact.address || "No address"}
-          />
-          <DetailBlock label="Customer type" value={contact.customerType} />
-        </section>
+        {isEditing ? (
+          <section className="mt-6 space-y-4 rounded-lg border border-[#d9e2ec] p-5">
+            <TextField label="Name" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
+            <TextField label="Phone" value={draft.phone} onChange={(v) => setDraft({ ...draft, phone: v })} />
+            <TextField label="Email" value={draft.email} onChange={(v) => setDraft({ ...draft, email: v })} />
+            <TextField label="Address" value={draft.address} onChange={(v) => setDraft({ ...draft, address: v })} />
+            <label className="block text-sm font-medium">
+              Customer Type
+              <select
+                value={draft.customerType}
+                onChange={(e) => setDraft({ ...draft, customerType: e.target.value as Contact["customerType"] })}
+                className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+              >
+                <option>Homeowner</option>
+                <option>Business</option>
+                <option>Property Manager</option>
+              </select>
+            </label>
+            <label className="block text-sm font-medium">
+              Notes
+              <textarea
+                value={draft.notes}
+                onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+                className="mt-2 min-h-20 w-full resize-none rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+              />
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={saveEdit}
+                className="flex-1 rounded-md bg-[#ff5c35] py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => { setDraft(contact); setIsEditing(false); }}
+                className="rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm transition hover:bg-[#f6f8fb]"
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="mt-8 grid gap-4 sm:grid-cols-2">
+            <DetailBlock label="Phone" value={contact.phone || "No phone"} />
+            <DetailBlock label="Email" value={contact.email || "No email"} />
+            <DetailBlock label="Address" value={contact.address || "No address"} />
+            <DetailBlock label="Customer type" value={contact.customerType} />
+          </section>
+        )}
 
-        <section className="mt-4 rounded-lg border border-[#d9e2ec] bg-white p-5">
-          <p className="text-sm font-medium text-black">Notes</p>
-          <p className="mt-3 text-sm leading-6 text-gray-600">
-            {contact.notes || "No notes yet."}
-          </p>
-        </section>
+        {!isEditing && (
+          <section className="mt-4 rounded-lg border border-[#d9e2ec] bg-white p-5">
+            <p className="text-sm font-medium text-black">Notes</p>
+            <p className="mt-3 text-sm leading-6 text-gray-600">
+              {contact.notes || "No notes yet."}
+            </p>
+          </section>
+        )}
 
         <section className="mt-4 rounded-lg border border-[#d9e2ec] bg-white p-5">
           <div className="flex items-center justify-between gap-4">
@@ -404,6 +484,39 @@ function ContactDetailPanel({
             )}
           </div>
         </section>
+
+        {/* Delete contact */}
+        <div className="mt-6">
+          {confirmDelete ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+              <p className="text-sm font-medium text-red-700">Delete this contact?</p>
+              <p className="mt-1 text-xs text-red-500">This cannot be undone. Projects and quotes will remain but won't be linked to this contact.</p>
+              <div className="mt-3 flex gap-3">
+                <button
+                  onClick={onDelete}
+                  className="flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-red-700"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Yes, delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="rounded-md border border-[#d9e2ec] px-4 py-2 text-xs transition hover:bg-[#f6f8fb]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 py-2.5 text-xs font-medium text-red-500 transition hover:bg-red-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete Contact
+            </button>
+          )}
+        </div>
       </aside>
     </div>
   );
@@ -414,9 +527,9 @@ function getContactProjects(contact: Contact, projects: Project[]) {
     if (project.contactId === contact.id) return true;
     const nameMatch = sameText(project.customerName, contact.name);
     const emailMatch =
-      Boolean(contact.email) && sameText(project.customerEmail, contact.email);
+      Boolean(contact.email) && Boolean(project.customerEmail) && sameText(project.customerEmail, contact.email);
     const phoneMatch =
-      Boolean(contact.phone) && sameText(project.customerPhone, contact.phone);
+      Boolean(contact.phone) && Boolean(project.customerPhone) && samePhone(project.customerPhone, contact.phone);
 
     return nameMatch || emailMatch || phoneMatch;
   });
@@ -428,7 +541,7 @@ function getContactQuotes(contact: Contact, quotes: Quote[]) {
       quote.contactId === contact.id ||
       sameText(quote.customerName, contact.name) ||
       (Boolean(contact.email) && sameText(quote.customerEmail ?? "", contact.email)) ||
-      (Boolean(contact.phone) && sameText(quote.customerPhone ?? "", contact.phone))
+      (Boolean(contact.phone) && Boolean(quote.customerPhone) && samePhone(quote.customerPhone ?? "", contact.phone))
   );
 }
 
@@ -440,6 +553,11 @@ function getSelectedQuote(quote: Quote) {
 
 function sameText(left: string, right: string) {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function samePhone(left: string, right: string) {
+  const digits = (s: string) => s.replace(/\D/g, "");
+  return digits(left) === digits(right) && digits(left).length > 0;
 }
 
 function DetailBlock({ label, value }: { label: string; value: string }) {

@@ -173,16 +173,123 @@
   counter-reset: proposal-page;
 }
 
+.paged-proposal-source-shell {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 210mm;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.paged-proposal-source-shell .proposal-document {
+  background: white !important;
+}
+
+.paged-proposal-source-shell .proposal-document > section {
+  break-before: page;
+  height: auto !important;
+  min-height: auto !important;
+  overflow: visible !important;
+  page-break-before: always;
+}
+
+.paged-proposal-source-shell .proposal-document > section::before,
+.paged-proposal-source-shell .proposal-document > section::after {
+  display: none !important;
+}
+
+.paged-proposal-output .pagedjs_pages {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.paged-proposal-output .pagedjs_page {
+  background: white;
+  border: 1px solid #d3dde8;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.paged-proposal-output .pagedjs_margin-content {
+  color: #94a3b8;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@page {
+  size: A4;
+  margin: 18mm 14mm 18mm;
+
+  @top-left {
+    border-bottom: 1px solid #e2e8f0;
+    color: #94a3b8;
+    content: "Proposal";
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    padding-bottom: 4px;
+    text-transform: uppercase;
+  }
+
+  @bottom-right {
+    border-top: 1px solid #e2e8f0;
+    color: #94a3b8;
+    content: "Page " counter(page);
+    font-size: 10px;
+    padding-top: 5px;
+  }
+}
+
+@page:first {
+  margin: 0;
+
+  @top-left {
+    content: none;
+  }
+
+  @bottom-right {
+    content: none;
+  }
+}
+
 .proposal-document > section {
   position: relative;
+  box-sizing: border-box;
   counter-increment: proposal-page;
 }
 
-.proposal-document > section::after {
+.proposal-document > section:not([data-proposal-section="cover"]) {
+  padding-top: 72px !important;
+  padding-bottom: 88px !important;
+}
+
+.proposal-document > section:not([data-proposal-section="cover"])::before {
+  content: "Proposal";
+  position: absolute;
+  left: 14mm;
+  right: 14mm;
+  top: 8mm;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4px;
+  font-size: 9px;
+  line-height: 1;
+  color: #94a3b8;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proposal-document > section:not([data-proposal-section="cover"])::after {
   content: "Page " counter(proposal-page);
   position: absolute;
   right: 14mm;
   bottom: 10mm;
+  left: 14mm;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 5px;
+  text-align: right;
   font-size: 10px;
   line-height: 1;
   color: #94a3b8;
@@ -234,5 +341,19 @@
 
   .proposal-document > footer {
     display: none !important;
+  }
+
+  .paged-proposal-source-shell {
+    display: none !important;
+  }
+
+  .paged-proposal-output .pagedjs_pages {
+    display: block !important;
+  }
+
+  .paged-proposal-output .pagedjs_page {
+    border: 0 !important;
+    box-shadow: none !important;
+    margin: 0 !important;
   }
 }

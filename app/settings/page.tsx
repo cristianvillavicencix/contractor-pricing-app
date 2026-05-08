@@ -2188,6 +2188,17 @@ function getValidationMessage(settings: AppSettings) {
     return "Default expiration days cannot be below 1.";
   }
 
+  const { goodMargin, betterMargin, bestMargin } = settings.pricingDefaults;
+  if (goodMargin >= betterMargin) {
+    return "Good margin must be lower than Better margin.";
+  }
+  if (betterMargin >= bestMargin) {
+    return "Better margin must be lower than Best margin.";
+  }
+  if (goodMargin < 5 || bestMargin > 80) {
+    return "Margins must be between 5% and 80%.";
+  }
+
   return "";
 }
 
@@ -2720,6 +2731,23 @@ function DataSection() {
           {importSuccess && (
             <p className="mt-3 text-sm text-green-700">{importSuccess}</p>
           )}
+        </div>
+
+        {/* Re-run Onboarding */}
+        <div className="rounded-lg border border-[#d9e2ec] p-5">
+          <p className="text-sm font-medium text-black">Re-run Setup Wizard</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Go through the onboarding flow again to update your company profile, pricing defaults, and market settings.
+          </p>
+          <button
+            onClick={() => {
+              window.localStorage.removeItem(storageKeys.onboarding);
+              window.location.href = "/onboarding";
+            }}
+            className="mt-4 rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+          >
+            Re-run Onboarding
+          </button>
         </div>
 
         {/* Clear */}

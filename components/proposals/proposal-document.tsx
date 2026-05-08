@@ -130,13 +130,22 @@ export function ProposalDocument({
     // ── Existing Conditions ───────────────────────────────────────────
     if (sectionId === "existingConditions") {
       if (!visible("existingConditions", template.existingConditions.enabled)) return null;
+      const existingLayout = layout("existingConditions", "list");
+      const existingPages = paginateTextItemsByHeight(
+        template.existingConditions.checklistItems,
+        {
+          columns: existingLayout === "columns" ? 2 : 1,
+          firstPagePx: existingLayout === "columns" ? 520 : 620,
+          nextPagePx: existingLayout === "columns" ? 690 : 760,
+          charsPerLine: existingLayout === "columns" ? 54 : 96,
+          basePx: 28,
+          linePx: 20,
+          rowGapPx: 12,
+        }
+      );
       return (
         <>
-          {paginateWeightedItems(
-            template.existingConditions.checklistItems,
-            layout("existingConditions", "list") === "columns" ? 12 : 9,
-            layout("existingConditions", "list") === "columns" ? 16 : 12
-          ).map((items, pageIndex) => (
+          {existingPages.map((items, pageIndex) => (
             <section
               key={`conditions-${pageIndex}`}
               data-proposal-section="existingConditions"
@@ -153,7 +162,7 @@ export function ProposalDocument({
               )}
               <div
                 className={
-                  layout("existingConditions", "list") === "columns"
+                  existingLayout === "columns"
                     ? "mt-8 grid gap-x-10 gap-y-3 md:grid-cols-2"
                     : "mt-8 space-y-3"
                 }
@@ -199,10 +208,10 @@ export function ProposalDocument({
                           alt={`Existing condition photo ${pageIndex + 1}-${index + 1}`}
                           className={
                             layout("existingConditionPhotos", "twoColumns") === "one"
-                              ? "h-[640px] w-full border border-[#d9e2ec] object-cover"
+                              ? "h-[560px] w-full border border-[#d9e2ec] object-cover"
                               : layout("existingConditionPhotos", "twoColumns") === "twoStacked"
-                                ? "h-[300px] w-full border border-[#d9e2ec] object-cover"
-                                : "h-[420px] w-full border border-[#d9e2ec] object-cover"
+                                ? "h-[260px] w-full border border-[#d9e2ec] object-cover"
+                                : "h-[360px] w-full border border-[#d9e2ec] object-cover"
                           }
                         />
                         <figcaption className="mt-2 text-xs leading-relaxed text-gray-500">
@@ -222,13 +231,19 @@ export function ProposalDocument({
     // ── Scope of Work ─────────────────────────────────────────────────
     if (sectionId === "scopeOfWork") {
       if (!visible("scopeOfWork", template.scopeOfWork.enabled)) return null;
+      const scopeLayout = layout("scopeOfWork", "numbered");
+      const scopePages = paginateTextItemsByHeight(template.scopeOfWork.items, {
+        columns: scopeLayout === "compact" ? 2 : 1,
+        firstPagePx: scopeLayout === "compact" ? 500 : 560,
+        nextPagePx: scopeLayout === "compact" ? 675 : 735,
+        charsPerLine: scopeLayout === "compact" ? 42 : 88,
+        basePx: scopeLayout === "compact" ? 30 : 26,
+        linePx: scopeLayout === "compact" ? 24 : 21,
+        rowGapPx: scopeLayout === "compact" ? 12 : 12,
+      });
       return (
         <>
-          {paginateWeightedItems(
-            template.scopeOfWork.items,
-            layout("scopeOfWork", "numbered") === "compact" ? 18 : 13,
-            layout("scopeOfWork", "numbered") === "compact" ? 22 : 16
-          ).map((items, pageIndex) => (
+          {scopePages.map((items, pageIndex) => (
             <section
               key={`scope-${pageIndex}`}
               data-proposal-section="scopeOfWork"
@@ -259,7 +274,12 @@ export function ProposalDocument({
                 }
               >
                 {items.map((item, i) => {
-                  const itemNumber = template.scopeOfWork.items.indexOf(item) + 1;
+                  const itemNumber =
+                    scopePages
+                      .slice(0, pageIndex)
+                      .reduce((total, page) => total + page.length, 0) +
+                    i +
+                    1;
                   return (
                     <li key={`${pageIndex}-${i}`} className="flex items-start gap-4">
                       <span className="mt-0.5 text-xs font-semibold tracking-wide text-[#ff5c35]">{itemNumber}</span>
@@ -959,6 +979,68 @@ function paginatePhases(phases: string[], tlLayout: string, firstAvailPx: number
       }
       current.push(p);
       used += h;
+    }
+  }
+
+  if (current.length > 0) pages.push(current);
+  return pages.length > 0 ? pages : [[]];
+}
+
+function paginateTextItemsByHeight(
+  items: string[],
+  {
+    columns,
+    firstPagePx,
+    nextPagePx,
+    charsPerLine,
+    basePx,
+    linePx,
+    rowGapPx,
+  }: {
+    columns: 1 | 2;
+    firstPagePx: number;
+    nextPagePx: number;
+    charsPerLine: number;
+    basePx: number;
+    linePx: number;
+    rowGapPx: number;
+  }
+) {
+  function itemHeight(item: string) {
+    const normalizedLength = item.replace(/\s+/g, " ").trim().length;
+    const lines = Math.max(1, Math.ceil(normalizedLength / charsPerLine));
+    return basePx + lines * linePx;
+  }
+
+  const pages: string[][] = [];
+  let current: string[] = [];
+  let used = 0;
+  let available = firstPagePx;
+
+  if (columns === 2) {
+    for (let index = 0; index < items.length; index += 2) {
+      const row = items.slice(index, index + 2);
+      const rowHeight = Math.max(...row.map(itemHeight)) + rowGapPx;
+      if (current.length > 0 && used + rowHeight > available) {
+        pages.push(current);
+        current = [];
+        used = 0;
+        available = nextPagePx;
+      }
+      current.push(...row);
+      used += rowHeight;
+    }
+  } else {
+    for (const item of items) {
+      const height = itemHeight(item) + rowGapPx;
+      if (current.length > 0 && used + height > available) {
+        pages.push(current);
+        current = [];
+        used = 0;
+        available = nextPagePx;
+      }
+      current.push(item);
+      used += height;
     }
   }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, TrendingUp } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
@@ -33,13 +33,22 @@ export default function DashboardPage() {
 
   // Pipeline: sum of Better prices for active (non-Won/Lost) projects
   const activeProjects = projects.filter(
-    (p) => p.status !== "Won" && p.status !== "Lost"
+    (p) => p.status !== "Won" && p.status !== "Lost" && p.status !== "Archived"
   );
   const wonProjects = projects.filter((p) => p.status === "Won");
   const pendingQuotes = quotes.filter(
     (q) => q.status === "Draft" || q.status === "Sent"
   );
   const acceptedQuotes = quotes.filter((q) => q.status === "Accepted");
+  const recentlySignedQuotes = useMemo(
+    () =>
+      acceptedQuotes.filter((q) => {
+        if (!q.signedAt) return false;
+        const sinceMs = new Date().getTime() - new Date(q.signedAt).getTime();
+        return sinceMs < 7 * 24 * 60 * 60 * 1000;
+      }),
+    [acceptedQuotes]
+  );
   const winRate =
     quotes.length > 0 ? acceptedQuotes.length / quotes.length : 0;
 
@@ -110,6 +119,7 @@ export default function DashboardPage() {
               label="Quotes Pending"
               value={String(pendingQuotes.length)}
               detail={`${acceptedQuotes.length} accepted`}
+              badge={recentlySignedQuotes.length > 0 ? `${recentlySignedQuotes.length} signed this week` : undefined}
             />
             <MetricCard
               label="Win Rate"
@@ -187,7 +197,7 @@ export default function DashboardPage() {
                   Projects by Status
                 </h3>
                 <div className="mt-4 space-y-2">
-                  {(["Draft", "Pricing", "Quoted", "Won", "Lost"] as const).map(
+                  {(["Draft", "Pricing", "Quoted", "Won", "Lost", "Archived"] as const).map(
                     (status) => {
                       const count = statusCounts[status] ?? 0;
                       const pct =
@@ -275,11 +285,13 @@ function MetricCard({
   label,
   value,
   detail,
+  badge,
   accent = false,
 }: {
   label: string;
   value: string;
   detail: string;
+  badge?: string;
   accent?: boolean;
 }) {
   return (
@@ -293,6 +305,15 @@ function MetricCard({
       <p className={`mt-2 text-sm ${accent ? "text-white/60" : "text-gray-500"}`}>
         {detail}
       </p>
+      {badge ? (
+        <p
+          className={`mt-3 inline-flex rounded-md px-2 py-1 text-xs font-medium ${
+            accent ? "bg-white/10 text-white" : "bg-green-50 text-green-700"
+          }`}
+        >
+          {badge}
+        </p>
+      ) : null}
     </article>
   );
 }

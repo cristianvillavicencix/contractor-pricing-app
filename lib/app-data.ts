@@ -1,4 +1,6 @@
-export type ProjectStatus = "Draft" | "Pricing" | "Quoted" | "Won" | "Lost";
+import { calculatePricingEngine } from "./pricing-engine";
+
+export type ProjectStatus = "Draft" | "Pricing" | "Quoted" | "Won" | "Lost" | "Archived";
 
 export type Trade =
   | "Roofing"
@@ -160,6 +162,8 @@ export type Quote = {
   status: QuoteStatus;
   createdAt: string;
   expiresAt: string;
+  signedAt?: string;
+  signedBy?: string;
 };
 
 export type AppSettings = {
@@ -338,6 +342,7 @@ export const statusOptions: ProjectStatus[] = [
   "Quoted",
   "Won",
   "Lost",
+  "Archived",
 ];
 export const quoteStatusOptions: QuoteStatus[] = [
   "Draft",
@@ -812,7 +817,123 @@ export function calculateProjectPricing(
   project: Project,
   settings: AppSettings = defaultSettings
 ) {
-  return calculatePricing(createPricingInputFromProject(project, mergeAppSettings(settings)));
+  const merged = mergeAppSettings(settings);
+  const result = calculatePricingEngine({
+    costs: {
+      material: project.costs.materials,
+      labor: project.costs.labor,
+      dumpster: project.costs.dumpster,
+      permits: project.costs.permits,
+      equipment: project.costs.equipment,
+      subcontractor: project.costs.subcontractor,
+      miscellaneous: project.costs.miscellaneous,
+    },
+    businessCosts: {
+      overheadPercent: merged.costRules.includeOverhead
+        ? merged.costRules.defaultOverheadPercent
+        : 0,
+      overheadAllocationMethod: merged.costRules.overheadAllocationMethod,
+      monthlyOverhead: merged.costRules.monthlyOverhead,
+      flatOverheadPerProject: merged.costRules.flatOverheadPerProject,
+      monthlyBillableDays: merged.costRules.monthlyBillableDays,
+      projectDurationDays: merged.costRules.defaultProjectDurationDays,
+      laborBurdenPercent: merged.costRules.laborBurdenPercent,
+      minimumJobPrice: merged.costRules.minimumJobPrice,
+      miscellaneousBufferPercent: merged.costRules.includeMiscellaneousBuffer
+        ? merged.costRules.miscellaneousBufferPercent
+        : 0,
+      permitBuffer: merged.costRules.permitBuffer,
+      creditCardFeePercent: merged.costRules.creditCardFeePercent,
+      financingFeePercent: merged.costRules.financingFeePercent,
+      taxPercent: merged.costRules.taxPercent,
+      includeCreditCardFee: merged.costRules.includeCreditCardFee,
+      includeFinancingFee: merged.costRules.includeFinancingFee,
+      includeTax: merged.costRules.includeTax,
+      includeMiscellaneousBuffer: merged.costRules.includeMiscellaneousBuffer,
+    },
+    commission: {
+      includeCommission: false,
+      commissionType: "Percentage",
+      commissionPercentage: 0,
+      commissionFlatAmount: 0,
+    },
+    setup: {
+      trade: project.trade,
+      state: project.state,
+      companyLevel: merged.companyProfile.companyLevel,
+      projectSize: project.projectSize,
+      riskLevel: project.riskLevel,
+      strategy: merged.pricingDefaults.defaultStrategy,
+    },
+    pricingRules: {
+      baseMargins: {
+        Good: merged.pricingDefaults.goodMargin / 100,
+        Better: merged.pricingDefaults.betterMargin / 100,
+        Best: merged.pricingDefaults.bestMargin / 100,
+      },
+      stateAdjustments: Object.fromEntries(
+        Object.entries(merged.marketLocation.stateAdjustments).map(([state, value]) => [
+          state,
+          (value ?? 0) / 100,
+        ])
+      ) as Partial<Record<ProjectState, number>>,
+      tradeAdjustments: Object.fromEntries(
+        Object.entries(merged.pricingDefaults.tradeAdjustments).map(([trade, value]) => [
+          trade,
+          value / 100,
+        ])
+      ) as Partial<Record<Trade, number>>,
+      sizeAdjustments: Object.fromEntries(
+        Object.entries(merged.pricingDefaults.sizeAdjustments).map(([size, value]) => [
+          size,
+          value / 100,
+        ])
+      ) as Partial<Record<ProjectSize, number>>,
+      riskAdjustments: Object.fromEntries(
+        Object.entries(merged.pricingDefaults.riskAdjustments).map(([risk, value]) => [
+          risk,
+          value / 100,
+        ])
+      ) as Partial<Record<RiskLevel, number>>,
+      strategyAdjustments: Object.fromEntries(
+        Object.entries(merged.pricingDefaults.strategyAdjustments).map(([strategy, value]) => [
+          strategy,
+          value / 100,
+        ])
+      ) as Partial<Record<Strategy, number>>,
+      companyAdjustments: Object.fromEntries(
+        Object.entries(merged.pricingDefaults.companyAdjustments).map(([company, value]) => [
+          company,
+          value / 100,
+        ])
+      ) as Partial<Record<CompanyLevel, number>>,
+      minimumSafeMargin: merged.pricingDefaults.minimumSafeMargin / 100,
+      thresholds: {
+        riskyMargin: merged.pricingThresholds.riskyMarginPercent / 100,
+        tightMargin: merged.pricingThresholds.tightMarginPercent / 100,
+        safePriceCushion: merged.pricingThresholds.safePriceCushionPercent / 100,
+        warningMarginLow: merged.pricingThresholds.warningMarginLowPercent / 100,
+        warningMarginHigh: merged.pricingThresholds.warningMarginHighPercent / 100,
+        warningCommission: merged.pricingThresholds.warningCommissionPercent / 100,
+        warningFeeProfit: merged.pricingThresholds.warningFeeProfitPercent / 100,
+        safeMarginRiskBonus: merged.pricingThresholds.safeMarginRiskBonusPercent / 100,
+        safeMarginSmallBonus: merged.pricingThresholds.safeMarginSmallBonusPercent / 100,
+        marginClampMin: merged.pricingThresholds.marginClampMinPercent / 100,
+        marginClampMax: merged.pricingThresholds.marginClampMaxPercent / 100,
+      },
+    },
+  });
+
+  return result.options.map((option) => ({
+    name: option.name,
+    salePrice: option.salePrice,
+    profit: option.netProfit,
+    margin: option.margin,
+    markup: option.markup,
+    description: getPricingDescription(option.name),
+    useCase: getPricingUseCase(option.name),
+    recommended: option.recommended,
+  }));
 }
 
 export function getPricingAdjustment(input: PricingInput) {

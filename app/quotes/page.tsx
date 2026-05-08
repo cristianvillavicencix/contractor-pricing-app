@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, RefreshCw, Search } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   formatMargin,
@@ -32,19 +32,25 @@ export default function QuotesPage() {
     initialContacts
   );
   const [statusFilter, setStatusFilter] = useState<"All" | QuoteStatus>("All");
+  const [search, setSearch] = useState("");
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(() =>
     typeof window === "undefined"
       ? null
       : new URLSearchParams(window.location.search).get("quoteId")
   );
 
-  const filteredQuotes = useMemo(
-    () =>
-      quotes.filter(
-        (quote) => statusFilter === "All" || quote.status === statusFilter
-      ),
-    [quotes, statusFilter]
-  );
+  const filteredQuotes = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return quotes.filter((quote) => {
+      const matchesStatus = statusFilter === "All" || quote.status === statusFilter;
+      const matchesSearch =
+        !query ||
+        quote.projectName.toLowerCase().includes(query) ||
+        quote.customerName.toLowerCase().includes(query) ||
+        (quote.proposalNumber ?? "").toLowerCase().includes(query);
+      return matchesStatus && matchesSearch;
+    });
+  }, [quotes, statusFilter, search]);
 
   function updateQuoteStatus(id: string, status: QuoteStatus) {
     setQuotes((current) =>
@@ -86,18 +92,29 @@ export default function QuotesPage() {
           </header>
 
           <section className="mt-8 rounded-lg border border-[#d9e2ec] bg-white p-4">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "All" | QuoteStatus)}
-              className="w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35] sm:w-56"
-            >
-              <option value="All">All statuses</option>
-              {quoteStatusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <label className="relative flex-1">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by project, customer, or proposal #"
+                  className="w-full rounded-md border border-[#d9e2ec] py-3 pl-11 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
+                />
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as "All" | QuoteStatus)}
+                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35] sm:w-48"
+              >
+                <option value="All">All statuses</option>
+                {quoteStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </div>
           </section>
 
           {filteredQuotes.length > 0 ? (
@@ -106,6 +123,7 @@ export default function QuotesPage() {
               <div className="space-y-2 sm:hidden">
                 {filteredQuotes.map((quote) => {
                   const selected = getSelectedResult(quote);
+                  const expired = isExpired(quote);
                   return (
                     <button
                       key={quote.id}
@@ -117,12 +135,17 @@ export default function QuotesPage() {
                           <p className="truncate font-medium text-black">{quote.projectName}</p>
                           <p className="mt-0.5 truncate text-xs text-gray-500">{quote.customerName}</p>
                         </div>
-                        <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
-                          quote.status === "Accepted" ? "bg-green-50 text-green-700" :
-                          quote.status === "Sent" ? "bg-blue-50 text-blue-700" :
-                          quote.status === "Declined" ? "bg-red-50 text-red-700" :
-                          "bg-gray-100 text-gray-600"
-                        }`}>{quote.status}</span>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {expired && (quote.status === "Draft" || quote.status === "Sent") ? (
+                            <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Expired</span>
+                          ) : null}
+                          <span className={`rounded px-2 py-0.5 text-xs font-medium ${
+                            quote.status === "Accepted" ? "bg-green-50 text-green-700" :
+                            quote.status === "Sent" ? "bg-blue-50 text-blue-700" :
+                            quote.status === "Declined" ? "bg-red-50 text-red-700" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>{quote.status}</span>
+                        </div>
                       </div>
                       <div className="mt-2.5 flex items-center gap-3 text-sm">
                         <span className="font-semibold">{formatMoney(selected.salePrice)}</span>
@@ -149,6 +172,7 @@ export default function QuotesPage() {
                 <div className="min-w-215 divide-y divide-gray-100">
                   {filteredQuotes.map((quote) => {
                     const selected = getSelectedResult(quote);
+                    const expired = isExpired(quote);
                     return (
                       <button
                         key={quote.id}
@@ -157,7 +181,14 @@ export default function QuotesPage() {
                       >
                         <div className="min-w-0">
                           <p className="truncate font-medium text-black">{quote.projectName}</p>
-                          <p className="mt-1 truncate text-gray-500">{quote.customerName} · expires {quote.expiresAt}</p>
+                          <p className="mt-1 truncate text-gray-500">
+                            {quote.customerName} ·{" "}
+                            {expired && (quote.status === "Draft" || quote.status === "Sent") ? (
+                              <span className="font-medium text-red-500">Expired {quote.expiresAt}</span>
+                            ) : (
+                              <span>expires {quote.expiresAt}</span>
+                            )}
+                          </p>
                         </div>
                         <span className="text-gray-600">{quote.status}</span>
                         <span>{quote.selectedOption}</span>
@@ -191,9 +222,10 @@ export default function QuotesPage() {
           onStatusChange={(status) => updateQuoteStatus(selectedQuote.id, status)}
           onOpenProject={(projectId) => router.push(`/projects?projectId=${projectId}`)}
           onOpenContact={(contactId) => router.push(`/contacts?contactId=${contactId}`)}
-          onPreview={() => {
-            router.push(`/quotes/preview?id=${selectedQuote.id}`);
-          }}
+          onPreview={() => router.push(`/quotes/preview?id=${selectedQuote.id}`)}
+          onReprice={selectedQuote.projectId
+            ? () => router.push(`/projects?projectId=${selectedQuote.projectId}&projectTab=costs`)
+            : undefined}
         />
       ) : null}
     </div>
@@ -209,6 +241,7 @@ function QuoteDetailPanel({
   onOpenProject,
   onOpenContact,
   onPreview,
+  onReprice,
 }: {
   quote: Quote;
   project?: Project;
@@ -218,6 +251,7 @@ function QuoteDetailPanel({
   onOpenProject: (projectId: string) => void;
   onOpenContact: (contactId: string) => void;
   onPreview: () => void;
+  onReprice?: () => void;
 }) {
   const selected = getSelectedResult(quote);
 
@@ -250,16 +284,28 @@ function QuoteDetailPanel({
         </div>
 
         {/* Preview CTA */}
-        <button
-          onClick={onPreview}
-          className="mt-5 flex w-full items-center justify-between gap-3 rounded-md border border-[#111111] bg-[#111111] px-5 py-3.5 text-sm font-medium text-white transition hover:bg-[#333333]"
-        >
-          <div className="flex items-center gap-2.5">
-            <FileText className="h-4 w-4" />
-            Preview &amp; Download PDF
-          </div>
-          <span className="text-xs text-white/60">Opens proposal editor →</span>
-        </button>
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={onPreview}
+            className="flex flex-1 items-center justify-between gap-3 rounded-md border border-[#111111] bg-[#111111] px-5 py-3.5 text-sm font-medium text-white transition hover:bg-[#333333]"
+          >
+            <div className="flex items-center gap-2.5">
+              <FileText className="h-4 w-4" />
+              Preview &amp; Download PDF
+            </div>
+            <span className="text-xs text-white/60">→</span>
+          </button>
+          {onReprice && (
+            <button
+              onClick={onReprice}
+              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+              title="Go to project costs to reprice"
+            >
+              <RefreshCw className="h-4 w-4 text-gray-500" />
+              Reprice
+            </button>
+          )}
+        </div>
 
         {/* Status */}
         <div className="mt-6">
@@ -307,7 +353,17 @@ function QuoteDetailPanel({
           <Metric label="Profit" value={formatMoney(selected.profit)} />
           <Metric label="Margin" value={formatMargin(selected.margin)} />
           <Metric label="Created" value={quote.createdAt} />
-          <Metric label="Expires" value={quote.expiresAt} />
+          <Metric
+            label="Expires"
+            value={quote.expiresAt}
+            alert={isExpired(quote) && (quote.status === "Draft" || quote.status === "Sent")}
+          />
+          {quote.signedAt && (
+            <Metric
+              label="Signed"
+              value={`${new Date(quote.signedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${quote.signedBy ? ` by ${quote.signedBy}` : ""}`}
+            />
+          )}
         </div>
 
         {/* Pricing options */}
@@ -353,18 +409,29 @@ function findQuoteContact(quote: Quote, contacts: Contact[]) {
         contact.email.trim().toLowerCase() ===
           (quote.customerEmail ?? "").trim().toLowerCase()) ||
       (Boolean(contact.phone) &&
-        contact.phone.trim().toLowerCase() ===
-          (quote.customerPhone ?? "").trim().toLowerCase())
+        samePhone(contact.phone, quote.customerPhone ?? ""))
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, alert = false }: { label: string; value: string; alert?: boolean }) {
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
         {label}
       </p>
-      <p className="mt-1 font-medium text-black">{value}</p>
+      <p className={`mt-1 font-medium ${alert ? "text-red-500" : "text-black"}`}>{value}</p>
     </div>
   );
+}
+
+function isExpired(quote: Quote) {
+  if (!quote.expiresAt) return false;
+  const expiry = new Date(quote.expiresAt);
+  return expiry < new Date();
+}
+
+function samePhone(left: string, right: string) {
+  const leftDigits = left.replace(/\D/g, "");
+  const rightDigits = right.replace(/\D/g, "");
+  return leftDigits.length > 0 && leftDigits === rightDigits;
 }

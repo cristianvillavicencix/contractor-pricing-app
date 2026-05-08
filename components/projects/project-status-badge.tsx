@@ -6,6 +6,7 @@ const statusStyles: Record<ProjectStatus, string> = {
   Quoted: "border-gray-300 bg-white text-gray-800",
   Won: "border-gray-300 bg-gray-100 text-black",
   Lost: "border-[#d9e2ec] bg-[#f6f8fb] text-gray-500",
+  Archived: "border-[#d9e2ec] bg-gray-50 text-gray-400",
 };
 
 export function ProjectStatusBadge({ status }: { status: ProjectStatus }) {

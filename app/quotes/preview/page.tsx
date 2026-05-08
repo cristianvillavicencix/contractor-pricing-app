@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  AlertTriangle,
   Check,
   ChevronDown,
   Download,
@@ -48,6 +49,7 @@ import {
   type ProposalTemplate,
 } from "@/lib/proposal-templates";
 import { ProposalDocument } from "@/components/proposals/proposal-document";
+import { PagedProposalPreview } from "@/components/proposals/paged-proposal-preview";
 import type {
   SectionLayouts,
   SectionOverrides,
@@ -55,6 +57,22 @@ import type {
 import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
 
 type ServiceItem = { name: string; visible: boolean };
+type ProposalHealthItem = { label: string; ok: boolean; detail: string };
+type QuoteVersionSnapshot = {
+  id: string;
+  savedAt: string;
+  proposalNumber?: string;
+  scopeSummary: string;
+  warrantyText: string;
+  termsText: string;
+  includedServices: string[];
+  certifications: string[];
+  pricingDescriptions: Record<"Good" | "Better" | "Best", string>;
+  sectionOverrides: SectionOverrides;
+  sectionLayouts: SectionLayouts;
+  sectionOrder: string[];
+  customSections: CustomSection[];
+};
 type QuotePhotos = {
   coverImageUrl: string | null;
   existingPhotos: string[];
@@ -63,9 +81,12 @@ type QuotePhotos = {
 };
 
 const SERVICES_COLLAPSE_AT = 6;
-
 function quotePhotosKey(id: string) {
   return `contractor-pricing-app:quote-photos:${id}`;
+}
+
+function quoteVersionsKey(id: string) {
+  return `contractor-pricing-app:quote-versions:${id}`;
 }
 
 const COVER_LAYOUTS: { id: CoverLayout; label: string }[] = [
@@ -94,6 +115,12 @@ function QuotePreviewContent() {
   const [terms, setTerms] = useState(
     quote?.termsText ?? settings.proposalSettings.defaultTerms
   );
+  const [pricingDescriptions, setPricingDescriptions] = useState(() => ({
+    Good: quote?.good.description ?? settings.proposalSettings.goodDescription,
+    Better:
+      quote?.better.description ?? settings.proposalSettings.betterDescription,
+    Best: quote?.best.description ?? settings.proposalSettings.bestDescription,
+  }));
   const [services, setServices] = useState<ServiceItem[]>(() =>
     (quote?.includedServices ?? settings.proposalSettings.defaultIncludedServices ?? defaultIncludedServices).map((name) => ({
       name,
@@ -112,14 +139,19 @@ function QuotePreviewContent() {
   const [sectionLayouts, setSectionLayouts] = useState<SectionLayouts>(
     () => quote?.sectionLayouts ?? {}
   );
-  const [sectionOrder, setSectionOrder] = useState<string[]>(
-    () => quote?.sectionOrder ?? PROPOSAL_SECTIONS.map((s) => s.id)
-  );
+  const [sectionOrder, setSectionOrder] = useState<string[]>(() => {
+    const saved = quote?.sectionOrder ?? PROPOSAL_SECTIONS.map((s) => s.id);
+    // Ensure any newly-added built-in sections are appended to existing saved orders
+    const builtInIds = PROPOSAL_SECTIONS.map((s) => s.id);
+    const missing = builtInIds.filter((id) => !saved.includes(id));
+    return [...saved, ...missing];
+  });
   const [customSections, setCustomSections] = useState<CustomSection[]>(
     () => quote?.customSections ?? []
   );
 
   const [showAllServices, setShowAllServices] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const [newService, setNewService] = useState("");
   const [newCert, setNewCert] = useState("");
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(() => {
@@ -137,6 +169,7 @@ function QuotePreviewContent() {
   );
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [mobileTab, setMobileTab] = useState<"edit" | "preview">("preview");
   const [dragSectionIndex, setDragSectionIndex] = useState<number | null>(null);
@@ -151,6 +184,15 @@ function QuotePreviewContent() {
   const [activeProposalSection, setActiveProposalSection] = useState<
     string | null
   >("cover");
+  const [quoteVersions, setQuoteVersions] = useState<QuoteVersionSnapshot[]>(
+    () => {
+      if (!quoteId) return [];
+      return readLocalStorage<QuoteVersionSnapshot[]>(
+        quoteVersionsKey(quoteId),
+        []
+      );
+    }
+  );
 
   // Proposal modal + photos + template editor
   const [showProposalModal, setShowProposalModal] = useState(false);
@@ -206,6 +248,7 @@ function QuotePreviewContent() {
     warrantyText: warranty,
     termsText: terms,
     includedServices: services.filter((s) => s.visible).map((s) => s.name),
+    pricingDescriptions,
     certifications: settings.proposalSettings.showCertifications
       ? certs.filter((c) => c.visible).map((c) => c.name)
       : [],
@@ -223,6 +266,9 @@ function QuotePreviewContent() {
   };
   const proposalQuote: Quote = {
     ...quote,
+    good: { ...quote.good, description: pricingDescriptions.Good },
+    better: { ...quote.better, description: pricingDescriptions.Better },
+    best: { ...quote.best, description: pricingDescriptions.Best },
     scopeSummary: scope,
     warrantyText: warranty,
     termsText: terms,
@@ -262,7 +308,8 @@ function QuotePreviewContent() {
     setIsDirty(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, warranty, terms, services, certs, sectionOverrides, sectionLayouts,
-      sectionOrder, customSections, existingPhotos, coverImageUrl, coverLayout, proposalTemplate]);
+      sectionOrder, customSections, existingPhotos, coverImageUrl, coverLayout,
+      proposalTemplate, pricingDescriptions]);
 
   // Warn before closing/refreshing with unsaved changes
   useEffect(() => {
@@ -273,13 +320,16 @@ function QuotePreviewContent() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  function handleSave() {
+  function saveProposal({ manual }: { manual: boolean }) {
     if (!quote) return;
     const all = readLocalStorage<Quote[]>(storageKeys.quotes, []);
     const updated = all.map((q) =>
       q.id === quote.id
         ? {
             ...q,
+            good: { ...q.good, description: pricingDescriptions.Good },
+            better: { ...q.better, description: pricingDescriptions.Better },
+            best: { ...q.best, description: pricingDescriptions.Best },
             scopeSummary: scope,
             warrantyText: warranty,
             termsText: terms,
@@ -301,24 +351,97 @@ function QuotePreviewContent() {
       coverLayout,
     });
     persistTemplate(proposalTemplate);
+    if (manual) {
+      const nextVersions = [
+        {
+          id: crypto.randomUUID(),
+          savedAt: new Date().toISOString(),
+          proposalNumber: quote.proposalNumber,
+          scopeSummary: scope,
+          warrantyText: warranty,
+          termsText: terms,
+          includedServices: services.filter((s) => s.visible).map((s) => s.name),
+          certifications: certs.filter((c) => c.visible).map((c) => c.name),
+          pricingDescriptions,
+          sectionOverrides,
+          sectionLayouts,
+          sectionOrder,
+          customSections,
+        },
+        ...quoteVersions,
+      ].slice(0, 10);
+      writeLocalStorage(quoteVersionsKey(quote.id), nextVersions);
+      setQuoteVersions(nextVersions);
+    }
     setIsDirty(false);
     setIsSaved(true);
+    setIsAutoSaving(false);
     setTimeout(() => setIsSaved(false), 2000);
   }
 
+  function handleSave() {
+    saveProposal({ manual: true });
+  }
+
+  useEffect(() => {
+    if (!isDirty || isSaved) return;
+    const timer = window.setTimeout(() => {
+      setIsAutoSaving(true);
+      saveProposal({ manual: false });
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, isSaved, scope, warranty, terms, services, certs, sectionOverrides,
+      sectionLayouts, sectionOrder, customSections, existingPhotos, coverImageUrl,
+      coverLayout, proposalTemplate, pricingDescriptions]);
+
   async function handleDownload() {
+    if (!quote) return;
     setIsDownloading(true);
     try {
-      const { downloadQuotePDF } = await import("@/components/quotes/quote-pdf");
-      await downloadQuotePDF(doc, coverImageUrl ?? undefined, coverLayout);
+      saveProposal({ manual: false });
+
+      const storage: Record<string, string> = {};
+      for (const key of Object.values(storageKeys)) {
+        const value = window.localStorage.getItem(key);
+        if (value) storage[key] = value;
+      }
+      if (quote.id) {
+        const photosValue = window.localStorage.getItem(quotePhotosKey(quote.id));
+        if (photosValue) storage[quotePhotosKey(quote.id)] = photosValue;
+      }
+
+      const response = await fetch("/api/proposals/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteId: quote.id, storage }),
+      });
+
+      if (!response.ok) {
+        throw new Error("PDF generation failed");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${doc.proposalNumber || "proposal"}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
     } finally {
       setIsDownloading(false);
     }
   }
 
   function handleCoverUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const MAX_BYTES = 1.2 * 1024 * 1024;
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_BYTES) {
+      alert(`"${file.name}" exceeds the 1 MB limit for cover photos. Please resize it before uploading.`);
+      e.target.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       const result = ev.target?.result;
@@ -329,13 +452,18 @@ function QuotePreviewContent() {
   }
 
   function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const MAX_BYTES = 1.2 * 1024 * 1024; // ~1.2 MB — base64 adds ~33% overhead
     const files = Array.from(e.target.files ?? []);
-    files.forEach((file) => {
+    const oversized = files.filter((f) => f.size > MAX_BYTES);
+    if (oversized.length > 0) {
+      alert(`"${oversized[0].name}" exceeds the 1 MB limit per photo. Please resize it before uploading.`);
+    }
+    files.filter((f) => f.size <= MAX_BYTES).forEach((file) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
         const result = ev.target?.result;
-        if (typeof result === "string") setExistingPhotos((prev) => [...prev, result]);
         if (typeof result === "string") {
+          setExistingPhotos((prev) => [...prev, result]);
           setExistingPhotoCaptions((prev) => [...prev, ""]);
         }
       };
@@ -473,10 +601,67 @@ function QuotePreviewContent() {
     });
   }
 
+  function restoreVersion(version: QuoteVersionSnapshot) {
+    setScope(version.scopeSummary);
+    setWarranty(version.warrantyText);
+    setTerms(version.termsText);
+    setServices(version.includedServices.map((name) => ({ name, visible: true })));
+    setCerts(version.certifications.map((name) => ({ name, visible: true })));
+    setPricingDescriptions(
+      version.pricingDescriptions ?? pricingDescriptions
+    );
+    setSectionOverrides(version.sectionOverrides);
+    setSectionLayouts(version.sectionLayouts);
+    setSectionOrder(version.sectionOrder);
+    setCustomSections(version.customSections);
+    setShowVersions(false);
+    setIsDirty(true);
+  }
+
   const displayedServices = showAllServices
     ? services
     : services.slice(0, SERVICES_COLLAPSE_AT);
   const hiddenCount = services.length - SERVICES_COLLAPSE_AT;
+  const visibleSectionCount = sectionOrder.filter((sectionId) =>
+    isSectionVisible(sectionId)
+  ).length;
+  const healthItems = getProposalHealthItems({
+    quote,
+    coverImageUrl,
+    scope,
+    warranty,
+    terms,
+    services,
+    existingPhotos,
+    existingPhotoCaptions,
+    sectionOrder,
+    isSectionVisible,
+  });
+  const unresolvedHealthItems = healthItems.filter((item) => !item.ok);
+  const proposalHealth =
+    unresolvedHealthItems.length === 0
+      ? "Ready to send"
+      : unresolvedHealthItems.length <= 2
+        ? "Needs review"
+        : "Needs work";
+  const pagedRenderKey = JSON.stringify({
+    quoteId: quote.id,
+    scope,
+    warranty,
+    terms,
+    services,
+    certs,
+    pricingDescriptions,
+    sectionOverrides,
+    sectionLayouts,
+    sectionOrder,
+    customSections,
+    existingPhotos,
+    existingPhotoCaptions,
+    coverImageUrl,
+    coverLayout,
+    proposalTemplate,
+  });
 
   return (
     <div className="h-screen overflow-hidden bg-[#f5f8fa] text-[#213343]">
@@ -506,7 +691,7 @@ function QuotePreviewContent() {
             >
               {isSaved ? <Check className="h-4 w-4" /> : null}
               <span className="hidden sm:inline">
-                {isSaved ? "Saved!" : isDirty ? "Save changes" : "Save"}
+                {isAutoSaving ? "Auto-saving…" : isSaved ? "Saved!" : isDirty ? "Save changes" : "Save"}
               </span>
               <span className="sm:hidden">
                 {isSaved ? "✓" : isDirty ? "●" : "Save"}
@@ -584,11 +769,106 @@ function QuotePreviewContent() {
           <div className="space-y-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Edit Proposal
+              Proposal Sections
             </p>
             <p className="mt-1 text-xs text-gray-400">
-              Open a section, adjust its content, and use the eye to show or hide it.
+              Open one section at a time, edit its content, and use the eye to control what the client sees.
             </p>
+            <div className="mt-3 flex items-center justify-between rounded border border-[#d9e2ec] bg-white px-3 py-2 text-xs">
+              <span className="text-gray-400">Client-visible sections</span>
+              <span className="font-medium text-[#213343]">
+                {visibleSectionCount} / {sectionOrder.length}
+              </span>
+            </div>
+            <div className="mt-3 rounded border border-[#d9e2ec] bg-white p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Proposal Health
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-[#213343]">
+                    {proposalHealth}
+                  </p>
+                </div>
+                <span
+                  className={`rounded px-2 py-1 text-xs font-medium ${
+                    proposalHealth === "Ready to send"
+                      ? "bg-green-50 text-green-700"
+                      : proposalHealth === "Needs review"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {unresolvedHealthItems.length} issue{unresolvedHealthItems.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                {healthItems.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-start gap-2 text-xs leading-relaxed"
+                  >
+                    {item.ok ? (
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                    )}
+                    <div>
+                      <p className={item.ok ? "text-gray-500" : "font-medium text-[#213343]"}>
+                        {item.label}
+                      </p>
+                      {!item.ok ? (
+                        <p className="text-gray-400">{item.detail}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {quoteVersions.length > 0 ? (
+                <div className="mt-3 border-t border-[#eef2f6] pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowVersions((value) => !value)}
+                    className="flex w-full items-center justify-between text-xs text-gray-400 transition hover:text-[#213343]"
+                  >
+                    <span>
+                      {quoteVersions.length} saved version{quoteVersions.length === 1 ? "" : "s"}
+                    </span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${
+                        showVersions ? "" : "-rotate-90"
+                      }`}
+                    />
+                  </button>
+                  {showVersions ? (
+                    <div className="mt-2 space-y-1.5">
+                      {quoteVersions.slice(0, 5).map((version) => (
+                        <div
+                          key={version.id}
+                          className="flex items-center justify-between gap-2 rounded border border-[#eef2f6] px-2 py-1.5 text-xs"
+                        >
+                          <span className="truncate text-gray-500">
+                            {new Date(version.savedAt).toLocaleString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => restoreVersion(version)}
+                            className="shrink-0 font-medium text-[#ff5c35] transition hover:text-[#e94820]"
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
           <input
             ref={fileInputRef}
@@ -1083,6 +1363,39 @@ function QuotePreviewContent() {
                       />
                       <MiniPriceRow label="Best" value={formatMoney(doc.bestPrice)} />
                       <EditTextarea
+                        label="Good Package Text"
+                        value={pricingDescriptions.Good}
+                        onChange={(value) =>
+                          setPricingDescriptions((current) => ({
+                            ...current,
+                            Good: value,
+                          }))
+                        }
+                        rows={2}
+                      />
+                      <EditTextarea
+                        label="Better Package Text"
+                        value={pricingDescriptions.Better}
+                        onChange={(value) =>
+                          setPricingDescriptions((current) => ({
+                            ...current,
+                            Better: value,
+                          }))
+                        }
+                        rows={2}
+                      />
+                      <EditTextarea
+                        label="Best Package Text"
+                        value={pricingDescriptions.Best}
+                        onChange={(value) =>
+                          setPricingDescriptions((current) => ({
+                            ...current,
+                            Best: value,
+                          }))
+                        }
+                        rows={2}
+                      />
+                      <EditTextarea
                         label="Pricing Intro"
                         value={proposalTemplate.pricing.introText}
                         onChange={(value) =>
@@ -1291,29 +1604,29 @@ function QuotePreviewContent() {
           <div className="mx-auto max-w-260 space-y-6">
             <div className="print:hidden rounded border border-[#d9e2ec] bg-white px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Live Proposal Preview
+                Live A4 Proposal Preview
               </p>
               <p className="mt-1 text-sm text-gray-500">
-                This updates as you edit. Each separated page represents how the client proposal is organized.
+                This updates as you edit. Each separated sheet is an A4 page; long sections split into continued pages before printing, downloading, or opening the client portal.
               </p>
             </div>
             <div className="rounded border border-[#d9e2ec] bg-[#e9eef4] px-8 py-8 shadow-inner">
-              <div className="[&_.proposal-document]:space-y-10 [&_.proposal-document]:bg-transparent [&_.proposal-document>footer]:mx-auto [&_.proposal-document>footer]:max-w-198.5 [&_.proposal-document>footer]:border [&_.proposal-document>footer]:border-[#d3dde8] [&_.proposal-document>footer]:bg-white [&_.proposal-document>footer]:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_30px_rgba(15,23,42,0.08)] [&_.proposal-document>section]:mx-auto [&_.proposal-document>section]:aspect-210/297 [&_.proposal-document>section]:w-full [&_.proposal-document>section]:max-w-198.5 [&_.proposal-document>section]:overflow-hidden [&_.proposal-document>section]:border [&_.proposal-document>section]:border-[#d3dde8] [&_.proposal-document>section]:bg-white [&_.proposal-document>section]:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_30px_rgba(15,23,42,0.08)]">
-              <ProposalDocument
-                template={proposalTemplate}
-                quote={proposalQuote}
-                settings={settings}
-                photos={existingPhotos}
-                photoCaptions={existingPhotoCaptions}
-                coverPhotoUrl={coverImageUrl}
-                coverLayout={coverLayout}
-                proposalNumber={doc.proposalNumber}
-                sectionOverrides={sectionOverrides}
-                sectionLayouts={sectionLayouts}
-                sectionOrder={sectionOrder}
-                customSections={customSections}
-              />
-              </div>
+              <PagedProposalPreview renderKey={pagedRenderKey}>
+                <ProposalDocument
+                  template={proposalTemplate}
+                  quote={proposalQuote}
+                  settings={settings}
+                  photos={existingPhotos}
+                  photoCaptions={existingPhotoCaptions}
+                  coverPhotoUrl={coverImageUrl}
+                  coverLayout={coverLayout}
+                  proposalNumber={doc.proposalNumber}
+                  sectionOverrides={sectionOverrides}
+                  sectionLayouts={sectionLayouts}
+                  sectionOrder={sectionOrder}
+                  customSections={customSections}
+                />
+              </PagedProposalPreview>
             </div>
           </div>
         </div>
@@ -1343,21 +1656,25 @@ function QuotePreviewContent() {
               </button>
             </div>
           </div>
-          <div className="mx-auto max-w-5xl py-8">
-            <ProposalDocument
-              template={proposalTemplate}
-              quote={proposalQuote}
-              settings={settings}
-              photos={existingPhotos}
-              photoCaptions={existingPhotoCaptions}
-              coverPhotoUrl={coverImageUrl}
-              coverLayout={coverLayout}
-              proposalNumber={doc.proposalNumber}
-              sectionOverrides={sectionOverrides}
-              sectionLayouts={sectionLayouts}
-              sectionOrder={sectionOrder}
-              customSections={customSections}
-            />
+          <div className="bg-[#e9eef4] px-6 py-8">
+            <div className="mx-auto max-w-260">
+              <PagedProposalPreview renderKey={pagedRenderKey}>
+              <ProposalDocument
+                template={proposalTemplate}
+                quote={proposalQuote}
+                settings={settings}
+                photos={existingPhotos}
+                photoCaptions={existingPhotoCaptions}
+                coverPhotoUrl={coverImageUrl}
+                coverLayout={coverLayout}
+                proposalNumber={doc.proposalNumber}
+                sectionOverrides={sectionOverrides}
+                sectionLayouts={sectionLayouts}
+                sectionOrder={sectionOrder}
+                customSections={customSections}
+              />
+              </PagedProposalPreview>
+            </div>
           </div>
         </div>
       )}
@@ -1414,7 +1731,13 @@ function ProposalSectionPanel({
   return (
     <div
       className={`overflow-hidden rounded border transition ${
-        open ? "border-[#213343] bg-white" : "border-[#d9e2ec] bg-white"
+        open
+          ? visible
+            ? "border-[#213343] bg-white"
+            : "border-gray-300 bg-[#f6f8fb]"
+          : visible
+            ? "border-[#d9e2ec] bg-white"
+            : "border-[#e6edf4] bg-[#f6f8fb]"
       }`}
     >
       <div className="flex items-center gap-1.5 px-2 py-2">
@@ -1432,6 +1755,13 @@ function ProposalSectionPanel({
             <p className="mt-1 pl-5 text-xs leading-relaxed text-gray-400">{description}</p>
           )}
         </button>
+        <span
+          className={`hidden shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium sm:inline-flex ${
+            visible ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-400"
+          }`}
+        >
+          {visible ? "Shown" : "Hidden"}
+        </span>
         <button
           onClick={onToggleVisible}
           title={visible ? "Hide section" : "Show section"}
@@ -1441,7 +1771,17 @@ function ProposalSectionPanel({
           {visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5 opacity-40" />}
         </button>
       </div>
-      {open && <div className="border-t border-[#eef2f6] px-3 py-3">{children}</div>}
+      {open && (
+        <div className="border-t border-[#eef2f6] px-3 py-3">
+          {!visible ? (
+            <div className="mb-3 rounded border border-gray-200 bg-white px-3 py-2 text-xs leading-relaxed text-gray-500">
+              This section is hidden from the client preview, printed proposal,
+              and client portal until you turn the eye back on.
+            </div>
+          ) : null}
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -1552,6 +1892,80 @@ function MiniPriceRow({
       <span className="font-semibold text-[#213343]">{value}</span>
     </div>
   );
+}
+
+function getProposalHealthItems({
+  quote,
+  coverImageUrl,
+  scope,
+  warranty,
+  terms,
+  services,
+  existingPhotos,
+  existingPhotoCaptions,
+  sectionOrder,
+  isSectionVisible,
+}: {
+  quote: Quote;
+  coverImageUrl: string | null;
+  scope: string;
+  warranty: string;
+  terms: string;
+  services: ServiceItem[];
+  existingPhotos: string[];
+  existingPhotoCaptions: string[];
+  sectionOrder: string[];
+  isSectionVisible: (sectionId: string) => boolean;
+}): ProposalHealthItem[] {
+  const visibleSections = sectionOrder.filter(isSectionVisible);
+  const missingCaptions = existingPhotos.filter(
+    (_, index) => !existingPhotoCaptions[index]?.trim()
+  ).length;
+  const expires = quote.expiresAt ? new Date(quote.expiresAt) : null;
+  const expired = Boolean(expires && expires < new Date());
+
+  return [
+    {
+      label: "Cover photo",
+      ok: Boolean(coverImageUrl),
+      detail: "Add a property or project photo so the first page feels complete.",
+    },
+    {
+      label: "Scope summary",
+      ok: scope.trim().length >= 40,
+      detail: "Add a clear project summary before sending.",
+    },
+    {
+      label: "Included services",
+      ok: services.some((service) => service.visible),
+      detail: "Show at least one included service or hide the Scope services block.",
+    },
+    {
+      label: "Photo descriptions",
+      ok: missingCaptions === 0,
+      detail: `${missingCaptions} existing-condition photo${missingCaptions === 1 ? "" : "s"} need descriptions.`,
+    },
+    {
+      label: "Warranty text",
+      ok: warranty.trim().length >= 30,
+      detail: "Add warranty language or hide the warranty section.",
+    },
+    {
+      label: "Terms",
+      ok: terms.trim().length >= 60,
+      detail: "Terms should be present before the client signs.",
+    },
+    {
+      label: "Expiration date",
+      ok: !expired,
+      detail: "This proposal is expired. Update the quote before sending.",
+    },
+    {
+      label: "Visible sections",
+      ok: visibleSections.length >= 4,
+      detail: "Too many sections are hidden. Confirm the client still has enough context.",
+    },
+  ];
 }
 
 function CompactInput({
