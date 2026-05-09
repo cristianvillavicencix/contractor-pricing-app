@@ -3,6 +3,7 @@
 import { Check, ChevronDown, Pencil, Plus, RotateCcw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { SignOutButton } from "@/components/sign-out-button";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   blankTemplate,
@@ -203,6 +204,7 @@ export default function SettingsPage() {
                   Unsaved changes
                 </span>
               ) : null}
+              <SignOutButton layout="toolbar" />
               <button
                 onClick={resetSettings}
                 className="inline-flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3 text-sm font-medium transition hover:bg-[#f6f8fb]"

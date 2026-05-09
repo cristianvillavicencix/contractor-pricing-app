@@ -16,6 +16,7 @@ import {
 import { defaultSettings, mergeAppSettings, type AppSettings } from "@/lib/app-data";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { loadCompanySettings, saveCompanySettings } from "@/lib/supabase/data";
+import { SignOutButton } from "@/components/sign-out-button";
 
 const sidebarItems = [
   { name: "Dashboard", href: "/", icon: BarChart3 },
@@ -148,12 +149,13 @@ export function AppSidebar() {
               />
             ))}
           </div>
-          <div className="mt-auto space-y-1">
+          <div className="mt-auto space-y-1 border-t border-[#f0f4f8] pt-3">
             <DesktopLink
               item={settingsItem}
               active={isActive(settingsItem.href)}
               collapsed={collapsed}
             />
+            <SignOutButton collapsed={collapsed} />
           </div>
         </nav>
       </aside>
