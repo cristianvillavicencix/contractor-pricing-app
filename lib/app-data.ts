@@ -173,6 +173,29 @@ export type Quote = {
   coverLayout?: ProposalCoverLayout;
 };
 
+/** One row of monthly overhead breakdown (Settings + onboarding). */
+export type OverheadLineItem = { id: string; label: string; amount: number };
+
+export function sumOverheadLineItems(items: OverheadLineItem[]): number {
+  return items.reduce((s, row) => s + Math.max(0, row.amount), 0);
+}
+
+/** Suggested labels when adding overhead rows in Settings or onboarding. */
+export const OVERHEAD_BREAKDOWN_SUGGESTIONS = [
+  "Office or shop rent",
+  "Utilities (electric, gas, water)",
+  "Work vehicles (payments, insurance, fuel)",
+  "Equipment / tool leases",
+  "General liability + workers comp",
+  "Phone, internet, software",
+  "Admin / estimator payroll (non-field)",
+  "Marketing & advertising",
+  "Licenses, memberships, lead services",
+  "Business loan / line of credit payments",
+  "Training & certifications",
+  "Other fixed monthly costs",
+] as const;
+
 export type AppSettings = {
   companyProfile: {
     businessName: string;
@@ -215,6 +238,8 @@ export type AppSettings = {
   };
   costRules: {
     monthlyOverhead: number;
+    /** Optional saved breakdown (onboarding guía, manual lines, or edited here). Sum should match monthlyOverhead when used. */
+    overheadLineItems: OverheadLineItem[];
     overheadAllocationMethod:
       | "Percentage"
       | "Flat Per Project"
@@ -473,6 +498,7 @@ export const defaultSettings: AppSettings = {
   },
   costRules: {
     monthlyOverhead: 5000,
+    overheadLineItems: [],
     overheadAllocationMethod: "Percentage",
     defaultOverheadPercent: 10,
     flatOverheadPerProject: 500,

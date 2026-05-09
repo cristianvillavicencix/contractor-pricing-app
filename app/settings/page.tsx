@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Pencil, Plus, RotateCcw, Save } from "lucide-react";
+import { Check, ChevronDown, Minus, Pencil, Plus, RotateCcw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -21,6 +21,7 @@ import {
 import type {
   AppSettings,
   CompanyLevel,
+  OverheadLineItem,
   ProjectSize,
   ProjectState,
   ProposalCredentialPlacement,
@@ -33,11 +34,13 @@ import {
   companyLevelOptions,
   defaultSettings,
   mergeAppSettings,
+  OVERHEAD_BREAKDOWN_SUGGESTIONS,
   projectSizeOptions,
   riskLevelOptions,
   settingsTradeOptions,
   stateOptions,
   strategyOptions,
+  sumOverheadLineItems,
   tradeOptions,
 } from "@/lib/app-data";
 import { getAppSettingsValidationError } from "@/lib/settings-validation";
@@ -985,6 +988,10 @@ function MarketLocationSection({ settings, setSettings }: SectionProps) {
 
 function CostRulesSection({ settings, setSettings }: SectionProps) {
   const costs = settings.costRules;
+  const overheadLines = costs.overheadLineItems;
+  const breakdownSum = sumOverheadLineItems(overheadLines);
+  const monthlyOverheadDisplayed =
+    overheadLines.length > 0 ? breakdownSum : costs.monthlyOverhead;
 
   return (
     <SettingsSection
@@ -995,8 +1002,13 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <NumberField
           label="Monthly Overhead ($)"
-          value={costs.monthlyOverhead}
-          helperText="All fixed business costs not tied to specific jobs."
+          value={monthlyOverheadDisplayed}
+          disabled={overheadLines.length > 0}
+          helperText={
+            overheadLines.length > 0
+              ? "Equals the sum of the breakdown below. Clear the breakdown to edit this total directly."
+              : "All fixed business costs not tied to specific jobs."
+          }
           tooltip="Add up: rent or office lease, vehicle payments (trucks, trailers), insurance premiums, phone and internet, software subscriptions, tools and equipment payments, any salaried office staff. Run your P&L report with your accountant — look for 'Total Fixed Expenses' per month. If you're not sure, start with a rough estimate and refine it."
           onChange={(value) => updateCostRule(setSettings, "monthlyOverhead", value)}
         />
@@ -1028,6 +1040,12 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
           }
         />
       </div>
+
+      <OverheadBreakdownEditor
+        lines={overheadLines}
+        monthlyOverheadScalar={costs.monthlyOverhead}
+        setSettings={setSettings}
+      />
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
         <ToggleField
@@ -1676,6 +1694,7 @@ function NumberField({
   min = 0,
   max,
   allowNegative = false,
+  disabled = false,
 }: {
   label: string;
   value: number;
@@ -1685,6 +1704,7 @@ function NumberField({
   min?: number;
   max?: number;
   allowNegative?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <label className="block text-sm font-medium">
@@ -1697,14 +1717,16 @@ function NumberField({
         min={allowNegative ? undefined : min}
         max={max}
         value={value}
+        disabled={disabled}
         onChange={(event) => {
+          if (disabled) return;
           const nextValue = Number(event.target.value);
           if (!Number.isFinite(nextValue)) return;
           if (!allowNegative && nextValue < min) return;
           if (typeof max === "number" && nextValue > max) return;
           onChange(nextValue);
         }}
-        className="mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+        className={`mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35] ${disabled ? "cursor-not-allowed bg-gray-50 text-gray-700" : ""}`}
       />
       {helperText ? (
         <span className="mt-2 block text-xs leading-5 text-gray-500">
@@ -1972,6 +1994,177 @@ function updateCostRule<K extends keyof AppSettings["costRules"]>(
     ...current,
     costRules: { ...current.costRules, [key]: value },
   }));
+}
+
+function updateOverheadBreakdown(
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>,
+  lines: OverheadLineItem[]
+) {
+  setSettings((current) => ({
+    ...current,
+    costRules: {
+      ...current.costRules,
+      overheadLineItems: lines,
+      monthlyOverhead: sumOverheadLineItems(lines),
+    },
+  }));
+}
+
+function OverheadBreakdownEditor({
+  lines,
+  monthlyOverheadScalar,
+  setSettings,
+}: {
+  lines: OverheadLineItem[];
+  monthlyOverheadScalar: number;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+}) {
+  function patchLines(next: OverheadLineItem[]) {
+    updateOverheadBreakdown(setSettings, next);
+  }
+
+  function addRow() {
+    if (lines.length === 0 && monthlyOverheadScalar > 0) {
+      patchLines([
+        {
+          id: crypto.randomUUID(),
+          label: "Monthly overhead",
+          amount: monthlyOverheadScalar,
+        },
+      ]);
+      return;
+    }
+    patchLines([...lines, { id: crypto.randomUUID(), label: "", amount: 0 }]);
+  }
+
+  function addSuggestedRows() {
+    const taken = new Set(lines.map((r) => r.label.trim().toLowerCase()).filter(Boolean));
+    const toAdd: OverheadLineItem[] = [];
+    for (const label of OVERHEAD_BREAKDOWN_SUGGESTIONS) {
+      const key = label.toLowerCase();
+      if (!taken.has(key)) {
+        toAdd.push({ id: crypto.randomUUID(), label, amount: 0 });
+        taken.add(key);
+      }
+    }
+    if (toAdd.length === 0) return;
+    patchLines([...lines, ...toAdd]);
+  }
+
+  function updateRow(id: string, patch: Partial<Pick<OverheadLineItem, "label" | "amount">>) {
+    patchLines(lines.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  function removeRow(id: string) {
+    patchLines(lines.filter((r) => r.id !== id));
+  }
+
+  const sum = sumOverheadLineItems(lines);
+
+  return (
+    <div className="mt-6 rounded-xl border border-[#e8eef3] bg-[#fafcfd] p-4">
+      <h4 className="text-sm font-semibold text-[#213343]">Monthly overhead breakdown</h4>
+      <p className="mt-1 text-xs text-[#6B7280]">
+        Line-by-line fixed costs (optional). If you use rows here, <strong>Monthly Overhead</strong> stays equal to
+        their sum. Data from onboarding is saved here so you can edit it anytime.
+      </p>
+
+      {lines.length === 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium text-[#213343] transition hover:border-[#ff5c35]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add line
+          </button>
+          <button
+            type="button"
+            onClick={addSuggestedRows}
+            className="rounded-lg border border-dashed border-[#b7c7d6] bg-white px-3 py-2 text-xs font-medium text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#213343]"
+          >
+            Add suggested categories
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="mt-3 max-h-[min(50vh,360px)] space-y-2 overflow-y-auto pr-1">
+            {lines.map((row) => (
+              <div
+                key={row.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-[#d9e2ec] bg-white p-2 sm:flex-nowrap"
+              >
+                <input
+                  type="text"
+                  value={row.label}
+                  placeholder="Description"
+                  onChange={(e) => updateRow(row.id, { label: e.target.value })}
+                  className="min-w-[8rem] flex-1 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
+                />
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-[#9CA3AF]">$</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={row.amount || ""}
+                    onChange={(e) =>
+                      updateRow(row.id, { amount: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                    className="w-24 rounded-md border border-[#d9e2ec] px-2 py-2 text-sm outline-none focus:border-[#ff5c35]"
+                  />
+                  <span className="text-xs text-[#9CA3AF]">/mo</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="rounded-md p-2 text-[#9CA3AF] transition hover:bg-red-50 hover:text-red-600"
+                  aria-label="Remove line"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#e8eef3] pt-3">
+            <div className="text-sm text-[#6B7280]">
+              Sum: <span className="font-semibold text-[#213343]">${sum.toLocaleString()}</span>
+              <span className="ml-2 text-xs text-[#9CA3AF]">(same as Monthly Overhead above)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={addRow}
+                className="inline-flex items-center gap-1 rounded-lg border border-[#d9e2ec] bg-white px-3 py-1.5 text-xs font-medium text-[#213343] transition hover:border-[#ff5c35]"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add line
+              </button>
+              <button
+                type="button"
+                onClick={addSuggestedRows}
+                className="rounded-lg border border-dashed border-[#b7c7d6] bg-white px-3 py-1.5 text-xs font-medium text-[#6B7280] transition hover:border-[#ff5c35]"
+              >
+                Add missing suggestions
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setSettings((c) => ({
+                    ...c,
+                    costRules: { ...c.costRules, overheadLineItems: [] },
+                  }))
+                }
+                className="rounded-lg border border-[#d9e2ec] bg-white px-3 py-1.5 text-xs font-medium text-[#6B7280] transition hover:bg-[#f6f8fb]"
+              >
+                Clear breakdown
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function updateProposal<K extends keyof AppSettings["proposalSettings"]>(

@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Check, ChevronLeft, Info, Minus, Plus, X } from "lucide-react";
 import {
   companyLevelOptionsWithDesc,
   defaultSettings,
   mergeAppSettings,
   onboardingTradeOptions,
+  OVERHEAD_BREAKDOWN_SUGGESTIONS,
   stateOptions,
   type AppSettings,
   type CompanyLevel,
@@ -31,9 +32,17 @@ type WizardState = {
   vehicles: number;
   hasOffice: boolean;
   officeRent: number;
+  /** Luz, agua, gas del local si no van incluidos en la renta */
+  utilitiesMonthly: number;
   nonJobStaff: number;
   insurance: number;
   phonesInternet: number;
+  marketingAdvertising: number;
+  equipmentLeaseMonthly: number;
+  professionalFeesMonthly: number;
+  licensesMembershipsMonthly: number;
+  businessDebtPaymentsMonthly: number;
+  trainingCertsMonthly: number;
   otherCosts: number;
   goodMargin: number;
   betterMargin: number;
@@ -51,9 +60,16 @@ function computeEstimate(s: WizardState): number {
   return (
     s.vehicles * 700 +
     (s.hasOffice ? s.officeRent : 0) +
+    s.utilitiesMonthly +
     s.nonJobStaff * 3500 +
     s.insurance +
     s.phonesInternet +
+    s.marketingAdvertising +
+    s.equipmentLeaseMonthly +
+    s.professionalFeesMonthly +
+    s.licensesMembershipsMonthly +
+    s.businessDebtPaymentsMonthly +
+    s.trainingCertsMonthly +
     s.otherCosts
   );
 }
@@ -61,26 +77,27 @@ function computeEstimate(s: WizardState): number {
 const INITIAL: WizardState = {
   businessName: "", contactName: "", phone: "", email: "",
   trade: "Roofing", state: "Connecticut", companyLevel: "Small Crew",
-  overheadMode: "estimate",
-  monthlyOverhead: 1400,
+  overheadMode: "manual",
+  monthlyOverhead: 0,
   laborBurdenPercent: 20,
-  vehicles: 1, hasOffice: false, officeRent: 0, nonJobStaff: 0,
-  insurance: 500, phonesInternet: 200, otherCosts: 0,
+  vehicles: 0,
+  hasOffice: false,
+  officeRent: 0,
+  utilitiesMonthly: 0,
+  nonJobStaff: 0,
+  insurance: 0,
+  phonesInternet: 0,
+  marketingAdvertising: 0,
+  equipmentLeaseMonthly: 0,
+  professionalFeesMonthly: 0,
+  licensesMembershipsMonthly: 0,
+  businessDebtPaymentsMonthly: 0,
+  trainingCertsMonthly: 0,
+  otherCosts: 0,
   goodMargin: 28, betterMargin: 35, bestMargin: 42, minimumSafeMargin: 20,
   manualOverheadStyle: "total",
   overheadLineItems: [],
 };
-
-const OVERHEAD_LINE_TEMPLATES = [
-  "Office or shop rent",
-  "Vehicles (payments, insurance, fuel)",
-  "General liability + workers comp",
-  "Phone, internet, software",
-  "Admin / estimator payroll (non-field)",
-  "Equipment leases or tool purchases",
-  "Marketing & advertising",
-  "Other fixed monthly costs",
-] as const;
 
 function sumOverheadLines(lines: OverheadLine[]): number {
   return lines.reduce((s, row) => s + Math.max(0, row.amount), 0);
@@ -88,13 +105,6 @@ function sumOverheadLines(lines: OverheadLine[]): number {
 
 function linesFromEstimate(d: WizardState): OverheadLine[] {
   const rows: OverheadLine[] = [];
-  if (d.vehicles > 0) {
-    rows.push({
-      id: crypto.randomUUID(),
-      label: `Work vehicles (${d.vehicles} × $700/mo est.)`,
-      amount: d.vehicles * 700,
-    });
-  }
   if (d.hasOffice && d.officeRent > 0) {
     rows.push({
       id: crypto.randomUUID(),
@@ -102,11 +112,39 @@ function linesFromEstimate(d: WizardState): OverheadLine[] {
       amount: d.officeRent,
     });
   }
+  if (d.utilitiesMonthly > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Utilities (not in rent)",
+      amount: d.utilitiesMonthly,
+    });
+  }
+  if (d.vehicles > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: `Work vehicles (${d.vehicles} × $700/mo est.)`,
+      amount: d.vehicles * 700,
+    });
+  }
+  if (d.equipmentLeaseMonthly > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Equipment / tool leases",
+      amount: d.equipmentLeaseMonthly,
+    });
+  }
   if (d.nonJobStaff > 0) {
     rows.push({
       id: crypto.randomUUID(),
       label: `Non-field staff (${d.nonJobStaff} × $3,500/mo est.)`,
       amount: d.nonJobStaff * 3500,
+    });
+  }
+  if (d.professionalFeesMonthly > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Professional fees (CPA, legal, etc.)",
+      amount: d.professionalFeesMonthly,
     });
   }
   if (d.insurance > 0) {
@@ -123,6 +161,34 @@ function linesFromEstimate(d: WizardState): OverheadLine[] {
       amount: d.phonesInternet,
     });
   }
+  if (d.marketingAdvertising > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Marketing & advertising",
+      amount: d.marketingAdvertising,
+    });
+  }
+  if (d.licensesMembershipsMonthly > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Licenses, memberships, lead services",
+      amount: d.licensesMembershipsMonthly,
+    });
+  }
+  if (d.businessDebtPaymentsMonthly > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Business loan / LOC payments",
+      amount: d.businessDebtPaymentsMonthly,
+    });
+  }
+  if (d.trainingCertsMonthly > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Training & certifications (monthly)",
+      amount: d.trainingCertsMonthly,
+    });
+  }
   if (d.otherCosts > 0) {
     rows.push({
       id: crypto.randomUUID(),
@@ -131,6 +197,19 @@ function linesFromEstimate(d: WizardState): OverheadLine[] {
     });
   }
   return rows;
+}
+
+/** Lines to store in company settings after onboarding (guía, manual desglose, or vacío). */
+function buildOverheadLinesForSettings(d: WizardState): AppSettings["costRules"]["overheadLineItems"] {
+  if (d.overheadMode === "estimate") return linesFromEstimate(d);
+  if (d.manualOverheadStyle === "lineItems" && d.overheadLineItems.length > 0) {
+    return d.overheadLineItems.map((row) => ({
+      id: row.id,
+      label: row.label,
+      amount: Math.max(0, row.amount),
+    }));
+  }
+  return [];
 }
 
 function getEffectiveMonthlyOverhead(d: WizardState): number {
@@ -219,13 +298,32 @@ function suggestMarginsFromWizard(d: WizardState): MarginSuggestion {
 }
 
 export default function OnboardingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+          Cargando…
+        </div>
+      }
+    >
+      <OnboardingPageInner />
+    </Suspense>
+  );
+}
+
+function OnboardingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  /** Lets you open `/onboarding?preview=1` even after completion (design / QA). Must be logged in. */
+  const previewMode =
+    searchParams.get("preview") === "1" || searchParams.get("force") === "1";
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardState>(INITIAL);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (previewMode) return;
     let cancelled = false;
     (async () => {
       try {
@@ -241,7 +339,7 @@ export default function OnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, [supabase, router]);
+  }, [supabase, router, previewMode]);
 
   function set<K extends keyof WizardState>(key: K, value: WizardState[K]) {
     setData((prev) => {
@@ -363,6 +461,7 @@ export default function OnboardingPage() {
         costRules: {
           ...base.costRules,
           monthlyOverhead: getEffectiveMonthlyOverhead(data),
+          overheadLineItems: buildOverheadLinesForSettings(data),
           laborBurdenPercent: data.laborBurdenPercent,
           includeOverhead: true,
           includeMiscellaneousBuffer: true,
@@ -380,6 +479,12 @@ export default function OnboardingPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#f5f8fa] p-4">
       <div className="w-full max-w-lg">
+        {previewMode ? (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-950">
+            Vista previa: <code className="rounded bg-white px-1">?preview=1</code> evita la redirección si ya
+            completaste el onboarding. Sigue logueado. Para probar de cero: Ajustes → Re-run onboarding.
+          </p>
+        ) : null}
         <div className="mb-6 text-center">
           <p className="text-xl font-bold tracking-tight text-[#213343]">ContractorPricing</p>
         </div>
@@ -427,7 +532,10 @@ function StepWelcome({ onNext }: { onNext: () => void }) {
       <div className="mt-6 space-y-3 rounded-xl bg-[#f6f8fb] p-5 text-left">
         {[
           { label: "Your business info", desc: "Name, trade, and location" },
-          { label: "Your monthly costs", desc: "We help you estimate if you don't know the exact number" },
+          {
+            label: "Monthly overhead",
+            desc: "Your fixed costs per month — or a short guided checklist if you’re not sure",
+          },
           { label: "Your target margins", desc: "We start with proven industry defaults" },
         ].map((item, i) => (
           <div key={i} className="flex items-start gap-3">
@@ -575,7 +683,7 @@ function OverheadDetailModal({
   function addSuggestedCategories() {
     const taken = new Set(draft.map((r) => r.label.trim().toLowerCase()).filter(Boolean));
     const toAdd: OverheadLine[] = [];
-    for (const label of OVERHEAD_LINE_TEMPLATES) {
+    for (const label of OVERHEAD_BREAKDOWN_SUGGESTIONS) {
       const key = label.toLowerCase();
       if (!taken.has(key)) {
         toAdd.push({ id: crypto.randomUUID(), label, amount: 0 });
@@ -708,26 +816,29 @@ function OverheadDetailModal({
   );
 }
 
+function OverheadGuidedSectionTitle({ label }: { label: string }) {
+  return (
+    <p className="mt-4 border-t border-[#e8eef3] pt-3 text-[10px] font-bold uppercase tracking-wider text-[#516f90] first:mt-0 first:border-t-0 first:pt-0">
+      {label}
+    </p>
+  );
+}
+
 function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
   const estimated = computeEstimate(data);
+  const guided = data.overheadMode === "estimate";
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailDraft, setDetailDraft] = useState<OverheadLine[]>([]);
   const effective = getEffectiveMonthlyOverhead(data);
 
-  /** Optional: prefills line items from the estimate and switches to manual — no popup until user taps Edit. */
-  function applyEstimateBreakdown() {
-    const raw = linesFromEstimate(data);
-    const lines = raw.length ? raw : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
-    const withIds = lines.map((l) => ({ ...l, id: crypto.randomUUID() }));
-    patch?.({
-      overheadMode: "manual",
-      manualOverheadStyle: "lineItems",
-      overheadLineItems: withIds,
-      monthlyOverhead: sumOverheadLines(withIds),
-    });
+  function enterGuidedMode() {
+    set("overheadMode", "estimate");
   }
 
-  /** Opens the line-item editor only when the user explicitly asks (button). */
+  function exitGuidedMode() {
+    set("overheadMode", "manual");
+  }
+
   function openDetailModal() {
     const lines =
       data.overheadLineItems.length > 0
@@ -759,176 +870,265 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
     setDetailOpen(false);
   }
 
+  const hasLineBreakdown =
+    data.manualOverheadStyle === "lineItems" && data.overheadLineItems.length > 0;
+  const manualTotalDisplay = hasLineBreakdown ? effective : data.monthlyOverhead;
+  const totalInputLocked = guided || hasLineBreakdown;
+
   return (
     <div>
       <StepHeader
         step={2}
-        title="Your Monthly Costs"
-        desc="We need this to make sure every job covers your overhead — not just materials and labor."
+        title="Gasto fijo mensual (overhead)"
+        desc="Son los pagos recurrentes del negocio: renta, seguros, vehículos de trabajo, oficina, etc. No es el material de la obra ni el sueldo de la cuadrilla en campo — eso va en cada trabajo."
       />
 
-      <div className="mt-6">
-        <div className="flex gap-2 rounded-xl bg-[#f6f8fb] p-1">
-          {(["estimate", "manual"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => {
-                if (mode === "manual" && data.overheadMode === "estimate") {
-                  set("monthlyOverhead", estimated);
-                }
-                set("overheadMode", mode);
+      <div className="mt-6 space-y-5">
+        <div
+          className={`rounded-2xl border-2 px-4 py-8 text-center transition sm:px-8 ${
+            totalInputLocked
+              ? "border-dashed border-[#b7c7d6] bg-[#f9fafb]"
+              : "border-[#d9e2ec] bg-white shadow-sm focus-within:border-[#ff5c35]"
+          }`}
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
+            {guided ? "Total según la guía" : "Gasto fijo total"}
+          </p>
+          <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-[#6B7280]">
+            {guided
+              ? "Este número es la suma de las respuestas de abajo. Para teclearlo tú mismo, elige «Ya tengo mi cifra»."
+              : hasLineBreakdown
+                ? "Este total es la suma de tu desglose. Edítalo en «Editar desglose» o borra líneas en el editor para volver a un solo monto."
+                : "Un mes típico en dólares (USD). Si ya lo tienes en contabilidad o Excel, escríbelo aquí."}
+          </p>
+          <div className="mt-5 flex flex-wrap items-baseline justify-center gap-x-1 gap-y-0">
+            <span className="text-3xl font-medium tabular-nums text-[#6B7280] sm:text-4xl">$</span>
+            <input
+              type="number"
+              min={0}
+              disabled={totalInputLocked}
+              value={guided ? estimated : manualTotalDisplay || ""}
+              placeholder="0"
+              onChange={(e) => {
+                if (totalInputLocked) return;
+                set("monthlyOverhead", Math.max(0, Number(e.target.value) || 0));
               }}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                data.overheadMode === mode
-                  ? "bg-white text-[#213343] shadow-sm"
-                  : "text-[#9CA3AF]"
-              }`}
-            >
-              {mode === "estimate" ? "Help me estimate" : "I know my number"}
-            </button>
-          ))}
+              className="min-w-0 max-w-[11rem] border-0 bg-transparent text-center text-3xl font-bold tabular-nums text-[#213343] outline-none placeholder:text-[#d1d5db] disabled:cursor-not-allowed sm:max-w-[14rem] sm:text-4xl"
+            />
+            <span className="text-sm font-medium text-[#9CA3AF] sm:text-base">/ mes</span>
+          </div>
         </div>
 
-        {data.overheadMode === "estimate" ? (
-          <div className="mt-5 space-y-4">
-            <EstimatorRow label="Work vehicles / trucks" hint="$700 each — payments, insurance, fuel">
-              <Stepper value={data.vehicles} min={0} max={10} onChange={(v) => set("vehicles", v)} />
-            </EstimatorRow>
-
-            <EstimatorRow label="Office or shop rent?" hint="Monthly lease payment">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={data.hasOffice}
-                  onChange={(e) => set("hasOffice", e.target.checked)}
-                  className="h-4 w-4 accent-[#ff5c35]"
-                />
-                <span className="text-sm text-[#6B7280]">Yes, I pay rent</span>
-              </label>
-              {data.hasOffice && (
-                <input
-                  type="number"
-                  value={data.officeRent || ""}
-                  min={0}
-                  placeholder="1200"
-                  onChange={(e) => set("officeRent", Number(e.target.value) || 0)}
-                  className="mt-2 w-full rounded-lg border border-[#d9e2ec] px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
-                />
-              )}
-            </EstimatorRow>
-
-            <EstimatorRow label="Non-job employees" hint="Office, admin, estimator — not crew ($3,500 ea.)">
-              <Stepper value={data.nonJobStaff} min={0} max={5} onChange={(v) => set("nonJobStaff", v)} />
-            </EstimatorRow>
-
-            <EstimatorRow label="Insurance (GL + Workers Comp)" hint="Monthly premium — check your policy">
-              <DollarInput value={data.insurance} onChange={(v) => set("insurance", v)} placeholder="500" />
-            </EstimatorRow>
-
-            <EstimatorRow label="Phone, internet, software" hint="Cell plans, email, apps, subscriptions">
-              <DollarInput value={data.phonesInternet} onChange={(v) => set("phonesInternet", v)} placeholder="200" />
-            </EstimatorRow>
-
-            <EstimatorRow label="Other monthly costs" hint="Anything else that's fixed every month">
-              <DollarInput value={data.otherCosts} onChange={(v) => set("otherCosts", v)} placeholder="0" />
-            </EstimatorRow>
-
-            <div className="rounded-xl bg-[#213343] px-5 py-4 text-white">
-              <p className="text-xs text-white/60">Estimated monthly overhead</p>
-              <p className="mt-1 text-2xl font-bold">${estimated.toLocaleString()}/mo</p>
-              <p className="mt-1 text-xs text-white/50">You can refine this anytime in Settings</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={applyEstimateBreakdown}
-              className="w-full rounded-xl border border-[#d9e2ec] bg-white py-3 text-sm font-medium text-[#213343] transition hover:border-[#ff5c35]"
-            >
-              Break into line items (optional)
-            </button>
-            <p className="text-center text-[11px] text-[#9CA3AF]">
-              Only if you want a breakdown. Prefills from your answers above — use &quot;Edit line items&quot; to open
-              the detailed editor.
-            </p>
-          </div>
+        {!guided ? (
+          <button
+            type="button"
+            onClick={enterGuidedMode}
+            className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl border border-[#ff5c35]/35 bg-[#fff8f5] py-3.5 text-sm font-semibold text-[#ff5c35] transition hover:bg-[#fff1ea] sm:flex-row sm:gap-2"
+          >
+            <span>No tengo la cifra a mano</span>
+            <span className="text-xs font-normal text-[#c2410c] sm:text-sm sm:font-semibold">
+              — armar un estimado con la guía
+            </span>
+          </button>
         ) : (
-          <div className="mt-5 space-y-4">
-            <div className="flex gap-2 rounded-xl bg-[#f6f8fb] p-1">
-              {(["total", "lineItems"] as const).map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  onClick={() => {
-                    if (style === "lineItems") {
-                      set("manualOverheadStyle", "lineItems");
-                    } else {
-                      patch?.({ manualOverheadStyle: "total" });
-                    }
-                  }}
-                  className={`flex-1 rounded-lg py-2 text-xs font-medium transition sm:text-sm ${
-                    data.manualOverheadStyle === style
-                      ? "bg-white text-[#213343] shadow-sm"
-                      : "text-[#9CA3AF]"
-                  }`}
-                >
-                  {style === "total" ? "One monthly total" : "Itemize (detailed)"}
-                </button>
-              ))}
-            </div>
-
-            {data.manualOverheadStyle === "total" ? (
-              <>
-                <Field
-                  label="Monthly overhead ($)"
-                  hint="All fixed costs: rent, insurance, vehicles, phones, software"
-                >
-                  <input
-                    type="number"
-                    value={data.monthlyOverhead || ""}
-                    min={0}
-                    placeholder="3000"
-                    onChange={(e) => set("monthlyOverhead", Number(e.target.value) || 0)}
-                    className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none focus:border-[#ff5c35]"
-                  />
-                </Field>
-                <p className="text-xs text-[#9CA3AF]">Not sure? Switch to &quot;Help me estimate&quot; above.</p>
-                <button
-                  type="button"
-                  onClick={openDetailModal}
-                  className="w-full rounded-xl border border-dashed border-[#b7c7d6] py-3 text-sm font-medium text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#213343]"
-                >
-                  Enter detailed line items instead…
-                </button>
-              </>
-            ) : (
-              <div className="rounded-xl border border-[#d9e2ec] bg-[#f9fafb] px-4 py-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-[#9CA3AF]">
-                  Itemized total
-                </p>
-                <p className="mt-1 text-2xl font-bold text-[#213343]">${effective.toLocaleString()}/mo</p>
-                <p className="mt-1 text-xs text-[#6B7280]">
-                  {data.overheadLineItems.length} line{data.overheadLineItems.length === 1 ? "" : "s"} — sum updates
-                  automatically
-                </p>
-                <button
-                  type="button"
-                  onClick={openDetailModal}
-                  className="mt-3 w-full rounded-lg bg-[#213343] py-2.5 text-sm font-semibold text-white transition hover:bg-[#2d4a5e]"
-                >
-                  Edit line items
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={exitGuidedMode}
+            className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl border border-[#d9e2ec] bg-white py-3.5 text-sm font-medium text-[#213343] transition hover:bg-[#f6f8fb] sm:flex-row sm:gap-2"
+          >
+            <span>Ya tengo mi cifra</span>
+            <span className="text-xs font-normal text-[#6B7280] sm:text-sm">
+              — escribir solo el total mensual
+            </span>
+          </button>
         )}
 
-        <div className="mt-5 border-t border-[#d9e2ec] pt-5">
+        {guided ? (
+          <div className="overflow-hidden rounded-xl border border-[#d9e2ec] bg-[#fafcfd]">
+            <div className="border-b border-[#e8eef3] bg-white px-4 py-3 text-left">
+              <p className="text-sm font-medium text-[#213343]">Guía rápida de gastos fijos</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#6B7280]">
+                Responde con lo que pagas <strong>cada mes</strong> aunque no haya contratos. Los montos con «~» son
+                referencias para contratistas en EE. UU.; ajusta a tu realidad.
+              </p>
+            </div>
+            <div className="max-h-[min(58vh,520px)] overflow-y-auto overscroll-contain px-3 py-3">
+              <div className="space-y-3 pb-2">
+                <OverheadGuidedSectionTitle label="Local y servicios del lugar" />
+                <EstimatorRow
+                  label="Renta de local, oficina o yarda"
+                  hint="Lo que pagas cada mes por el espacio fijo del negocio (no trailers o bodegas solo de un proyecto). Si no aplica, no marques."
+                >
+                  <div className="flex min-w-[10rem] flex-col items-stretch gap-2 sm:items-end">
+                    <label className="flex cursor-pointer items-center justify-end gap-2 sm:justify-start">
+                      <input
+                        type="checkbox"
+                        checked={data.hasOffice}
+                        onChange={(e) => set("hasOffice", e.target.checked)}
+                        className="h-4 w-4 accent-[#ff5c35]"
+                      />
+                      <span className="text-sm text-[#6B7280]">Sí, pago renta</span>
+                    </label>
+                    {data.hasOffice && (
+                      <input
+                        type="number"
+                        value={data.officeRent || ""}
+                        min={0}
+                        placeholder="Ej. 1200"
+                        onChange={(e) => set("officeRent", Number(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
+                      />
+                    )}
+                  </div>
+                </EstimatorRow>
+                <EstimatorRow
+                  label="Luz, agua, gas del local"
+                  hint="Solo si no van incluidos en la renta. Monto mensual típico del edificio o yarda."
+                >
+                  <DollarInput
+                    value={data.utilitiesMonthly}
+                    onChange={(v) => set("utilitiesMonthly", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Vehículos y equipo pesado" />
+                <EstimatorRow
+                  label="Vehículos de trabajo (camionetas, trucks)"
+                  hint="Cuántas unidades dedicas al negocio. ~$700/mes c/u es un orden de idea (pago, seguro, gas promedio)."
+                >
+                  <Stepper value={data.vehicles} min={0} max={15} onChange={(v) => set("vehicles", v)} />
+                </EstimatorRow>
+                <EstimatorRow
+                  label="Arrendamiento de equipo o herramientas"
+                  hint="Plataformas elevadoras, compresores, trailers de equipo, etc.: lo que pagas al mes por arrendar (no la compra puntual)."
+                >
+                  <DollarInput
+                    value={data.equipmentLeaseMonthly}
+                    onChange={(v) => set("equipmentLeaseMonthly", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Personal y asesoría externa" />
+                <EstimatorRow
+                  label="Personal que no va a la obra"
+                  hint="Oficina, administración o estimador dedicado. ~$3,500/mes por persona es referencia; pon 0 si no aplica."
+                >
+                  <Stepper value={data.nonJobStaff} min={0} max={8} onChange={(v) => set("nonJobStaff", v)} />
+                </EstimatorRow>
+                <EstimatorRow
+                  label="Contador, abogado u otros profesionales"
+                  hint="Honorarios mensuales o prorratea anual ÷ 12 (impuestos, contratos, compliance)."
+                >
+                  <DollarInput
+                    value={data.professionalFeesMonthly}
+                    onChange={(v) => set("professionalFeesMonthly", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Seguros" />
+                <EstimatorRow
+                  label="Seguros del negocio (GL, vehículos comerciales, etc.)"
+                  hint="Prima mensual. Si pagas anual, divide entre 12. Workers comp a veces va aparte; inclúyelo aquí si es costo fijo mensual."
+                >
+                  <DollarInput value={data.insurance} onChange={(v) => set("insurance", v)} placeholder="0" />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Tecnología y comunicación" />
+                <EstimatorRow
+                  label="Teléfono, internet y software"
+                  hint="Líneas del negocio, Wi‑Fi del local, QuickBooks, CRM, almacenamiento en la nube, etc."
+                >
+                  <DollarInput value={data.phonesInternet} onChange={(v) => set("phonesInternet", v)} placeholder="0" />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Marketing y ventas" />
+                <EstimatorRow
+                  label="Publicidad y marketing"
+                  hint="Google Ads, redes, flyers, vallas, agencia, fotos de trabajos: lo que gastas al mes de forma recurrente."
+                >
+                  <DollarInput
+                    value={data.marketingAdvertising}
+                    onChange={(v) => set("marketingAdvertising", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Licencias, membresías y plataformas de leads" />
+                <EstimatorRow
+                  label="Licencias, renovaciones y suscripciones del ramo"
+                  hint="Registro de empresa, licencias estatales/locales, HomeAdvisor/Angi, Thumbtack, cámara de comercio, sindicato: total mensual o anual ÷ 12."
+                >
+                  <DollarInput
+                    value={data.licensesMembershipsMonthly}
+                    onChange={(v) => set("licensesMembershipsMonthly", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Deuda y pagos fijos del negocio" />
+                <EstimatorRow
+                  label="Pagos de préstamos o líneas de crédito del negocio"
+                  hint="Cuota mensual de financiamiento de equipo, vehículo comercial o LOC (solo la parte que pagas aunque no haya ventas)."
+                >
+                  <DollarInput
+                    value={data.businessDebtPaymentsMonthly}
+                    onChange={(v) => set("businessDebtPaymentsMonthly", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Capacitación y cumplimiento" />
+                <EstimatorRow
+                  label="Capacitación, certificaciones y seguridad"
+                  hint="OSHA, EPA, renovaciones, cursos: pon un promedio mensual (anual ÷ 12) si no pagas cada mes."
+                >
+                  <DollarInput
+                    value={data.trainingCertsMonthly}
+                    onChange={(v) => set("trainingCertsMonthly", v)}
+                    placeholder="0"
+                  />
+                </EstimatorRow>
+
+                <OverheadGuidedSectionTitle label="Todo lo demás (fijo cada mes)" />
+                <EstimatorRow
+                  label="Otros gastos fijos"
+                  hint="Lo que no entró arriba pero pagas todos los meses: portero, limpieza del local, donativos fijos, etc."
+                >
+                  <DollarInput value={data.otherCosts} onChange={(v) => set("otherCosts", v)} placeholder="0" />
+                </EstimatorRow>
+                <p className="pb-1 pt-2 text-center text-[11px] leading-relaxed text-[#9CA3AF]">
+                  El total grande arriba suma todas estas partidas; deja en 0 lo que no aplica.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {!guided && data.manualOverheadStyle === "lineItems" && data.overheadLineItems.length > 0 ? (
+          <div className="rounded-xl border border-[#d9e2ec] bg-[#f9fafb] px-4 py-3">
+            <p className="text-xs text-[#6B7280]">
+              Tienes {data.overheadLineItems.length} líneas · total{" "}
+              <strong>${effective.toLocaleString()}/mes</strong>
+            </p>
+            <button
+              type="button"
+              onClick={openDetailModal}
+              className="mt-2 text-sm font-medium text-[#ff5c35] hover:underline"
+            >
+              Editar desglose
+            </button>
+          </div>
+        ) : null}
+
+        <div className="border-t border-[#d9e2ec] pt-5">
           <Field
-            label="Labor burden %"
-            hint="Payroll taxes + workers comp on top of base wages. Typical: 18–25%. Ask your payroll provider if unsure."
+            label="Carga laboral % (labor burden)"
+            hint="Lo que pagas encima del salario base de la cuadrilla: impuestos patronales, workers comp, etc. Típico 18–25% en EE. UU. Si no sabes, deja 20% o pregunta a nómina/contador."
           >
-            <div className="mt-1.5 flex items-center gap-3">
+            <div className="mt-1.5 flex flex-wrap items-center gap-3">
               <input
                 type="number"
                 value={data.laborBurdenPercent}
@@ -937,9 +1137,14 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                 onChange={(e) => set("laborBurdenPercent", Math.max(0, Number(e.target.value) || 0))}
                 className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none focus:border-[#ff5c35]"
               />
-              <span className="text-sm text-[#9CA3AF]">% — leave at 20% if unsure</span>
+              <span className="text-sm text-[#9CA3AF]">% — 20% es un punto de partida razonable</span>
             </div>
           </Field>
+          <p className="mt-4 text-center text-[11px] leading-relaxed text-[#9CA3AF]">
+            Para llevar el overhead por partidas a tu manera (tipo Excel), podrás hacerlo después en{" "}
+            <strong className="font-medium text-[#6B7280]">Ajustes</strong>. En este paso alcanza con el total de arriba o
+            con la guía de gastos.
+          </p>
         </div>
       </div>
 
