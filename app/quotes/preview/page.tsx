@@ -137,6 +137,9 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const [customerPhone, setCustomerPhone] = useState(quote?.customerPhone ?? "");
   const [customerEmail, setCustomerEmail] = useState(quote?.customerEmail ?? "");
   const [projectName, setProjectName] = useState(quote?.projectName ?? "");
+  const [selectedOption, setSelectedOption] = useState<Quote["selectedOption"]>(
+    quote?.selectedOption ?? "Better"
+  );
 
   const [scope, setScope] = useState(quote?.scopeSummary ?? "");
   const [warranty, setWarranty] = useState(
@@ -211,6 +214,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const [showServices, setShowServices] = useState(true);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showCerts, setShowCerts] = useState(true);
+  const [showProposalHealth, setShowProposalHealth] = useState(false);
   const [activeProposalSection, setActiveProposalSection] = useState<
     string | null
   >("cover");
@@ -281,6 +285,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     customerPhone,
     customerEmail,
     projectName,
+    selectedOption,
   };
 
   const doc: QuoteDocument = {
@@ -307,9 +312,9 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   };
   const mergedProfile = mergeAppSettings(settings).companyProfile;
   const elegantPriceAuto = formatMoney(
-    quote.selectedOption === "Good"
+    selectedOption === "Good"
       ? quote.good.salePrice
-      : quote.selectedOption === "Better"
+      : selectedOption === "Better"
         ? quote.better.salePrice
         : quote.best.salePrice
   );
@@ -327,6 +332,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     sectionLayouts,
     sectionOrder,
     customSections,
+    selectedOption,
   };
 
   const tradeSuggestions = (settings.contentDefaults.tradeServices[doc.trade] ?? doc.tradeServiceSuggestions ?? []).filter(
@@ -358,7 +364,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, warranty, terms, services, certs, sectionOverrides, sectionLayouts,
       sectionOrder, customSections, existingPhotos, coverImageUrl, coverLayout,
-      proposalTemplate, pricingDescriptions]);
+      proposalTemplate, pricingDescriptions, selectedOption]);
 
   // Warn before closing/refreshing with unsaved changes
   useEffect(() => {
@@ -381,6 +387,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
            customerPhone,
            customerEmail,
            projectName,
+           selectedOption,
             good: { ...q.good, description: pricingDescriptions.Good },
             better: { ...q.better, description: pricingDescriptions.Better },
             best: { ...q.best, description: pricingDescriptions.Best },
@@ -447,7 +454,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDirty, isSaved, scope, warranty, terms, services, certs, sectionOverrides,
       sectionLayouts, sectionOrder, customSections, existingPhotos, coverImageUrl,
-      coverLayout, proposalTemplate, pricingDescriptions]);
+      coverLayout, proposalTemplate, pricingDescriptions, selectedOption]);
 
   async function handleDownload() {
     if (!quote) return;
@@ -861,95 +868,6 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                 {visibleSectionCount} / {sectionOrder.length}
               </span>
             </div>
-            <div className="mt-3 rounded border border-[#d9e2ec] bg-white p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Proposal Health
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-[#213343]">
-                    {proposalHealth}
-                  </p>
-                </div>
-                <span
-                  className={`rounded px-2 py-1 text-xs font-medium ${
-                    proposalHealth === "Ready to send"
-                      ? "bg-green-50 text-green-700"
-                      : proposalHealth === "Needs review"
-                        ? "bg-amber-50 text-amber-700"
-                        : "bg-red-50 text-red-700"
-                  }`}
-                >
-                  {unresolvedHealthItems.length} issue{unresolvedHealthItems.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="mt-3 space-y-1.5">
-                {healthItems.map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-start gap-2 text-xs leading-relaxed"
-                  >
-                    {item.ok ? (
-                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" />
-                    ) : (
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                    )}
-                    <div>
-                      <p className={item.ok ? "text-gray-500" : "font-medium text-[#213343]"}>
-                        {item.label}
-                      </p>
-                      {!item.ok ? (
-                        <p className="text-gray-400">{item.detail}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {quoteVersions.length > 0 ? (
-                <div className="mt-3 border-t border-[#eef2f6] pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowVersions((value) => !value)}
-                    className="flex w-full items-center justify-between text-xs text-gray-400 transition hover:text-[#213343]"
-                  >
-                    <span>
-                      {quoteVersions.length} saved version{quoteVersions.length === 1 ? "" : "s"}
-                    </span>
-                    <ChevronDown
-                      className={`h-3.5 w-3.5 transition-transform ${
-                        showVersions ? "" : "-rotate-90"
-                      }`}
-                    />
-                  </button>
-                  {showVersions ? (
-                    <div className="mt-2 space-y-1.5">
-                      {quoteVersions.slice(0, 5).map((version) => (
-                        <div
-                          key={version.id}
-                          className="flex items-center justify-between gap-2 rounded border border-[#eef2f6] px-2 py-1.5 text-xs"
-                        >
-                          <span className="truncate text-gray-500">
-                            {new Date(version.savedAt).toLocaleString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                              hour: "numeric",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => restoreVersion(version)}
-                            className="shrink-0 font-medium text-[#ff5c35] transition hover:text-[#e94820]"
-                          >
-                            Restore
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
           </div>
           <input
             ref={fileInputRef}
@@ -1024,70 +942,20 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                 >
                   {sectionId === "cover" && (
                     <div className="space-y-3">
-                      <div className="rounded-md border border-[#e8eef5] bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                          Client / Project (shown on cover)
-                        </p>
-                        <div className="mt-3 space-y-3">
-                          <CompactInput
-                            label="Customer name"
-                            value={customerName}
-                            onChange={setCustomerName}
-                            placeholder="Customer"
-                          />
-                          <CompactInput
-                            label="Customer address"
-                            value={customerAddress}
-                            onChange={setCustomerAddress}
-                            placeholder="123 Main St, City, ST 00000"
-                          />
-                          <CompactInput
-                            label="Customer phone"
-                            value={customerPhone}
-                            onChange={setCustomerPhone}
-                            placeholder="(555) 555-5555"
-                          />
-                          <CompactInput
-                            label="Customer email"
-                            value={customerEmail}
-                            onChange={setCustomerEmail}
-                            placeholder="name@example.com"
-                          />
-                          <CompactInput
-                            label="Project name"
-                            value={projectName}
-                            onChange={setProjectName}
-                            placeholder="Project"
-                          />
-                        </div>
-                      </div>
-                      <EditTextarea
-                        label="Cover Tagline"
-                        value={proposalTemplate.cover.tagline}
-                        onChange={(value) =>
-                          updateTemplate("cover", {
-                            ...proposalTemplate.cover,
-                            tagline: value,
-                          })
-                        }
-                        rows={2}
+                      <LayoutPicker
+                        label="Cover Layout"
+                        value={coverLayout}
+                        options={COVER_LAYOUTS.map(({ id, label }) => ({
+                          value: id,
+                          label,
+                        }))}
+                        onChange={(value) => setCoverLayout(value as CoverLayout)}
                       />
-                      <label className="block text-xs font-medium text-gray-500">
-                        Elegante — banner headline
-                        <input
-                          type="text"
-                          value={proposalTemplate.cover.bannerHeadline ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            updateTemplate("cover", {
-                              ...proposalTemplate.cover,
-                              bannerHeadline: v.trim() === "" ? undefined : v.trim(),
-                            });
-                          }}
-                          placeholder="PROPOSED INVESTMENT"
-                          className="mt-1 w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-sm outline-none focus:border-[#ff5c35]"
-                        />
-                      </label>
+
+                      <SidebarSubsection
+                        title="Cover photo"
+                        description="Main project image used on the first page."
+                      >
                       {coverImageUrl ? (
                         <>
                           <div className="relative overflow-hidden rounded border border-[#d9e2ec]">
@@ -1120,29 +988,88 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                           Upload cover photo
                         </button>
                       )}
-                      <div className="flex gap-1">
-                        {COVER_LAYOUTS.map(({ id, label }) => (
-                          <button
-                            key={id}
-                            onClick={() => setCoverLayout(id)}
-                            className={`flex-1 rounded border py-1.5 text-xs font-medium transition ${
-                              coverLayout === id
-                                ? "border-[#111111] bg-[#111111] text-white"
-                                : "border-[#d9e2ec] hover:bg-[#f6f8fb]"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
+                      </SidebarSubsection>
+
+                      <SidebarSubsection
+                        title="Client / project"
+                        description="Shown on the cover and proposal metadata."
+                      >
+                        <div className="space-y-3">
+                          <CompactInput
+                            label="Customer name"
+                            value={customerName}
+                            onChange={setCustomerName}
+                            placeholder="Customer"
+                          />
+                          <CompactInput
+                            label="Customer address"
+                            value={customerAddress}
+                            onChange={setCustomerAddress}
+                            placeholder="123 Main St, City, ST 00000"
+                          />
+                          <CompactInput
+                            label="Customer phone"
+                            value={customerPhone}
+                            onChange={setCustomerPhone}
+                            placeholder="(555) 555-5555"
+                          />
+                          <CompactInput
+                            label="Customer email"
+                            value={customerEmail}
+                            onChange={setCustomerEmail}
+                            placeholder="name@example.com"
+                          />
+                          <CompactInput
+                            label="Project name"
+                            value={projectName}
+                            onChange={setProjectName}
+                            placeholder="Project"
+                          />
+                        </div>
+                      </SidebarSubsection>
+
+                      <SidebarSubsection
+                        title="Cover text"
+                        description="Headline and supporting copy used by cover layouts."
+                      >
+                        <div className="space-y-3">
+                          <EditTextarea
+                            label="Cover Tagline"
+                            value={proposalTemplate.cover.tagline}
+                            onChange={(value) =>
+                              updateTemplate("cover", {
+                                ...proposalTemplate.cover,
+                                tagline: value,
+                              })
+                            }
+                            rows={2}
+                          />
+                          {coverLayout === "elegant" ? (
+                            <CompactInput
+                              label="Price band headline"
+                              value={proposalTemplate.cover.bannerHeadline ?? ""}
+                              onChange={(value) =>
+                                updateTemplate("cover", {
+                                  ...proposalTemplate.cover,
+                                  bannerHeadline:
+                                    value.trim() === "" ? undefined : value.trim(),
+                                })
+                              }
+                              placeholder="PROPOSED INVESTMENT"
+                            />
+                          ) : null}
+                        </div>
+                      </SidebarSubsection>
 
                       {coverLayout === "elegant" ? (
-                        <div className="space-y-3 rounded-md border border-[#e8eef5] bg-[#f9fafb] p-3">
-                          <p className="text-xs leading-relaxed text-gray-500">
-                            Elegante — opcional: se guarda en la plantilla de este trade. La dirección y el proyecto en la franja oscura siguen saliendo del presupuesto.
-                          </p>
+                        <SidebarSubsection
+                          title="Elegante cover details"
+                          description="Optional overrides for logo, price and footer contact."
+                          muted
+                        >
+                          <div className="space-y-3">
                           <CompactInput
-                            label="Nombre de empresa (opcional)"
+                            label="Company name override"
                             value={proposalTemplate.cover.elegantBusinessName ?? ""}
                             onChange={(value) =>
                               updateTemplate("cover", {
@@ -1155,7 +1082,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                           />
                           <div>
                             <span className="mb-1.5 block text-sm font-medium">
-                              Logo en cabecera (opcional)
+                              Header logo override
                             </span>
                             {proposalTemplate.cover.elegantLogoUrl ? (
                               <div className="relative overflow-hidden rounded border border-[#d9e2ec]">
@@ -1189,13 +1116,13 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                               className="w-full rounded border border-[#d9e2ec] py-1.5 text-xs font-medium text-gray-600 transition hover:bg-[#f6f8fb]"
                             >
                               {proposalTemplate.cover.elegantLogoUrl
-                                ? "Reemplazar logo"
-                                : "Subir logo"}
+                                ? "Replace logo"
+                                : "Upload logo"}
                             </button>
                           </div>
                           <label className="block">
                             <span className="mb-1.5 block text-sm font-medium">
-                              Monto mostrado (opcional)
+                              Price shown override
                             </span>
                             <input
                               value={proposalTemplate.cover.elegantPriceDisplay ?? ""}
@@ -1212,7 +1139,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                             />
                           </label>
                           <CompactInput
-                            label="Nombre en pie verde (opcional)"
+                            label="Footer contact name"
                             value={proposalTemplate.cover.elegantContactName ?? ""}
                             onChange={(value) =>
                               updateTemplate("cover", {
@@ -1228,7 +1155,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                             }
                           />
                           <CompactInput
-                            label="Cargo (opcional)"
+                            label="Footer contact title"
                             value={proposalTemplate.cover.elegantContactJobTitle ?? ""}
                             onChange={(value) =>
                               updateTemplate("cover", {
@@ -1244,7 +1171,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                           />
                           <div>
                             <span className="mb-1.5 block text-sm font-medium">
-                              Foto en pie verde (opcional)
+                              Footer contact photo
                             </span>
                             {proposalTemplate.cover.elegantContactPhotoUrl ? (
                               <div className="relative mb-2 inline-block">
@@ -1280,11 +1207,12 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                               className="w-full rounded border border-[#d9e2ec] py-1.5 text-xs font-medium text-gray-600 transition hover:bg-[#f6f8fb]"
                             >
                               {proposalTemplate.cover.elegantContactPhotoUrl
-                                ? "Reemplazar foto"
-                                : "Subir foto"}
+                                ? "Replace photo"
+                                : "Upload photo"}
                             </button>
                           </div>
-                        </div>
+                          </div>
+                        </SidebarSubsection>
                       ) : null}
                     </div>
                   )}
@@ -1453,6 +1381,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                   {sectionId === "scopeOfWork" && (
                     <div className="space-y-4">
                       <LayoutPicker
+                        label="Work items layout"
                         value={getSectionLayout(sectionId)}
                         options={[
                           { value: "numbered", label: "Rows" },
@@ -1460,7 +1389,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                         ]}
                         onChange={(value) => setSectionLayout(sectionId, value)}
                       />
-                      <div>
+                      <SidebarSubsection
+                        title="Scope introduction"
+                        description="Short paragraph before the detailed work list."
+                      >
                         <EditTextarea
                           label="Scope Intro"
                           value={proposalTemplate.scopeOfWork.introText}
@@ -1472,6 +1404,11 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                           }
                           rows={3}
                         />
+                      </SidebarSubsection>
+                      <SidebarSubsection
+                        title="Project summary"
+                        description="Optional summary generated by the wizard or edited manually."
+                      >
                         <ScopeWizard
                           trade={doc.trade || "Roofing"}
                           onGenerate={(text) => {
@@ -1499,7 +1436,13 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                             className="mt-1.5 w-full resize-none rounded border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
                           />
                         )}
+                      </SidebarSubsection>
+                      <SidebarSubsection
+                        title="Detailed work items"
+                        description="The numbered items that define exactly what will be performed."
+                      >
                         <WorkItemsList
+                          label="Work Items"
                           items={proposalTemplate.scopeOfWork.items}
                           onChange={(items) =>
                             updateTemplate("scopeOfWork", {
@@ -1508,17 +1451,17 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                             })
                           }
                         />
-                      </div>
+                      </SidebarSubsection>
 
-                      <div className="space-y-1.5 border-t border-[#eef2f6] pt-3">
+                      <SidebarSubsection
+                        title="Included services"
+                        description="Services shown after the detailed scope items."
+                      >
                         <CollapseHeader
-                          label="Included Services shown in Scope"
+                          label="Included Services"
                           open={showServices}
                           onToggle={() => setShowServices((v) => !v)}
                         />
-                        <p className="text-xs leading-relaxed text-gray-400">
-                          These appear in the proposal after the detailed work items.
-                        </p>
                         {showServices && (
                           <div className="space-y-1">
                             {displayedServices.map((item) => (
@@ -1589,7 +1532,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                             )}
                           </div>
                         )}
-                      </div>
+                      </SidebarSubsection>
                     </div>
                   )}
 
@@ -1642,8 +1585,9 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                   )}
 
                   {sectionId === "pricing" && (
-                    <div className="space-y-2 text-sm">
+                    <div className="space-y-3 text-sm">
                       <LayoutPicker
+                        label="Pricing layout"
                         value={getSectionLayout(sectionId)}
                         options={[
                           { value: "cards", label: "Cards" },
@@ -1654,76 +1598,143 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                       <p className="text-xs text-gray-400">
                         Customer-facing prices. Internal margin and profit are hidden.
                       </p>
-                      <MiniPriceRow label="Good" value={formatMoney(doc.goodPrice)} />
-                      <MiniPriceRow
-                        label="Better"
-                        value={formatMoney(doc.betterPrice)}
-                        recommended
-                      />
-                      <MiniPriceRow label="Best" value={formatMoney(doc.bestPrice)} />
-                      <EditTextarea
-                        label="Good Package Text"
-                        value={pricingDescriptions.Good}
-                        onChange={(value) =>
-                          setPricingDescriptions((current) => ({
-                            ...current,
-                            Good: value,
-                          }))
-                        }
-                        rows={2}
-                      />
-                      <EditTextarea
-                        label="Better Package Text"
-                        value={pricingDescriptions.Better}
-                        onChange={(value) =>
-                          setPricingDescriptions((current) => ({
-                            ...current,
-                            Better: value,
-                          }))
-                        }
-                        rows={2}
-                      />
-                      <EditTextarea
-                        label="Best Package Text"
-                        value={pricingDescriptions.Best}
-                        onChange={(value) =>
-                          setPricingDescriptions((current) => ({
-                            ...current,
-                            Best: value,
-                          }))
-                        }
-                        rows={2}
-                      />
-                      <EditTextarea
-                        label="Pricing Intro"
-                        value={proposalTemplate.pricing.introText}
-                        onChange={(value) =>
-                          updateTemplate("pricing", {
-                            ...proposalTemplate.pricing,
-                            introText: value,
-                          })
-                        }
-                      />
-                      <EditTextarea
-                        label="Allowances & Exclusions"
-                        value={proposalTemplate.pricing.allowancesText}
-                        onChange={(value) =>
-                          updateTemplate("pricing", {
-                            ...proposalTemplate.pricing,
-                            allowancesText: value,
-                          })
-                        }
-                      />
-                      <EditTextarea
-                        label="Financing Text"
-                        value={proposalTemplate.pricing.financingText}
-                        onChange={(value) =>
-                          updateTemplate("pricing", {
-                            ...proposalTemplate.pricing,
-                            financingText: value,
-                          })
-                        }
-                      />
+
+                      <SidebarSubsection
+                        title="Selected option"
+                        description="This is the option highlighted as recommended in the proposal."
+                      >
+                        <div className="grid grid-cols-3 gap-1">
+                          {(["Good", "Better", "Best"] as const).map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => setSelectedOption(option)}
+                              className={`rounded border px-2 py-2 text-xs font-semibold transition ${
+                                selectedOption === option
+                                  ? "border-[#111111] bg-[#111111] text-white"
+                                  : "border-[#d9e2ec] text-gray-500 hover:bg-[#f6f8fb]"
+                              }`}
+                            >
+                              {option}
+                            </button>
+                          ))}
+                        </div>
+                      </SidebarSubsection>
+
+                      <SidebarSubsection
+                        title="Customer price options"
+                        description="Shown to the client. Profit and margin stay internal."
+                      >
+                        <div className="space-y-2">
+                          <MiniPriceRow
+                            label="Good"
+                            value={formatMoney(doc.goodPrice)}
+                            recommended={selectedOption === "Good"}
+                          />
+                          <MiniPriceRow
+                            label="Better"
+                            value={formatMoney(doc.betterPrice)}
+                            recommended={selectedOption === "Better"}
+                          />
+                          <MiniPriceRow
+                            label="Best"
+                            value={formatMoney(doc.bestPrice)}
+                            recommended={selectedOption === "Best"}
+                          />
+                        </div>
+                      </SidebarSubsection>
+
+                      <SidebarSubsection
+                        title="Pricing copy"
+                        description="Intro and package descriptions shown in the Investment section."
+                      >
+                        <div className="space-y-3">
+                          <EditTextarea
+                            label="Pricing Intro"
+                            value={proposalTemplate.pricing.introText}
+                            onChange={(value) =>
+                              updateTemplate("pricing", {
+                                ...proposalTemplate.pricing,
+                                introText: value,
+                              })
+                            }
+                          />
+                          <EditTextarea
+                            label="Good Package Text"
+                            value={pricingDescriptions.Good}
+                            onChange={(value) =>
+                              setPricingDescriptions((current) => ({
+                                ...current,
+                                Good: value,
+                              }))
+                            }
+                            rows={2}
+                          />
+                          <EditTextarea
+                            label="Better Package Text"
+                            value={pricingDescriptions.Better}
+                            onChange={(value) =>
+                              setPricingDescriptions((current) => ({
+                                ...current,
+                                Better: value,
+                              }))
+                            }
+                            rows={2}
+                          />
+                          <EditTextarea
+                            label="Best Package Text"
+                            value={pricingDescriptions.Best}
+                            onChange={(value) =>
+                              setPricingDescriptions((current) => ({
+                                ...current,
+                                Best: value,
+                              }))
+                            }
+                            rows={2}
+                          />
+                        </div>
+                      </SidebarSubsection>
+
+                      <SidebarSubsection
+                        title="Allowances & financing"
+                        description="Optional notes shown below pricing."
+                      >
+                        <div className="space-y-3">
+                          <VisibilityRow
+                            label="Show financing note"
+                            visible={proposalTemplate.pricing.showFinancingOption}
+                            onToggle={() =>
+                              updateTemplate("pricing", {
+                                ...proposalTemplate.pricing,
+                                showFinancingOption:
+                                  !proposalTemplate.pricing.showFinancingOption,
+                              })
+                            }
+                          />
+                          <EditTextarea
+                            label="Allowances & Exclusions"
+                            value={proposalTemplate.pricing.allowancesText}
+                            onChange={(value) =>
+                              updateTemplate("pricing", {
+                                ...proposalTemplate.pricing,
+                                allowancesText: value,
+                              })
+                            }
+                          />
+                          {proposalTemplate.pricing.showFinancingOption ? (
+                            <EditTextarea
+                              label="Financing Text"
+                              value={proposalTemplate.pricing.financingText}
+                              onChange={(value) =>
+                                updateTemplate("pricing", {
+                                  ...proposalTemplate.pricing,
+                                  financingText: value,
+                                })
+                              }
+                            />
+                          ) : null}
+                        </div>
+                      </SidebarSubsection>
                     </div>
                   )}
 
@@ -1894,6 +1905,113 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               <Plus className="h-3.5 w-3.5" />
               Add Custom Section
             </button>
+
+            <div className="rounded border border-[#d9e2ec] bg-white">
+              <button
+                type="button"
+                onClick={() => setShowProposalHealth((value) => !value)}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition hover:bg-[#f6f8fb]"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Proposal Health
+                  </p>
+                  <p className="mt-0.5 truncate text-sm font-medium text-[#213343]">
+                    {proposalHealth}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={`rounded px-2 py-1 text-xs font-medium ${
+                      proposalHealth === "Ready to send"
+                        ? "bg-green-50 text-green-700"
+                        : proposalHealth === "Needs review"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-red-50 text-red-700"
+                    }`}
+                  >
+                    {unresolvedHealthItems.length} issue{unresolvedHealthItems.length === 1 ? "" : "s"}
+                  </span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 text-gray-400 transition-transform ${
+                      showProposalHealth ? "" : "-rotate-90"
+                    }`}
+                  />
+                </div>
+              </button>
+
+              {showProposalHealth ? (
+                <div className="border-t border-[#eef2f6] px-3 py-3">
+                  <div className="space-y-1.5">
+                    {healthItems.map((item) => (
+                      <div
+                        key={item.label}
+                        className="flex items-start gap-2 text-xs leading-relaxed"
+                      >
+                        {item.ok ? (
+                          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" />
+                        ) : (
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                        )}
+                        <div>
+                          <p className={item.ok ? "text-gray-500" : "font-medium text-[#213343]"}>
+                            {item.label}
+                          </p>
+                          {!item.ok ? (
+                            <p className="text-gray-400">{item.detail}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {quoteVersions.length > 0 ? (
+                    <div className="mt-3 border-t border-[#eef2f6] pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowVersions((value) => !value)}
+                        className="flex w-full items-center justify-between text-xs text-gray-400 transition hover:text-[#213343]"
+                      >
+                        <span>
+                          {quoteVersions.length} saved version{quoteVersions.length === 1 ? "" : "s"}
+                        </span>
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${
+                            showVersions ? "" : "-rotate-90"
+                          }`}
+                        />
+                      </button>
+                      {showVersions ? (
+                        <div className="mt-2 space-y-1.5">
+                          {quoteVersions.slice(0, 5).map((version) => (
+                            <div
+                              key={version.id}
+                              className="flex items-center justify-between gap-2 rounded border border-[#eef2f6] px-2 py-1.5 text-xs"
+                            >
+                              <span className="truncate text-gray-500">
+                                {new Date(version.savedAt).toLocaleString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => restoreVersion(version)}
+                                className="shrink-0 font-medium text-[#ff5c35] transition hover:text-[#e94820]"
+                              >
+                                Restore
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
           </div>
         </aside>
@@ -2127,6 +2245,40 @@ function VisibilityRow({
           <EyeOff className="h-3.5 w-3.5 opacity-40" />
         )}
       </button>
+    </div>
+  );
+}
+
+function SidebarSubsection({
+  title,
+  description,
+  muted = false,
+  children,
+}: {
+  title: string;
+  description?: string;
+  muted?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded border p-3 ${
+        muted
+          ? "border-[#e8eef5] bg-[#f9fafb]"
+          : "border-[#e8eef5] bg-white"
+      }`}
+    >
+      <div className="mb-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+          {title}
+        </p>
+        {description ? (
+          <p className="mt-1 text-xs leading-relaxed text-gray-400">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      {children}
     </div>
   );
 }

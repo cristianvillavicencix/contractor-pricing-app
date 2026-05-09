@@ -247,22 +247,77 @@ section.cover-page-elegant {
 
 /* Pie Elegante: nombre + cargo deben quedar juntos (sin salto entre párrafos). */
 section.cover-page-elegant .elegant-cover-footer-cluster,
-section.cover-page-elegant .elegant-cover-footer-text {
+section.cover-page-elegant .elegant-cover-footer-text,
+section.cover-page-elegant .elegant-cover-contact-lock {
   break-inside: avoid !important;
   page-break-inside: avoid !important;
+  break-before: avoid !important;
+  break-after: avoid !important;
+  page-break-before: avoid !important;
+  page-break-after: avoid !important;
+  orphans: 3;
+  widows: 3;
 }
 
-/* Elegante header: fade the frosted bar into the image (top→bottom). */
-section.cover-page-elegant .elegant-cover-header-bar {
-  /* Mask fades the entire element (including backdrop blur) */
-  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+/*
+ * Definitive Paged.js guard:
+ * the role is generated from an attribute on the same locked block, not rendered
+ * as a second DOM text node. That prevents Paged from moving the role to a
+ * second cover page while leaving the name on the first.
+ */
+section.cover-page-elegant .elegant-cover-contact-lock::after {
+  content: attr(data-subtitle);
+  display: block;
+  max-width: 100%;
+  margin-top: 1.7mm;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 3.9mm;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+  line-height: 1.08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Elegante price band fade: apply mask to the background layer only (keep text solid). */
-section.cover-page-elegant .elegant-cover-price-fade {
-  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
-  mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+/* Elegante header: dark glass layer fading into the image (top→bottom). */
+section.cover-page-elegant .elegant-cover-header-glass {
+  -webkit-backdrop-filter: blur(14px) saturate(0.92);
+  backdrop-filter: blur(14px) saturate(0.92);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.82) 52%,
+    rgba(0, 0, 0, 0.18) 78%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.82) 52%,
+    rgba(0, 0, 0, 0.18) 78%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+/* Elegante price band: blur the photo behind the price and fade upward. */
+section.cover-page-elegant .elegant-cover-price-glass {
+  -webkit-backdrop-filter: blur(14px) saturate(0.92);
+  backdrop-filter: blur(14px) saturate(0.92);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.35) 16%,
+    rgba(0, 0, 0, 1) 36%,
+    rgba(0, 0, 0, 1) 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.35) 16%,
+    rgba(0, 0, 0, 1) 36%,
+    rgba(0, 0, 0, 1) 100%
+  );
 }
 
 /* Cover sheet only — named page proposal-cover (data-page on section). Never tie bleed to :first. */
@@ -344,6 +399,7 @@ section.cover-page-elegant .elegant-cover-price-fade {
 }
 
 .paged-proposal-output .pagedjs_page {
+  position: relative;
   background: white;
   border: 1px solid #d3dde8;
   box-shadow:
@@ -365,6 +421,26 @@ section.cover-page-elegant .elegant-cover-price-fade {
  */
 .paged-proposal-output .pagedjs_page:not(.pagedjs_first_page) {
   counter-increment: proposal-sheet-number;
+}
+
+.paged-proposal-output .pagedjs_page:not(.pagedjs_first_page)::after {
+  content: "Page " counter(proposal-sheet-number);
+  position: absolute;
+  right: 14mm;
+  bottom: 1.5mm;
+  z-index: 20;
+  min-width: 22mm;
+  box-sizing: border-box;
+  border: 1px solid #d8e2ec;
+  border-bottom: 0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 5px 9px 6px;
+  text-align: center;
 }
 
 .paged-proposal-output
@@ -410,38 +486,16 @@ section.cover-page-elegant .elegant-cover-price-fade {
   .pagedjs_page:not(.pagedjs_first_page)
   .pagedjs_margin-bottom-right
   .pagedjs_margin-content::after {
-  content: "Page " counter(proposal-sheet-number);
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  border-top: 1px solid #e2e8f0;
-  color: #94a3b8;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  line-height: 1.2;
-  padding-top: 5px;
-  margin-top: 2mm;
-  text-align: right;
-  text-transform: none;
+  content: "";
+  display: none;
 }
 
 .paged-proposal-output
   .pagedjs_page:not(.pagedjs_first_page)
   [class*="pagedjs_margin-bottom"]
   .pagedjs_margin-content::after {
-  content: "Page " counter(proposal-sheet-number);
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  border-top: 1px solid #e2e8f0;
-  color: #94a3b8;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  line-height: 1.2;
-  padding-top: 5px;
-  margin-top: 2mm;
-  text-align: right;
-  text-transform: none;
+  content: "";
+  display: none;
 }
 
 /* Used by Paged for layout; margin content is applied via rules above */

@@ -83,6 +83,15 @@ export function PagedProposalPreview({
 
       const clonedDocument = source.cloneNode(true) as HTMLElement;
       clonedDocument.classList.remove("paged-proposal-source-shell");
+      /*
+       * ProposalDocument keeps a legacy footer for non-paged fallback output.
+       * If Paged.js sees it, it can allocate a final page for that footer and
+       * our CSS hides it afterward, producing a blank last PDF page. Remove it
+       * from the paginated clone before layout is calculated.
+       */
+      clonedDocument
+        .querySelectorAll(".proposal-document > footer")
+        .forEach((footer) => footer.remove());
 
       const paged = await loadPagedJs();
 
@@ -97,9 +106,9 @@ export function PagedProposalPreview({
       if (cancelled || renderId !== renderIdRef.current) return;
 
       target.replaceChildren(...Array.from(staging.childNodes));
+      removeTrailingBlankPages(target);
 
-      const pageCount =
-        flow.total ?? target.querySelectorAll(".pagedjs_page").length;
+      const pageCount = target.querySelectorAll(".pagedjs_page").length || flow.total || 0;
       onRenderedRef.current?.(pageCount);
       window.dispatchEvent(
         new CustomEvent("proposal:paged", { detail: { pageCount } })
@@ -138,6 +147,22 @@ export function PagedProposalPreview({
       </div>
     </div>
   );
+}
+
+function removeTrailingBlankPages(target: HTMLElement) {
+  const pages = Array.from(target.querySelectorAll<HTMLElement>(".pagedjs_page"));
+
+  for (let index = pages.length - 1; index >= 0; index -= 1) {
+    const page = pages[index];
+    const content = page.querySelector<HTMLElement>(".pagedjs_page_content");
+    const text = content?.textContent?.replace(/\s+/g, "").trim() ?? "";
+    const hasMedia = Boolean(
+      content?.querySelector("img, svg, canvas, table, figure, [data-proposal-section]")
+    );
+
+    if (text || hasMedia) return;
+    page.remove();
+  }
 }
 
 function loadPagedJs() {
