@@ -35,7 +35,7 @@ type ProposalCredentialPlacement =
   | "Before Signatures"
   | "After Scope"
   | "Footer";
-type ProposalCoverLayout = "full" | "half" | "square";
+type ProposalCoverLayout = "full" | "half" | "square" | "elegant";
 type CompanyCredential = {
   id: string;
   name: string;
@@ -60,6 +60,8 @@ type AppSettings = {
   companyProfile: {
     businessName: string;
     contactName: string;
+    contactJobTitle: string;
+    contactPhotoUrl: string;
     email: string;
     phone: string;
     website: string;
@@ -222,7 +224,12 @@ const credentialPlacementOptions: ProposalCredentialPlacement[] = [
   "After Scope",
   "Footer",
 ];
-const coverLayoutOptions: ProposalCoverLayout[] = ["full", "half", "square"];
+const coverLayoutOptions: { value: ProposalCoverLayout; label: string }[] = [
+  { value: "full", label: "Full bleed (photo + overlay)" },
+  { value: "half", label: "Half — photo on top" },
+  { value: "square", label: "Square photo" },
+  { value: "elegant", label: "Elegante" },
+];
 
 const defaultCompanyCredentials: CompanyCredential[] = [
   { id: "licensed-insured", name: "Licensed & Insured", enabled: true },
@@ -247,6 +254,8 @@ const defaultSettings: AppSettings = {
   companyProfile: {
     businessName: "Contractor Company",
     contactName: "",
+    contactJobTitle: "",
+    contactPhotoUrl: "/branding/default-contact-photo.png",
     email: "",
     phone: "",
     website: "",
@@ -365,7 +374,7 @@ const defaultSettings: AppSettings = {
     },
   },
   branding: {
-    logoUrl: "",
+    logoUrl: "/branding/default-company-logo.png",
     primaryColor: "#111111",
     accentColor: "#737373",
     tagline: "",
@@ -658,6 +667,30 @@ function CompanyProfileSection({
             setSettings((current) => ({
               ...current,
               companyProfile: { ...current.companyProfile, contactName: value },
+            }))
+          }
+        />
+        <TextField
+          label="Job title / role"
+          placeholder="Senior Loan Officer · Owner · Project Manager"
+          value={profile.contactJobTitle}
+          helperText="Shown under the contact name on the elegant proposal cover and PDF."
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, contactJobTitle: value },
+            }))
+          }
+        />
+        <TextField
+          label="Contact photo URL"
+          placeholder="/branding/default-contact-photo.png"
+          value={profile.contactPhotoUrl}
+          helperText="Headshot shown on the elegant cover footer (circle). Use a public URL or path under /public."
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, contactPhotoUrl: value },
             }))
           }
         />
@@ -1588,19 +1621,29 @@ function BrandingSection({ settings, setSettings }: SectionProps) {
               )
             }
           />
-          <SelectField
-            label="Default Cover Layout"
-            value={branding.proposalCoverLayout}
-            options={coverLayoutOptions}
-            helperText="Loaded as the starting cover layout in future proposal previews."
-            onChange={(value) =>
-              updateBranding(
-                setSettings,
-                "proposalCoverLayout",
-                value as ProposalCoverLayout
-              )
-            }
-          />
+          <label className="block text-sm font-medium">
+            <span className="flex items-center">Default Cover Layout</span>
+            <select
+              value={branding.proposalCoverLayout}
+              onChange={(event) =>
+                updateBranding(
+                  setSettings,
+                  "proposalCoverLayout",
+                  event.target.value as ProposalCoverLayout
+                )
+              }
+              className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+            >
+              {coverLayoutOptions.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <span className="mt-2 block text-xs leading-5 text-gray-500">
+              Loaded as the starting cover layout in future proposal previews.
+            </span>
+          </label>
           <TextField
             label="Primary Color"
             value={branding.primaryColor}

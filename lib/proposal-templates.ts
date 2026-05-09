@@ -3,6 +3,20 @@
 export type CoverSection = {
   enabled: boolean;
   tagline: string;
+  /** Small uppercase line above the hero price on the Elegante cover (e.g. PROPOSED INVESTMENT). */
+  bannerHeadline?: string;
+  /**
+   * Elegante layout — optional overrides stored on the template (per trade).
+   * Unset/empty falls back to Settings and the live quote total.
+   */
+  elegantBusinessName?: string;
+  /** Data URL or https — overrides branding logo on Elegante cover header only. */
+  elegantLogoUrl?: string;
+  /** Overrides formatted selected-tier total on Elegante cover (e.g. custom wording). */
+  elegantPriceDisplay?: string;
+  elegantContactName?: string;
+  elegantContactPhotoUrl?: string;
+  elegantContactJobTitle?: string;
   showPreparedBy: boolean;
   showProposalNumber: boolean;
 };

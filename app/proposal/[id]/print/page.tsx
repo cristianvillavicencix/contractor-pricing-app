@@ -103,7 +103,13 @@ export default function ProposalPrintPage() {
   });
 
   return (
-    <main className="min-h-screen bg-[#e9eef4] px-6 py-8 print:bg-white print:p-0">
+    <main
+      className={
+        coverLayout === "elegant"
+          ? "min-h-screen bg-[#e9eef4] px-2 py-3 print:bg-white print:p-0"
+          : "min-h-screen bg-[#e9eef4] px-6 py-8 print:bg-white print:p-0"
+      }
+    >
       <div className="mx-auto max-w-260">
         <PagedProposalPreview
           renderKey={pagedRenderKey}

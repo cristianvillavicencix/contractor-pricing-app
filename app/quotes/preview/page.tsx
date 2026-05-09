@@ -93,12 +93,35 @@ const COVER_LAYOUTS: { id: CoverLayout; label: string }[] = [
   { id: "full", label: "Full" },
   { id: "half", label: "Half" },
   { id: "square", label: "Square" },
+  { id: "elegant", label: "Elegante" },
 ];
 
 function QuotePreviewContent() {
   const searchParams = useSearchParams();
   const quoteId = searchParams.get("id");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
+  /**
+   * This screen is driven by localStorage. During SSR, we don't have access to it.
+   * IMPORTANT: never return early before declaring the rest of the hooks in this file.
+   * We mount-gate by rendering a separate component instead.
+   */
+  if (!mounted) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-[#213343]">
+        <div className="text-center">
+          <p className="text-lg font-semibold">Loading…</p>
+          <p className="mt-2 text-sm text-gray-500">Preparing your quote preview.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <QuotePreviewContentClient quoteId={quoteId} />;
+}
+
+function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const quotes = readLocalStorage<Quote[]>(storageKeys.quotes, []);
   const projects = readLocalStorage<Project[]>(storageKeys.projects, []);
   const settings = mergeAppSettings(
@@ -107,6 +130,13 @@ function QuotePreviewContent() {
 
   const quote = quotes.find((q) => q.id === quoteId);
   const project = projects.find((p) => p.id === quote?.projectId);
+
+  // Cover/customer editable fields (stored on the quote)
+  const [customerName, setCustomerName] = useState(quote?.customerName ?? "");
+  const [customerAddress, setCustomerAddress] = useState(quote?.customerAddress ?? "");
+  const [customerPhone, setCustomerPhone] = useState(quote?.customerPhone ?? "");
+  const [customerEmail, setCustomerEmail] = useState(quote?.customerEmail ?? "");
+  const [projectName, setProjectName] = useState(quote?.projectName ?? "");
 
   const [scope, setScope] = useState(quote?.scopeSummary ?? "");
   const [warranty, setWarranty] = useState(
@@ -227,6 +257,8 @@ function QuotePreviewContent() {
 
   const photoUploadRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const elegantLogoInputRef = useRef<HTMLInputElement>(null);
+  const elegantContactPhotoInputRef = useRef<HTMLInputElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
 
   if (!quote) {
@@ -242,8 +274,17 @@ function QuotePreviewContent() {
     );
   }
 
+  const quoteForDoc: Quote = {
+    ...quote,
+    customerName,
+    customerAddress,
+    customerPhone,
+    customerEmail,
+    projectName,
+  };
+
   const doc: QuoteDocument = {
-    ...buildQuoteDocument(quote, project, settings),
+    ...buildQuoteDocument(quoteForDoc, project, settings, proposalTemplate),
     scopeSummary: scope,
     warrantyText: warranty,
     termsText: terms,
@@ -264,8 +305,16 @@ function QuotePreviewContent() {
         )
       : [],
   };
+  const mergedProfile = mergeAppSettings(settings).companyProfile;
+  const elegantPriceAuto = formatMoney(
+    quote.selectedOption === "Good"
+      ? quote.good.salePrice
+      : quote.selectedOption === "Better"
+        ? quote.better.salePrice
+        : quote.best.salePrice
+  );
   const proposalQuote: Quote = {
-    ...quote,
+    ...quoteForDoc,
     good: { ...quote.good, description: pricingDescriptions.Good },
     better: { ...quote.better, description: pricingDescriptions.Better },
     best: { ...quote.best, description: pricingDescriptions.Best },
@@ -327,6 +376,11 @@ function QuotePreviewContent() {
       q.id === quote.id
         ? {
             ...q,
+           customerName,
+           customerAddress,
+           customerPhone,
+           customerEmail,
+           projectName,
             good: { ...q.good, description: pricingDescriptions.Good },
             better: { ...q.better, description: pricingDescriptions.Better },
             best: { ...q.best, description: pricingDescriptions.Best },
@@ -449,6 +503,33 @@ function QuotePreviewContent() {
     };
     reader.readAsDataURL(file);
     e.target.value = "";
+  }
+
+  function handleElegantImageUpload(
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: "elegantLogoUrl" | "elegantContactPhotoUrl"
+  ) {
+    const MAX_BYTES = 1.2 * 1024 * 1024;
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > MAX_BYTES) {
+      alert(`Image exceeds the 1 MB limit. Resize before uploading.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        setProposalTemplate((current) => ({
+          ...current,
+          cover: { ...current.cover, [field]: result },
+          lastModified: new Date().toISOString().slice(0, 10),
+        }));
+      }
+    };
+    reader.readAsDataURL(file);
   }
 
   function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -885,6 +966,20 @@ function QuotePreviewContent() {
             onChange={handlePhotoUpload}
             className="hidden"
           />
+          <input
+            ref={elegantLogoInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(ev) => handleElegantImageUpload(ev, "elegantLogoUrl")}
+            className="hidden"
+          />
+          <input
+            ref={elegantContactPhotoInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(ev) => handleElegantImageUpload(ev, "elegantContactPhotoUrl")}
+            className="hidden"
+          />
 
           <div className="space-y-2">
             {sectionOrder.map((sectionId, index) => {
@@ -929,6 +1024,43 @@ function QuotePreviewContent() {
                 >
                   {sectionId === "cover" && (
                     <div className="space-y-3">
+                      <div className="rounded-md border border-[#e8eef5] bg-white p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                          Client / Project (shown on cover)
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          <CompactInput
+                            label="Customer name"
+                            value={customerName}
+                            onChange={setCustomerName}
+                            placeholder="Customer"
+                          />
+                          <CompactInput
+                            label="Customer address"
+                            value={customerAddress}
+                            onChange={setCustomerAddress}
+                            placeholder="123 Main St, City, ST 00000"
+                          />
+                          <CompactInput
+                            label="Customer phone"
+                            value={customerPhone}
+                            onChange={setCustomerPhone}
+                            placeholder="(555) 555-5555"
+                          />
+                          <CompactInput
+                            label="Customer email"
+                            value={customerEmail}
+                            onChange={setCustomerEmail}
+                            placeholder="name@example.com"
+                          />
+                          <CompactInput
+                            label="Project name"
+                            value={projectName}
+                            onChange={setProjectName}
+                            placeholder="Project"
+                          />
+                        </div>
+                      </div>
                       <EditTextarea
                         label="Cover Tagline"
                         value={proposalTemplate.cover.tagline}
@@ -940,6 +1072,22 @@ function QuotePreviewContent() {
                         }
                         rows={2}
                       />
+                      <label className="block text-xs font-medium text-gray-500">
+                        Elegante — banner headline
+                        <input
+                          type="text"
+                          value={proposalTemplate.cover.bannerHeadline ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            updateTemplate("cover", {
+                              ...proposalTemplate.cover,
+                              bannerHeadline: v.trim() === "" ? undefined : v.trim(),
+                            });
+                          }}
+                          placeholder="PROPOSED INVESTMENT"
+                          className="mt-1 w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-sm outline-none focus:border-[#ff5c35]"
+                        />
+                      </label>
                       {coverImageUrl ? (
                         <>
                           <div className="relative overflow-hidden rounded border border-[#d9e2ec]">
@@ -987,6 +1135,157 @@ function QuotePreviewContent() {
                           </button>
                         ))}
                       </div>
+
+                      {coverLayout === "elegant" ? (
+                        <div className="space-y-3 rounded-md border border-[#e8eef5] bg-[#f9fafb] p-3">
+                          <p className="text-xs leading-relaxed text-gray-500">
+                            Elegante — opcional: se guarda en la plantilla de este trade. La dirección y el proyecto en la franja oscura siguen saliendo del presupuesto.
+                          </p>
+                          <CompactInput
+                            label="Nombre de empresa (opcional)"
+                            value={proposalTemplate.cover.elegantBusinessName ?? ""}
+                            onChange={(value) =>
+                              updateTemplate("cover", {
+                                ...proposalTemplate.cover,
+                                elegantBusinessName:
+                                  value.trim() === "" ? undefined : value.trim(),
+                              })
+                            }
+                            placeholder={mergedProfile.businessName || "Como en Ajustes"}
+                          />
+                          <div>
+                            <span className="mb-1.5 block text-sm font-medium">
+                              Logo en cabecera (opcional)
+                            </span>
+                            {proposalTemplate.cover.elegantLogoUrl ? (
+                              <div className="relative overflow-hidden rounded border border-[#d9e2ec]">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={proposalTemplate.cover.elegantLogoUrl}
+                                  alt=""
+                                  className="h-16 w-full object-contain bg-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateTemplate("cover", {
+                                      ...proposalTemplate.cover,
+                                      elegantLogoUrl: undefined,
+                                    })
+                                  }
+                                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition hover:bg-black"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="mb-2 text-xs text-gray-400">
+                                Sin override: se usa el logo de Ajustes.
+                              </p>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => elegantLogoInputRef.current?.click()}
+                              className="w-full rounded border border-[#d9e2ec] py-1.5 text-xs font-medium text-gray-600 transition hover:bg-[#f6f8fb]"
+                            >
+                              {proposalTemplate.cover.elegantLogoUrl
+                                ? "Reemplazar logo"
+                                : "Subir logo"}
+                            </button>
+                          </div>
+                          <label className="block">
+                            <span className="mb-1.5 block text-sm font-medium">
+                              Monto mostrado (opcional)
+                            </span>
+                            <input
+                              value={proposalTemplate.cover.elegantPriceDisplay ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                updateTemplate("cover", {
+                                  ...proposalTemplate.cover,
+                                  elegantPriceDisplay:
+                                    v.trim() === "" ? undefined : v,
+                                });
+                              }}
+                              placeholder={`Automático: ${elegantPriceAuto}`}
+                              className="w-full rounded border border-[#d9e2ec] px-3 py-2 text-sm outline-none transition focus:border-[#111111]"
+                            />
+                          </label>
+                          <CompactInput
+                            label="Nombre en pie verde (opcional)"
+                            value={proposalTemplate.cover.elegantContactName ?? ""}
+                            onChange={(value) =>
+                              updateTemplate("cover", {
+                                ...proposalTemplate.cover,
+                                elegantContactName:
+                                  value.trim() === "" ? undefined : value.trim(),
+                              })
+                            }
+                            placeholder={
+                              mergedProfile.contactName ||
+                              mergedProfile.businessName ||
+                              "Como en Ajustes"
+                            }
+                          />
+                          <CompactInput
+                            label="Cargo (opcional)"
+                            value={proposalTemplate.cover.elegantContactJobTitle ?? ""}
+                            onChange={(value) =>
+                              updateTemplate("cover", {
+                                ...proposalTemplate.cover,
+                                elegantContactJobTitle:
+                                  value.trim() === "" ? undefined : value.trim(),
+                              })
+                            }
+                            placeholder={
+                              mergedProfile.contactJobTitle?.trim() ||
+                              "Como en Ajustes"
+                            }
+                          />
+                          <div>
+                            <span className="mb-1.5 block text-sm font-medium">
+                              Foto en pie verde (opcional)
+                            </span>
+                            {proposalTemplate.cover.elegantContactPhotoUrl ? (
+                              <div className="relative mb-2 inline-block">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={proposalTemplate.cover.elegantContactPhotoUrl}
+                                  alt=""
+                                  className="h-16 w-16 rounded-full border border-[#d9e2ec] object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateTemplate("cover", {
+                                      ...proposalTemplate.cover,
+                                      elegantContactPhotoUrl: undefined,
+                                    })
+                                  }
+                                  className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="mb-2 text-xs text-gray-400">
+                                Sin override: foto de contacto en Ajustes.
+                              </p>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                elegantContactPhotoInputRef.current?.click()
+                              }
+                              className="w-full rounded border border-[#d9e2ec] py-1.5 text-xs font-medium text-gray-600 transition hover:bg-[#f6f8fb]"
+                            >
+                              {proposalTemplate.cover.elegantContactPhotoUrl
+                                ? "Reemplazar foto"
+                                : "Subir foto"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   )}
 
@@ -1607,11 +1906,17 @@ function QuotePreviewContent() {
                 Live A4 Proposal Preview
               </p>
               <p className="mt-1 text-sm text-gray-500">
-                This updates as you edit. Each separated sheet is an A4 page; long sections split into continued pages before printing, downloading, or opening the client portal.
+                Paginated preview refreshes shortly after you pause typing (same layout as print, PDF, and client portal). Each sheet is A4 with live page breaks.
               </p>
             </div>
-            <div className="rounded border border-[#d9e2ec] bg-[#e9eef4] px-8 py-8 shadow-inner">
-              <PagedProposalPreview renderKey={pagedRenderKey}>
+            <div
+              className={
+                coverLayout === "elegant"
+                  ? "rounded border border-[#d9e2ec] bg-[#e9eef4] px-1 py-2 shadow-inner"
+                  : "rounded border border-[#d9e2ec] bg-[#e9eef4] px-8 py-8 shadow-inner"
+              }
+            >
+              <PagedProposalPreview debounceMs={380} renderKey={pagedRenderKey}>
                 <ProposalDocument
                   template={proposalTemplate}
                   quote={proposalQuote}
@@ -1656,9 +1961,15 @@ function QuotePreviewContent() {
               </button>
             </div>
           </div>
-          <div className="bg-[#e9eef4] px-6 py-8">
+          <div
+            className={
+              coverLayout === "elegant"
+                ? "bg-[#e9eef4] px-2 py-3"
+                : "bg-[#e9eef4] px-6 py-8"
+            }
+          >
             <div className="mx-auto max-w-260">
-              <PagedProposalPreview renderKey={pagedRenderKey}>
+              <PagedProposalPreview debounceMs={380} renderKey={pagedRenderKey}>
               <ProposalDocument
                 template={proposalTemplate}
                 quote={proposalQuote}

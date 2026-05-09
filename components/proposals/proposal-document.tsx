@@ -2,10 +2,17 @@
 
 import { Fragment } from "react";
 import { CheckSquare, Shield, Clock, Star } from "lucide-react";
-import type { ProposalTemplate, CustomSection, MaterialItem } from "@/lib/proposal-templates";
+import type { ProposalTemplate, CustomSection } from "@/lib/proposal-templates";
 import type { AppSettings, Quote } from "@/lib/app-data";
 import { formatMoney, getEnabledCompanyCredentials } from "@/lib/app-data";
 import type { CoverLayout } from "@/lib/pdf-generator";
+import {
+  CoverPageElegant,
+  ELEGANT_COVER_DEFAULT_HEADLINE,
+  getContactInitials,
+  getElegantCoverDetailLine,
+  getSelectedQuotePrice,
+} from "@/components/proposals/cover-page-elegant";
 import type { ReactNode } from "react";
 
 export type SectionOverrides = Partial<Record<string, boolean>>;
@@ -31,6 +38,13 @@ const DEFAULT_SECTION_ORDER = [
   "cover", "executiveSummary", "existingConditions", "scopeOfWork",
   "materialsSpecs", "timeline", "pricing", "warranty", "terms", "acceptance",
 ];
+
+/** Paged.js uses this for explicit page breaks (break-before in CSS often never reaches its parser). */
+const PAGED_NEW_PAGE = { "data-break-before": "page" as const };
+
+function pagedChapterProps(startNewChapter: boolean) {
+  return startNewChapter ? PAGED_NEW_PAGE : {};
+}
 
 export function ProposalDocument({
   template,
@@ -80,7 +94,7 @@ export function ProposalDocument({
 
   const orderedSections = sectionOrder ?? DEFAULT_SECTION_ORDER;
 
-  function renderSection(sectionId: string): ReactNode {
+  function renderSection(sectionId: string, startNewChapter: boolean): ReactNode {
     // ── Cover ────────────────────────────────────────────────────────
     if (sectionId === "cover") {
       if (!visible("cover", template.cover.enabled)) return null;
@@ -104,7 +118,8 @@ export function ProposalDocument({
       return (
         <section
           data-proposal-section="executiveSummary"
-          className="px-14 py-16 print:break-before-page"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
         >
           <SectionLabel />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
@@ -131,99 +146,81 @@ export function ProposalDocument({
     if (sectionId === "existingConditions") {
       if (!visible("existingConditions", template.existingConditions.enabled)) return null;
       const existingLayout = layout("existingConditions", "list");
-      const existingPages = paginateTextItemsByHeight(
-        template.existingConditions.checklistItems,
-        {
-          columns: existingLayout === "columns" ? 2 : 1,
-          firstPagePx: existingLayout === "columns" ? 520 : 620,
-          nextPagePx: existingLayout === "columns" ? 690 : 760,
-          charsPerLine: existingLayout === "columns" ? 54 : 96,
-          basePx: 28,
-          linePx: 20,
-          rowGapPx: 12,
-        }
-      );
+      const photoLayout = layout("existingConditionPhotos", "twoColumns");
       return (
         <>
-          {existingPages.map((items, pageIndex) => (
+          <section
+            data-proposal-section="existingConditions"
+            className="px-0 py-6"
+            {...pagedChapterProps(startNewChapter)}
+          >
+            <SectionLabel />
+            <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Existing Conditions</h2>
+            <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
+              {template.existingConditions.introText}
+            </p>
+            <div
+              className={
+                existingLayout === "columns"
+                  ? "mt-8 grid gap-x-10 gap-y-3 md:grid-cols-2"
+                  : "mt-8 space-y-3"
+              }
+            >
+              {template.existingConditions.checklistItems.map((item, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-3 border-b border-[#e8eef5] pb-3 break-inside-avoid"
+                >
+                  <CheckSquare className="mt-0.5 h-4 w-4 shrink-0 text-[#ff5c35]" />
+                  <p className="text-sm leading-relaxed text-[#1a2733] text-justify [hyphens:auto]">{item}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+          {photos.length > 0 ? (
             <section
-              key={`conditions-${pageIndex}`}
               data-proposal-section="existingConditions"
-              className="bg-[#f5f8fa] px-14 py-16 print:break-before-page"
+              className="px-0 py-6"
+              {...PAGED_NEW_PAGE}
             >
               <SectionLabel />
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                Existing Conditions{pageIndex > 0 ? " Continued" : ""}
+                Existing Conditions Photos
               </h2>
-              {pageIndex === 0 && (
-                <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
-                  {template.existingConditions.introText}
-                </p>
-              )}
+              <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500">
+                Photo documentation from the inspection and project assessment.
+              </p>
               <div
                 className={
-                  existingLayout === "columns"
-                    ? "mt-8 grid gap-x-10 gap-y-3 md:grid-cols-2"
-                    : "mt-8 space-y-3"
+                  photoLayout === "one"
+                    ? "mt-10"
+                    : photoLayout === "twoStacked"
+                      ? "mt-10 grid gap-6"
+                      : "mt-10 grid grid-cols-2 gap-5"
                 }
               >
-                {items.map((item, i) => (
-                  <div key={`${pageIndex}-${i}`} className="flex items-start gap-3 border-b border-[#e8eef5] pb-3">
-                    <CheckSquare className="mt-0.5 h-4 w-4 shrink-0 text-[#ff5c35]" />
-                    <p className="text-sm leading-relaxed text-[#1a2733] text-justify [hyphens:auto]">{item}</p>
-                  </div>
+                {photos.map((src, index) => (
+                  <figure key={`${src}-${index}`} className="break-inside-avoid">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt={`Existing condition photo ${index + 1}`}
+                      className={
+                        photoLayout === "one"
+                          ? "h-[560px] w-full border border-[#d9e2ec] object-cover"
+                          : photoLayout === "twoStacked"
+                            ? "h-[260px] w-full border border-[#d9e2ec] object-cover"
+                            : "h-[360px] w-full border border-[#d9e2ec] object-cover"
+                      }
+                    />
+                    <figcaption className="mt-2 text-xs leading-relaxed text-gray-500">
+                      {photoCaptions[index] || `Photo ${index + 1}`}
+                    </figcaption>
+                  </figure>
                 ))}
               </div>
             </section>
-          ))}
-          {photos.length > 0 &&
-            chunkPhotos(photos, layout("existingConditionPhotos", "twoColumns")).map(
-              (photoGroup, pageIndex) => (
-                <section
-                  key={`condition-photos-${pageIndex}`}
-                  data-proposal-section="existingConditions"
-                  className="bg-white px-14 py-16 print:break-before-page"
-                >
-                  <SectionLabel />
-                  <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                    Existing Conditions Photos
-                  </h2>
-                  <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500">
-                    Photo documentation from the inspection and project assessment.
-                  </p>
-                  <div
-                    className={
-                      layout("existingConditionPhotos", "twoColumns") === "one"
-                        ? "mt-10"
-                        : layout("existingConditionPhotos", "twoColumns") === "twoStacked"
-                          ? "mt-10 grid gap-6"
-                          : "mt-10 grid grid-cols-2 gap-5"
-                    }
-                  >
-                    {photoGroup.map((src, index) => (
-                      <figure key={`${src}-${index}`} className="break-inside-avoid">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={src}
-                          alt={`Existing condition photo ${pageIndex + 1}-${index + 1}`}
-                          className={
-                            layout("existingConditionPhotos", "twoColumns") === "one"
-                              ? "h-[560px] w-full border border-[#d9e2ec] object-cover"
-                              : layout("existingConditionPhotos", "twoColumns") === "twoStacked"
-                                ? "h-[260px] w-full border border-[#d9e2ec] object-cover"
-                                : "h-[360px] w-full border border-[#d9e2ec] object-cover"
-                          }
-                        />
-                        <figcaption className="mt-2 text-xs leading-relaxed text-gray-500">
-                          {photoCaptions[getPhotoGlobalIndex(pageIndex, index, layout("existingConditionPhotos", "twoColumns"))] ||
-                            `Photo ${getPhotoGlobalIndex(pageIndex, index, layout("existingConditionPhotos", "twoColumns")) + 1}`}
-                        </figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                </section>
-              )
-            )}
+          ) : null}
         </>
       );
     }
@@ -232,66 +229,45 @@ export function ProposalDocument({
     if (sectionId === "scopeOfWork") {
       if (!visible("scopeOfWork", template.scopeOfWork.enabled)) return null;
       const scopeLayout = layout("scopeOfWork", "numbered");
-      const scopePages = paginateTextItemsByHeight(template.scopeOfWork.items, {
-        columns: scopeLayout === "compact" ? 2 : 1,
-        firstPagePx: scopeLayout === "compact" ? 500 : 560,
-        nextPagePx: scopeLayout === "compact" ? 675 : 735,
-        charsPerLine: scopeLayout === "compact" ? 42 : 88,
-        basePx: scopeLayout === "compact" ? 30 : 26,
-        linePx: scopeLayout === "compact" ? 24 : 21,
-        rowGapPx: scopeLayout === "compact" ? 12 : 12,
-      });
       return (
         <>
-          {scopePages.map((items, pageIndex) => (
-            <section
-              key={`scope-${pageIndex}`}
-              data-proposal-section="scopeOfWork"
-              className="px-14 py-16 print:break-before-page"
+          <section
+            data-proposal-section="scopeOfWork"
+            className="px-0 py-6"
+            {...pagedChapterProps(startNewChapter)}
+          >
+            <SectionLabel />
+            <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Scope of Work</h2>
+            <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
+              {template.scopeOfWork.introText}
+            </p>
+            {scopeSummary ? (
+              <div className="mt-6 border-l-2 border-[#ff5c35] bg-[#fff9f7] px-5 py-4">
+                <p className="text-sm font-semibold text-[#ff5c35] mb-1">Project Summary</p>
+                <p className="text-sm leading-relaxed text-[#213343] text-justify [hyphens:auto]">{scopeSummary}</p>
+              </div>
+            ) : null}
+            <ol
+              className={
+                scopeLayout === "compact"
+                  ? "mt-8 grid gap-x-8 gap-y-3 md:grid-cols-2"
+                  : "mt-8 space-y-3"
+              }
             >
-              <SectionLabel />
-              <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                Scope of Work{pageIndex > 0 ? " Continued" : ""}
-              </h2>
-              {pageIndex === 0 && (
-                <>
-                  <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
-                    {template.scopeOfWork.introText}
-                  </p>
-                  {scopeSummary && (
-                    <div className="mt-6 border-l-2 border-[#ff5c35] bg-[#fff9f7] px-5 py-4">
-                      <p className="text-sm font-semibold text-[#ff5c35] mb-1">Project Summary</p>
-                      <p className="text-sm leading-relaxed text-[#213343] text-justify [hyphens:auto]">{scopeSummary}</p>
-                    </div>
-                  )}
-                </>
-              )}
-              <ol
-                className={
-                  layout("scopeOfWork", "numbered") === "compact"
-                    ? "mt-8 grid gap-x-8 gap-y-3 md:grid-cols-2"
-                    : "mt-8 space-y-3"
-                }
-              >
-                {items.map((item, i) => {
-                  const itemNumber =
-                    scopePages
-                      .slice(0, pageIndex)
-                      .reduce((total, page) => total + page.length, 0) +
-                    i +
-                    1;
-                  return (
-                    <li key={`${pageIndex}-${i}`} className="flex items-start gap-4">
-                      <span className="mt-0.5 text-xs font-semibold tracking-wide text-[#ff5c35]">{itemNumber}</span>
-                      <p className="text-sm leading-relaxed text-[#1a2733] text-justify [hyphens:auto]">{item}</p>
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-          ))}
-          {includedServices.length > 0 && (
-            <section data-proposal-section="scopeOfWork" className="px-14 py-16 print:break-before-page">
+              {template.scopeOfWork.items.map((item, i) => (
+                <li key={i} className="flex items-start gap-4 break-inside-avoid">
+                  <span className="mt-0.5 text-xs font-semibold tracking-wide text-[#ff5c35]">{i + 1}</span>
+                  <p className="text-sm leading-relaxed text-[#1a2733] text-justify [hyphens:auto]">{item}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
+          {includedServices.length > 0 ? (
+            <section
+              data-proposal-section="scopeOfWork"
+              className="px-0 py-6"
+              {...PAGED_NEW_PAGE}
+            >
               <SectionLabel />
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Included Services</h2>
               <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
@@ -299,14 +275,14 @@ export function ProposalDocument({
               </p>
               <div className="mt-8 grid gap-x-10 gap-y-3 md:grid-cols-2">
                 {includedServices.map((service) => (
-                  <div key={service} className="flex items-start gap-3 border-b border-[#e8eef5] pb-3">
+                  <div key={service} className="flex items-start gap-3 border-b border-[#e8eef5] pb-3 break-inside-avoid">
                     <CheckSquare className="mt-0.5 h-4 w-4 shrink-0 text-[#ff5c35]" />
                     <p className="text-sm leading-relaxed text-[#1a2733]">{service}</p>
                   </div>
                 ))}
               </div>
             </section>
-          )}
+          ) : null}
         </>
       );
     }
@@ -315,104 +291,89 @@ export function ProposalDocument({
     if (sectionId === "materialsSpecs") {
       if (!visible("materialsSpecs", template.materialsSpecs.enabled)) return null;
       const matLayout = layout("materialsSpecs", "table");
-
-      // Choose pagination strategy per layout.
-      // Pixel budgets = available tbody height: page-1 has less room (title + intro overhead).
-      const pages =
-        matLayout === "cards"
-          ? chunkArray(template.materialsSpecs.items, 6)
-          : matLayout === "list"
-            ? paginateMaterialItems(template.materialsSpecs.items, 660, 800)
-            : paginateMaterialItems(template.materialsSpecs.items, 720, 860);
+      const items = template.materialsSpecs.items;
 
       return (
-        <>
-          {pages.map((items, pageIndex) => (
-            <section
-              key={`materials-${pageIndex}`}
-              data-proposal-section="materialsSpecs"
-              className="bg-[#f5f8fa] px-14 py-12 print:break-before-page"
-            >
-              <SectionLabel />
-              <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                Materials &amp; Specifications{pageIndex > 0 ? " (Continued)" : ""}
-              </h2>
-              {pageIndex === 0 && (
-                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-gray-500 text-justify [hyphens:auto]">
-                  {template.materialsSpecs.introText}
-                </p>
-              )}
-              {matLayout === "cards" ? (
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  {items.map((item) => (
-                    <div key={item.id} className="border border-[#d9e2ec] bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-[#ff5c35]">{item.category}</p>
-                      <p className="mt-1 font-bold text-[#213343]">{item.product}</p>
-                      {item.brand && <p className="mt-1 text-sm text-gray-500">{item.brand}</p>}
-                      {item.warranty && (
-                        <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
-                          <Shield className="h-3.5 w-3.5 shrink-0" />
-                          {item.warranty}
-                        </div>
-                      )}
-                      {item.notes && <p className="mt-2 text-xs leading-relaxed text-gray-400">{item.notes}</p>}
+        <section
+          data-proposal-section="materialsSpecs"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
+        >
+          <SectionLabel />
+          <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
+            Materials &amp; Specifications
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm leading-relaxed text-gray-500 text-justify [hyphens:auto]">
+            {template.materialsSpecs.introText}
+          </p>
+          {matLayout === "cards" ? (
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {items.map((item) => (
+                <div key={item.id} className="break-inside-avoid border border-[#d9e2ec] bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-[#ff5c35]">{item.category}</p>
+                  <p className="mt-1 font-bold text-[#213343]">{item.product}</p>
+                  {item.brand ? <p className="mt-1 text-sm text-gray-500">{item.brand}</p> : null}
+                  {item.warranty ? (
+                    <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+                      <Shield className="h-3.5 w-3.5 shrink-0" />
+                      {item.warranty}
                     </div>
-                  ))}
+                  ) : null}
+                  {item.notes ? <p className="mt-2 text-xs leading-relaxed text-gray-400">{item.notes}</p> : null}
                 </div>
-              ) : matLayout === "list" ? (
-                <div className="mt-6 space-y-3">
+              ))}
+            </div>
+          ) : matLayout === "list" ? (
+            <div className="mt-6 space-y-3">
+              {items.map((item) => (
+                <div key={item.id} className="flex items-start gap-3 border-b border-[#e8eef5] pb-3 break-inside-avoid">
+                  <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff5c35]" />
+                  <div>
+                    <p className="text-sm font-semibold text-[#213343]">{item.category} — {item.product}</p>
+                    {item.brand ? <p className="text-xs text-gray-500">{item.brand}</p> : null}
+                    {(item.warranty || item.notes) ? (
+                      <p className="mt-0.5 text-xs text-gray-400">{[item.warranty, item.notes].filter(Boolean).join(" · ")}</p>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-6 overflow-hidden border border-[#d9e2ec]">
+              <table className="w-full table-fixed text-xs">
+                <colgroup>
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "23%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "29%" }} />
+                </colgroup>
+                <thead className="bg-[#213343] text-left text-[10px] font-semibold uppercase tracking-widest text-white">
+                  <tr>
+                    <th className="px-3 py-2.5">Category</th>
+                    <th className="px-3 py-2.5">Product</th>
+                    <th className="px-3 py-2.5">Brand</th>
+                    <th className="px-3 py-2.5">Warranty</th>
+                    <th className="px-3 py-2.5">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#d9e2ec] bg-white">
                   {items.map((item) => (
-                    <div key={item.id} className="flex items-start gap-3 border-b border-[#e8eef5] pb-3">
-                      <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff5c35]" />
-                      <div>
-                        <p className="text-sm font-semibold text-[#213343]">{item.category} — {item.product}</p>
-                        {item.brand && <p className="text-xs text-gray-500">{item.brand}</p>}
-                        {(item.warranty || item.notes) && (
-                          <p className="mt-0.5 text-xs text-gray-400">{[item.warranty, item.notes].filter(Boolean).join(" · ")}</p>
-                        )}
-                      </div>
-                    </div>
+                    <tr key={item.id} className="align-top">
+                      <td className="break-words px-3 py-2 font-medium leading-snug text-[#213343]">{item.category}</td>
+                      <td className="break-words px-3 py-2 leading-snug text-[#213343]">{item.product}</td>
+                      <td className="break-words px-3 py-2 leading-snug text-gray-500">{item.brand}</td>
+                      <td className="break-words px-3 py-2 leading-snug text-gray-500">{item.warranty}</td>
+                      <td className="px-3 py-2 leading-snug text-gray-400">
+                        <span className="line-clamp-5 wrap-break-word">{item.notes}</span>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              ) : (
-                /* Table layout — fixed columns, compact cells, words wrap within their cell */
-                <div className="mt-6 overflow-hidden border border-[#d9e2ec]">
-                  <table className="w-full table-fixed text-xs">
-                    <colgroup>
-                      <col style={{ width: "14%" }} />
-                      <col style={{ width: "23%" }} />
-                      <col style={{ width: "14%" }} />
-                      <col style={{ width: "20%" }} />
-                      <col style={{ width: "29%" }} />
-                    </colgroup>
-                    <thead className="bg-[#213343] text-left text-[10px] font-semibold uppercase tracking-widest text-white">
-                      <tr>
-                        <th className="px-3 py-2.5">Category</th>
-                        <th className="px-3 py-2.5">Product</th>
-                        <th className="px-3 py-2.5">Brand</th>
-                        <th className="px-3 py-2.5">Warranty</th>
-                        <th className="px-3 py-2.5">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#d9e2ec] bg-white">
-                      {items.map((item) => (
-                        <tr key={item.id} className="align-top">
-                          <td className="break-words px-3 py-2 font-medium leading-snug text-[#213343]">{item.category}</td>
-                          <td className="break-words px-3 py-2 leading-snug text-[#213343]">{item.product}</td>
-                          <td className="break-words px-3 py-2 leading-snug text-gray-500">{item.brand}</td>
-                          <td className="break-words px-3 py-2 leading-snug text-gray-500">{item.warranty}</td>
-                          <td className="px-3 py-2 leading-snug text-gray-400">
-                            <span className="line-clamp-5 wrap-break-word">{item.notes}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          ))}
-        </>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       );
     }
 
@@ -420,131 +381,125 @@ export function ProposalDocument({
     if (sectionId === "timeline") {
       if (!visible("timeline", template.timeline.enabled)) return null;
       const tlLayout = layout("timeline", "steps");
+      const phaseLines = template.timeline.phases.map((p) => `${p.name}|||${p.description}`);
       return (
-        <>
-          {paginatePhases(
-            template.timeline.phases.map((p) => `${p.name}|||${p.description}`),
-            tlLayout,
-            700,
-            840,
-          ).map((phaseLines, pageIndex) => (
-            <section
-              key={`timeline-${pageIndex}`}
-              data-proposal-section="timeline"
-              className="px-14 py-16 print:break-before-page"
-            >
-              <SectionLabel />
-              <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                Project Timeline{pageIndex > 0 ? " Continued" : ""}
-              </h2>
-              {pageIndex === 0 && (
-                <>
-                  <div className="mt-3 flex items-center gap-2 text-sm text-gray-400">
-                    <Clock className="h-4 w-4" />
-                    <span>Estimated {template.timeline.estimatedDays} day{template.timeline.estimatedDays !== 1 ? "s" : ""} on site</span>
+        <section
+          data-proposal-section="timeline"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
+        >
+          <SectionLabel />
+          <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Project Timeline</h2>
+          <div className="mt-3 flex items-center gap-2 text-sm text-gray-400">
+            <Clock className="h-4 w-4" />
+            <span>
+              Estimated {template.timeline.estimatedDays} day
+              {template.timeline.estimatedDays !== 1 ? "s" : ""} on site
+            </span>
+          </div>
+          <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
+            {template.timeline.introText}
+          </p>
+          {tlLayout === "compact" ? (
+            <div className="mt-8 grid gap-x-8 gap-y-4 md:grid-cols-2">
+              {phaseLines.map((line, i) => {
+                const [name, description] = line.split("|||");
+                const globalIndex =
+                  template.timeline.phases.findIndex(
+                    (p) => p.name === name && p.description === description
+                  ) + 1;
+                return (
+                  <div key={i} className="flex items-start gap-3 break-inside-avoid">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#213343] text-xs font-bold text-white">
+                      {globalIndex}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-[#213343] text-sm">{name}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
+                    </div>
                   </div>
-                  <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
-                    {template.timeline.introText}
-                  </p>
-                </>
-              )}
-              {tlLayout === "compact" ? (
-                /* 2-col numbered grid */
-                <div className="mt-8 grid gap-x-8 gap-y-4 md:grid-cols-2">
-                  {phaseLines.map((line, i) => {
-                    const [name, description] = line.split("|||");
-                    const globalIndex = template.timeline.phases.findIndex(
-                      (p) => p.name === name && p.description === description
-                    ) + 1;
-                    return (
-                      <div key={`${pageIndex}-${i}`} className="flex items-start gap-3">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#213343] text-xs font-bold text-white">
-                          {globalIndex}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-[#213343] text-sm">{name}</p>
-                          <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
-                        </div>
+                );
+              })}
+            </div>
+          ) : tlLayout === "bars" ? (
+            <div className="mt-8 space-y-2">
+              {phaseLines.map((line, i) => {
+                const [name, description] = line.split("|||");
+                const globalIndex =
+                  template.timeline.phases.findIndex(
+                    (p) => p.name === name && p.description === description
+                  ) + 1;
+                return (
+                  <div
+                    key={i}
+                    className="flex items-start gap-4 border border-[#e8eef5] border-l-4 border-l-[#ff5c35] bg-white px-4 py-3 break-inside-avoid"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#213343] text-[10px] font-bold text-white">
+                      {globalIndex}
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold leading-none text-[#213343]">{name}</p>
+                      {description ? (
+                        <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : tlLayout === "cards" ? (
+            <div className="mt-8 grid gap-3 md:grid-cols-2">
+              {phaseLines.map((line, i) => {
+                const [name, description] = line.split("|||");
+                const globalIndex =
+                  template.timeline.phases.findIndex(
+                    (p) => p.name === name && p.description === description
+                  ) + 1;
+                return (
+                  <div key={i} className="overflow-hidden rounded-lg border border-[#d9e2ec] break-inside-avoid">
+                    <div className="flex items-center gap-3 bg-[#213343] px-4 py-2.5">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ff5c35] text-[9px] font-bold text-white">
+                        {globalIndex}
+                      </span>
+                      <p className="text-sm font-semibold text-white">{name}</p>
+                    </div>
+                    {description ? (
+                      <p className="bg-white px-4 py-3 text-xs leading-relaxed text-gray-500">{description}</p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-10 space-y-0">
+              {phaseLines.map((line, i) => {
+                const [name, description] = line.split("|||");
+                const globalIndex =
+                  template.timeline.phases.findIndex(
+                    (p) => p.name === name && p.description === description
+                  ) + 1;
+                return (
+                  <div key={i} className="flex gap-5 break-inside-avoid">
+                    <div className="flex flex-col items-center">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#213343] text-xs font-bold text-white">
+                        {globalIndex}
                       </div>
-                    );
-                  })}
-                </div>
-              ) : tlLayout === "bars" ? (
-                /* Horizontal bars with orange left accent */
-                <div className="mt-8 space-y-2">
-                  {phaseLines.map((line, i) => {
-                    const [name, description] = line.split("|||");
-                    const globalIndex = template.timeline.phases.findIndex(
-                      (p) => p.name === name && p.description === description
-                    ) + 1;
-                    return (
-                      <div key={`${pageIndex}-${i}`} className="flex items-start gap-4 border-l-4 border-[#ff5c35] bg-[#f5f8fa] px-4 py-3">
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#213343] text-[10px] font-bold text-white">
-                          {globalIndex}
-                        </span>
-                        <div>
-                          <p className="text-sm font-semibold leading-none text-[#213343]">{name}</p>
-                          {description && (
-                            <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : tlLayout === "cards" ? (
-                /* 2-col cards with dark header */
-                <div className="mt-8 grid gap-3 md:grid-cols-2">
-                  {phaseLines.map((line, i) => {
-                    const [name, description] = line.split("|||");
-                    const globalIndex = template.timeline.phases.findIndex(
-                      (p) => p.name === name && p.description === description
-                    ) + 1;
-                    return (
-                      <div key={`${pageIndex}-${i}`} className="overflow-hidden rounded-lg border border-[#d9e2ec]">
-                        <div className="flex items-center gap-3 bg-[#213343] px-4 py-2.5">
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ff5c35] text-[9px] font-bold text-white">
-                            {globalIndex}
-                          </span>
-                          <p className="text-sm font-semibold text-white">{name}</p>
-                        </div>
-                        {description && (
-                          <p className="bg-white px-4 py-3 text-xs leading-relaxed text-gray-500">{description}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                /* Default: vertical stepper */
-                <div className="mt-10 space-y-0">
-                  {phaseLines.map((line, i) => {
-                    const [name, description] = line.split("|||");
-                    const globalIndex = template.timeline.phases.findIndex(
-                      (p) => p.name === name && p.description === description
-                    ) + 1;
-                    return (
-                      <div key={`${pageIndex}-${i}`} className="flex gap-5">
-                        <div className="flex flex-col items-center">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#213343] text-xs font-bold text-white">
-                            {globalIndex}
-                          </div>
-                          {i < phaseLines.length - 1 && (
-                            <div className="my-1 h-full min-h-[32px] w-px bg-[#d9e2ec]" />
-                          )}
-                        </div>
-                        <div className="pb-8">
-                          <p className="font-semibold text-[#213343]">{name}</p>
-                          <p className="mt-1.5 text-sm leading-relaxed text-gray-500 text-justify [hyphens:auto]">{description}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          ))}
-        </>
+                      {i < phaseLines.length - 1 ? (
+                        <div className="my-1 h-full min-h-[32px] w-px bg-[#d9e2ec]" />
+                      ) : null}
+                    </div>
+                    <div className="pb-8">
+                      <p className="font-semibold text-[#213343]">{name}</p>
+                      <p className="mt-1.5 text-sm leading-relaxed text-gray-500 text-justify [hyphens:auto]">
+                        {description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
       );
     }
 
@@ -552,7 +507,11 @@ export function ProposalDocument({
     if (sectionId === "pricing") {
       if (!visible("pricing", template.pricing.enabled)) return null;
       return (
-        <section data-proposal-section="pricing" className="bg-[#f5f8fa] px-14 py-16 print:break-before-page">
+        <section
+          data-proposal-section="pricing"
+          className="bg-white px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
+        >
           <SectionLabel />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Your Investment</h2>
           <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500">{template.pricing.introText}</p>
@@ -607,41 +566,37 @@ export function ProposalDocument({
     if (sectionId === "warranty") {
       if (!visible("warranty", template.warranty.enabled)) return null;
       const wLayout = layout("warranty", "columns");
-      const warrantyItems = chunkArray(
-        [
-          { title: `${template.warranty.workmanshipYears}-Year Workmanship Warranty`, text: workmanshipText, primary: true },
-          { title: "Manufacturer Warranty", text: template.warranty.manufacturerText, primary: false },
-        ].flatMap((item) =>
-          splitTextIntoPages(item.text, 1700).map((text, index) => ({
-            ...item,
-            text,
-            title: index > 0 ? `${item.title} Continued` : item.title,
-          }))
-        ),
-        wLayout === "stacked" ? 1 : 2
-      );
       return (
-        <>
-          {warrantyItems.map((items, pageIndex) => (
-            <section key={`warranty-${pageIndex}`} data-proposal-section="warranty" className="px-14 py-16 print:break-before-page">
-              <SectionLabel />
-              <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                Warranty{pageIndex > 0 ? " Continued" : ""}
-              </h2>
-              <div className={wLayout === "stacked" ? "mt-8 space-y-8" : "mt-8 grid gap-6 md:grid-cols-2"}>
-                {items.map((item, index) => (
-                  <div key={`${pageIndex}-${index}`} className={`border-l-2 pl-6 ${item.primary ? "border-[#213343]" : "border-[#d9e2ec]"}`}>
-                    <div className="flex items-center gap-3">
-                      <Shield className={`h-6 w-6 ${item.primary ? "text-[#ff5c35]" : "text-gray-400"}`} />
-                      <p className="font-bold text-[#213343]">{item.title}</p>
-                    </div>
-                    <p className="mt-4 text-sm leading-relaxed text-gray-600 text-justify [hyphens:auto]">{item.text}</p>
-                  </div>
-                ))}
+        <section
+          data-proposal-section="warranty"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
+        >
+          <SectionLabel />
+          <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Warranty</h2>
+          <div className={wLayout === "stacked" ? "mt-8 space-y-8" : "mt-8 grid gap-6 md:grid-cols-2"}>
+            <div className="border-l-2 border-[#213343] pl-6 break-inside-avoid">
+              <div className="flex items-center gap-3">
+                <Shield className="h-6 w-6 text-[#ff5c35]" />
+                <p className="font-bold text-[#213343]">
+                  {template.warranty.workmanshipYears}-Year Workmanship Warranty
+                </p>
               </div>
-            </section>
-          ))}
-        </>
+              <p className="mt-4 text-sm leading-relaxed text-gray-600 text-justify [hyphens:auto]">
+                {workmanshipText}
+              </p>
+            </div>
+            <div className="border-l-2 border-[#d9e2ec] pl-6 break-inside-avoid">
+              <div className="flex items-center gap-3">
+                <Shield className="h-6 w-6 text-gray-400" />
+                <p className="font-bold text-[#213343]">Manufacturer Warranty</p>
+              </div>
+              <p className="mt-4 text-sm leading-relaxed text-gray-600 text-justify [hyphens:auto]">
+                {template.warranty.manufacturerText}
+              </p>
+            </div>
+          </div>
+        </section>
       );
     }
 
@@ -654,42 +609,37 @@ export function ProposalDocument({
           .split(/\n/)
           .map((l) => l.trim())
           .filter(Boolean);
-        const pages = chunkArray(bulletItems, 18);
         return (
-          <>
-            {pages.map((items, pageIndex) => (
-              <section key={`terms-${pageIndex}`} data-proposal-section="terms" className="bg-[#f5f8fa] px-14 py-16 print:break-before-page">
-                <SectionLabel />
-                <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                  Terms &amp; Conditions{pageIndex > 0 ? " Continued" : ""}
-                </h2>
-                <div className="mt-8 grid gap-x-10 gap-y-2 md:grid-cols-2">
-                  {items.map((item, i) => (
-                    <div key={i} className="flex items-start gap-2 border-b border-[#e8eef5] py-2">
-                      <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff5c35]" />
-                      <p className="text-sm leading-relaxed text-gray-600">{item}</p>
-                    </div>
-                  ))}
+          <section
+            data-proposal-section="terms"
+            className="px-0 py-6"
+            {...pagedChapterProps(startNewChapter)}
+          >
+            <SectionLabel />
+            <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Terms &amp; Conditions</h2>
+            <div className="mt-8 grid gap-x-10 gap-y-2 md:grid-cols-2">
+              {bulletItems.map((item, i) => (
+                <div key={i} className="flex items-start gap-2 border-b border-[#e8eef5] py-2 break-inside-avoid">
+                  <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff5c35]" />
+                  <p className="text-sm leading-relaxed text-gray-600">{item}</p>
                 </div>
-              </section>
-            ))}
-          </>
+              ))}
+            </div>
+          </section>
         );
       }
       return (
-        <>
-          {splitTextIntoPages(termsText, 2600).map((text, pageIndex) => (
-            <section key={`terms-${pageIndex}`} data-proposal-section="terms" className="bg-[#f5f8fa] px-14 py-16 print:break-before-page">
-              <SectionLabel />
-              <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
-                Terms &amp; Conditions{pageIndex > 0 ? " Continued" : ""}
-              </h2>
-              <div className="mt-8 border-l-2 border-[#d9e2ec] bg-white pl-6">
-                <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-gray-600">{text}</pre>
-              </div>
-            </section>
-          ))}
-        </>
+        <section
+          data-proposal-section="terms"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
+        >
+          <SectionLabel />
+          <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Terms &amp; Conditions</h2>
+          <div className="mt-8 border-l-2 border-[#d9e2ec] bg-white pl-6">
+            <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-gray-600">{termsText}</pre>
+          </div>
+        </section>
       );
     }
 
@@ -698,7 +648,11 @@ export function ProposalDocument({
       if (!visible("acceptance", template.acceptance.enabled)) return null;
       const aLayout = layout("acceptance", "standard");
       return (
-        <section data-proposal-section="acceptance" className="px-14 py-16 print:break-before-page">
+        <section
+          data-proposal-section="acceptance"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
+        >
           <SectionLabel />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
             Acceptance &amp; Authorization
@@ -706,19 +660,19 @@ export function ProposalDocument({
           <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500">
             {template.acceptance.contractIntroText}
           </p>
-          {template.acceptance.paymentScheduleText && (
-            <div className="mt-6 border-l-2 border-[#d9e2ec] bg-[#f5f8fa] px-5 py-4">
+          {template.acceptance.paymentScheduleText ? (
+            <div className="mt-6 border-l-2 border-[#d9e2ec] bg-white px-5 py-4">
               <p className="text-sm font-semibold text-[#213343]">Payment Schedule</p>
               <p className="mt-2 text-sm leading-relaxed text-gray-600">{template.acceptance.paymentScheduleText}</p>
             </div>
-          )}
-          {template.acceptance.showFinancingOption && (
+          ) : null}
+          {template.acceptance.showFinancingOption ? (
             <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
               Financing options are available. Ask us for details before signing.
             </div>
-          )}
-          {credentials.length > 0 && (
-            <div className="mt-8 border-l-2 border-[#d9e2ec] bg-[#f5f8fa] px-5 py-4">
+          ) : null}
+          {credentials.length > 0 ? (
+            <div className="mt-8 border-l-2 border-[#d9e2ec] bg-white px-5 py-4">
               <p className="text-sm font-semibold text-[#213343]">Certifications &amp; Credentials</p>
               <div className="mt-4 grid gap-2 md:grid-cols-2">
                 {credentials.map((credential) => (
@@ -729,7 +683,7 @@ export function ProposalDocument({
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
           <div className={`mt-12 grid gap-10 ${aLayout === "compact" ? "grid-cols-1" : "md:grid-cols-2"}`}>
             <SignatureBlock label="Customer Signature" name={quote?.customerName ?? "Customer Name"} />
             <SignatureBlock label="Contractor Signature" name={company.contactName || company.businessName} />
@@ -756,7 +710,8 @@ export function ProposalDocument({
       return (
         <section
           data-proposal-section={custom.id}
-          className="px-14 py-16 print:break-before-page"
+          className="px-0 py-6"
+          {...pagedChapterProps(startNewChapter)}
         >
           <SectionLabel />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">{custom.title}</h2>
@@ -776,11 +731,22 @@ export function ProposalDocument({
     return null;
   }
 
+  const sectionNodes: ReactNode[] = [];
+  let coverRendered = false;
+  let sawNonCover = false;
+  for (const id of orderedSections) {
+    const startNewChapter = id !== "cover" && (coverRendered || sawNonCover);
+    const node = renderSection(id, startNewChapter);
+    sectionNodes.push(<Fragment key={id}>{node}</Fragment>);
+    if (node != null) {
+      if (id === "cover") coverRendered = true;
+      else sawNonCover = true;
+    }
+  }
+
   return (
     <div className="proposal-document bg-white font-sans text-[#1a2733]">
-      {orderedSections.map((id) => (
-        <Fragment key={id}>{renderSection(id)}</Fragment>
-      ))}
+      {sectionNodes}
       <footer className="border-t border-[#d9e2ec] px-14 py-6">
         <div className="flex items-center justify-between text-xs text-gray-400">
           <p>
@@ -816,9 +782,50 @@ function CoverSection({
   displayDate: string;
   displayProposalNumber: string;
 }) {
+  if (coverLayout === "elegant") {
+    const c = template.cover;
+    const bannerHeadline =
+      c.bannerHeadline?.trim() || ELEGANT_COVER_DEFAULT_HEADLINE;
+    const detail = getElegantCoverDetailLine(quote);
+    const displayCompanyName = c.elegantBusinessName?.trim() || company.businessName;
+    const displayLogo =
+      c.elegantLogoUrl?.trim() || brand.logoUrl?.trim() || null;
+    const displayPrice =
+      c.elegantPriceDisplay?.trim() ||
+      (quote ? formatMoney(getSelectedQuotePrice(quote)) : "—");
+    const displayContactName =
+      c.elegantContactName?.trim() ||
+      company.contactName ||
+      company.businessName;
+    const jobLine =
+      c.elegantContactJobTitle?.trim() ||
+      company.contactJobTitle?.trim() ||
+      "";
+    const displayContactPhoto =
+      c.elegantContactPhotoUrl?.trim() ||
+      company.contactPhotoUrl?.trim() ||
+      null;
+    const initials = getContactInitials(displayContactName);
+
+    return (
+      <CoverPageElegant
+        coverPhotoUrl={coverPhotoUrl}
+        logoUrl={displayLogo}
+        companyName={displayCompanyName}
+        bannerHeadline={bannerHeadline}
+        priceDisplay={displayPrice}
+        detailLine={detail || quote?.customerName || ""}
+        contactName={displayContactName}
+        contactSubtitle={jobLine}
+        contactPhotoUrl={displayContactPhoto}
+        initials={initials}
+      />
+    );
+  }
+
   if (coverLayout === "half") {
     return (
-      <section data-proposal-section="cover" className="flex flex-col overflow-hidden bg-white">
+      <section data-proposal-section="cover" data-page="proposal-cover" className="flex flex-col overflow-hidden bg-white">
         <div className="h-[42%] bg-[#1a2733]">
           {coverPhotoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -836,7 +843,7 @@ function CoverSection({
 
   if (coverLayout === "square") {
     return (
-      <section data-proposal-section="cover" className="flex flex-col items-center justify-center overflow-hidden bg-white px-14 py-16 text-center">
+      <section data-proposal-section="cover" data-page="proposal-cover" className="flex flex-col items-center justify-center overflow-hidden bg-white px-14 py-16 text-center">
         <CoverBrand company={company} brand={brand} dark={false} centered />
         {coverPhotoUrl ? (
           <div className="mt-10 aspect-square w-[52%] overflow-hidden border border-[#d9e2ec]">
@@ -855,7 +862,7 @@ function CoverSection({
   }
 
   return (
-    <section data-proposal-section="cover" className="relative flex flex-col overflow-hidden bg-[#1a2733]">
+    <section data-proposal-section="cover" data-page="proposal-cover" className="relative flex flex-col overflow-hidden bg-[#1a2733]">
       {coverPhotoUrl && (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -871,226 +878,6 @@ function CoverSection({
       </div>
     </section>
   );
-}
-
-function chunkPhotos(photos: string[], photoLayout: string) {
-  const perPage = photoLayout === "one" ? 1 : photoLayout === "grid" ? 4 : 2;
-  const groups: string[][] = [];
-  for (let index = 0; index < photos.length; index += perPage) {
-    groups.push(photos.slice(index, index + perPage));
-  }
-  return groups;
-}
-
-function chunkArray<T>(items: T[], perPage: number) {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += perPage) {
-    chunks.push(items.slice(index, index + perPage));
-  }
-  return chunks.length > 0 ? chunks : [[]];
-}
-
-// Estimates rendered height of a single table row in pixels.
-// py-2 (16px) + lines × 17px (text-xs leading-snug ≈ 16.5px rounded up).
-function matRowPx(item: MaterialItem): number {
-  const notesLines = Math.min(5, Math.ceil((item.notes?.length || 0) / 28));
-  const otherLines = Math.ceil(
-    Math.max(
-      item.category?.length || 0,
-      item.product?.length || 0,
-      item.brand?.length || 0,
-      item.warranty?.length || 0,
-    ) / 18,
-  );
-  return 16 + Math.max(1, notesLines, otherLines) * 17;
-}
-
-// Splits material items into pages using pixel-height budgets.
-// firstAvailPx / nextAvailPx = available tbody height for page 1 vs 2+.
-function paginateMaterialItems(items: MaterialItem[], firstAvailPx: number, nextAvailPx: number) {
-  const pages: MaterialItem[][] = [];
-  let current: MaterialItem[] = [];
-  let used = 0;
-  let avail = firstAvailPx;
-
-  for (const item of items) {
-    const h = matRowPx(item);
-    if (current.length > 0 && used + h > avail) {
-      pages.push(current);
-      current = [];
-      used = 0;
-      avail = nextAvailPx;
-    }
-    current.push(item);
-    used += h;
-  }
-
-  if (current.length > 0) pages.push(current);
-  return pages.length > 0 ? pages : [[]];
-}
-
-// Splits timeline phases into pages using pixel-height budgets.
-// Handles 2-col layouts (compact/cards) by pairing items.
-function paginatePhases(phases: string[], tlLayout: string, firstAvailPx: number, nextAvailPx: number) {
-  function phasePx(p: string): number {
-    const desc = p.split("|||")[1] || "";
-    if (tlLayout === "steps") {
-      const lines = Math.max(1, Math.ceil(desc.length / 56)); // text-sm ~638px wide
-      return 32 + 22 + 6 + lines * 23; // pb-8 + title + mt-1.5 + desc
-    }
-    if (tlLayout === "bars") {
-      const lines = Math.max(1, Math.ceil(desc.length / 56));
-      return 24 + 18 + lines * 18 + 8; // py-3 + title + desc + space-y-2
-    }
-    // compact / cards — 2-col, ~30 chars per line at half width
-    const lines = Math.max(1, Math.ceil(desc.length / 30));
-    return tlLayout === "cards"
-      ? 40 + lines * 18 + 12
-      : 28 + 20 + lines * 18 + 16;
-  }
-
-  const pages: string[][] = [];
-  let current: string[] = [];
-  let used = 0;
-  let avail = firstAvailPx;
-  const twoCol = tlLayout === "compact" || tlLayout === "cards";
-
-  if (twoCol) {
-    for (let i = 0; i < phases.length; i += 2) {
-      const pair = phases.slice(i, Math.min(i + 2, phases.length));
-      const rowH = Math.max(...pair.map(phasePx));
-      if (current.length > 0 && used + rowH > avail) {
-        pages.push(current);
-        current = [];
-        used = 0;
-        avail = nextAvailPx;
-      }
-      current.push(...pair);
-      used += rowH;
-    }
-  } else {
-    for (const p of phases) {
-      const h = phasePx(p);
-      if (current.length > 0 && used + h > avail) {
-        pages.push(current);
-        current = [];
-        used = 0;
-        avail = nextAvailPx;
-      }
-      current.push(p);
-      used += h;
-    }
-  }
-
-  if (current.length > 0) pages.push(current);
-  return pages.length > 0 ? pages : [[]];
-}
-
-function paginateTextItemsByHeight(
-  items: string[],
-  {
-    columns,
-    firstPagePx,
-    nextPagePx,
-    charsPerLine,
-    basePx,
-    linePx,
-    rowGapPx,
-  }: {
-    columns: 1 | 2;
-    firstPagePx: number;
-    nextPagePx: number;
-    charsPerLine: number;
-    basePx: number;
-    linePx: number;
-    rowGapPx: number;
-  }
-) {
-  function itemHeight(item: string) {
-    const normalizedLength = item.replace(/\s+/g, " ").trim().length;
-    const lines = Math.max(1, Math.ceil(normalizedLength / charsPerLine));
-    return basePx + lines * linePx;
-  }
-
-  const pages: string[][] = [];
-  let current: string[] = [];
-  let used = 0;
-  let available = firstPagePx;
-
-  if (columns === 2) {
-    for (let index = 0; index < items.length; index += 2) {
-      const row = items.slice(index, index + 2);
-      const rowHeight = Math.max(...row.map(itemHeight)) + rowGapPx;
-      if (current.length > 0 && used + rowHeight > available) {
-        pages.push(current);
-        current = [];
-        used = 0;
-        available = nextPagePx;
-      }
-      current.push(...row);
-      used += rowHeight;
-    }
-  } else {
-    for (const item of items) {
-      const height = itemHeight(item) + rowGapPx;
-      if (current.length > 0 && used + height > available) {
-        pages.push(current);
-        current = [];
-        used = 0;
-        available = nextPagePx;
-      }
-      current.push(item);
-      used += height;
-    }
-  }
-
-  if (current.length > 0) pages.push(current);
-  return pages.length > 0 ? pages : [[]];
-}
-
-function paginateWeightedItems(items: string[], firstPageMax: number, nextPageMax: number) {
-  const pages: string[][] = [];
-  let currentPage: string[] = [];
-  let currentWeight = 0;
-  let maxWeight = firstPageMax;
-
-  for (const item of items) {
-    const itemWeight = Math.max(1, Math.ceil(item.length / 180));
-    if (currentPage.length > 0 && currentWeight + itemWeight > maxWeight) {
-      pages.push(currentPage);
-      currentPage = [];
-      currentWeight = 0;
-      maxWeight = nextPageMax;
-    }
-    currentPage.push(item);
-    currentWeight += itemWeight;
-  }
-
-  if (currentPage.length > 0) pages.push(currentPage);
-  return pages.length > 0 ? pages : [[]];
-}
-
-function splitTextIntoPages(text: string, maxChars: number) {
-  const normalized = text.trim();
-  if (!normalized) return [""];
-  const paragraphs = normalized.split(/\n\s*\n/);
-  const pages: string[] = [];
-  let current = "";
-  for (const paragraph of paragraphs) {
-    if ((current + "\n\n" + paragraph).trim().length > maxChars && current) {
-      pages.push(current.trim());
-      current = paragraph;
-    } else {
-      current = current ? `${current}\n\n${paragraph}` : paragraph;
-    }
-  }
-  if (current.trim()) pages.push(current.trim());
-  return pages;
-}
-
-function getPhotoGlobalIndex(pageIndex: number, index: number, photoLayout: string) {
-  const perPage = photoLayout === "one" ? 1 : photoLayout === "grid" ? 4 : 2;
-  return pageIndex * perPage + index;
 }
 
 function CoverBrand({

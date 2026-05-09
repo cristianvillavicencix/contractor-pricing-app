@@ -39,6 +39,29 @@ type ProjectDetailTab = "overview" | "costs" | "quote" | "notes";
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  /**
+   * This screen is powered by localStorage (via useLocalStorageState).
+   * During SSR, the server cannot read localStorage, which can cause hydration mismatches
+   * when the client loads the real data.
+   */
+  if (!mounted) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-[#213343]">
+        <div className="text-center">
+          <p className="text-lg font-semibold">Loading…</p>
+          <p className="mt-2 text-sm text-gray-500">Preparing your projects.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <ProjectsPageClient router={router} />;
+}
+
+function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }) {
   const [projects, setProjects] = useLocalStorageState<Project[]>(
     storageKeys.projects,
     initialProjects

@@ -169,8 +169,34 @@
   }
 }
 
-.proposal-document {
-  counter-reset: proposal-page;
+.paged-proposal-preview {
+  position: relative;
+  width: 100%;
+  /*
+   * Paged.js defaults (~8.5×11in). This app uses A4 (210×297mm) in @page and PDF.
+   * If we leave Letter height, a 297mm-tall cover overflows ~18mm onto a second sheet.
+   */
+  --pagedjs-width: 210mm;
+  --pagedjs-height: 297mm;
+  --pagedjs-width-right: 210mm;
+  --pagedjs-height-right: 297mm;
+  --pagedjs-width-left: 210mm;
+  --pagedjs-height-left: 297mm;
+  --pagedjs-pagebox-width: 210mm;
+  --pagedjs-pagebox-height: 297mm;
+}
+
+.paged-proposal-output {
+  width: 100%;
+}
+
+.paged-proposal-staging-host {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 210mm;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .paged-proposal-source-shell {
@@ -186,23 +212,135 @@
   background: white !important;
 }
 
-.paged-proposal-source-shell .proposal-document > section {
-  break-before: page;
+/* Cover: exact one A4 sheet in Paged source/output (height, not min-height, avoids spill pages) */
+.paged-proposal-source-shell .proposal-document > section[data-proposal-section="cover"]:not(.cover-page-elegant),
+.paged-proposal-output section[data-proposal-section="cover"]:not(.cover-page-elegant) {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+  box-sizing: border-box !important;
+  min-height: 0 !important;
+  height: 297mm !important;
+  max-height: 297mm !important;
+  overflow: hidden !important;
+}
+
+/* Builders-style elegant cover: explicit A4, full bleed, no card chrome */
+section.cover-page-elegant {
+  width: 210mm !important;
+  max-width: 210mm !important;
+  height: 296.5mm !important;
+  max-height: 296.5mm !important;
+  min-height: 296.5mm !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  display: block !important;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+  /* Evita que Paged “parta” la portada en dos hojas por altura ambigua */
+  flex-shrink: 0 !important;
+}
+
+/* Pie Elegante: nombre + cargo deben quedar juntos (sin salto entre párrafos). */
+section.cover-page-elegant .elegant-cover-footer-cluster,
+section.cover-page-elegant .elegant-cover-footer-text {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+/* Elegante header: fade the frosted bar into the image (top→bottom). */
+section.cover-page-elegant .elegant-cover-header-bar {
+  /* Mask fades the entire element (including backdrop blur) */
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* Elegante price band fade: apply mask to the background layer only (keep text solid). */
+section.cover-page-elegant .elegant-cover-price-fade {
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* Cover sheet only — named page proposal-cover (data-page on section). Never tie bleed to :first. */
+.paged-proposal-output .pagedjs_proposal-cover_page .pagedjs_pagebox > .pagedjs_area {
+  padding: 0 !important;
+  border: none !important;
+}
+
+.paged-proposal-output .pagedjs_proposal-cover_page {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.paged-proposal-output .pagedjs_proposal-cover_page:has(.cover-page-elegant) .proposal-document {
+  background-color: #c5daf0 !important;
+}
+
+.paged-proposal-source-shell .proposal-document > footer {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+}
+
+.paged-proposal-output .proposal-document > footer {
+  display: none !important;
+}
+
+.paged-proposal-source-shell .proposal-document > section:not([data-proposal-section="cover"]) {
+  /* break-before: each section starts a new sheet (see section + section rule) */
+  break-after: auto !important;
+  page-break-after: auto !important;
+  break-inside: auto !important;
+  page-break-inside: auto !important;
   height: auto !important;
   min-height: auto !important;
   overflow: visible !important;
-  page-break-before: always;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }
 
-.paged-proposal-source-shell .proposal-document > section::before,
-.paged-proposal-source-shell .proposal-document > section::after {
-  display: none !important;
+/* Every block after another <section> starts on a new page (cover → §1, §2 → §3, …). */
+.paged-proposal-source-shell .proposal-document > section + section {
+  break-before: page !important;
+  page-break-before: always !important;
+}
+
+.paged-proposal-output .proposal-document > section:not([data-proposal-section="cover"]) {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* Let long lists / tables span pages without clipping the section */
+.proposal-document > section {
+  position: relative;
+  box-sizing: border-box;
+  orphans: 2;
+  widows: 2;
+}
+
+.proposal-document table {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
+.proposal-document tbody tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .paged-proposal-output .pagedjs_pages {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 32px;
+  counter-reset: proposal-sheet-number;
 }
 
 .paged-proposal-output .pagedjs_page {
@@ -220,85 +358,115 @@
   text-transform: uppercase;
 }
 
+/*
+ * Paged.js margin boxes from @page { @top-left { content: … } } are unreliable here
+ * (Tailwind pipeline + preview). Stamp header / page numbers on the real DOM instead.
+ * proposal-sheet-number starts at 1 on the first page after the cover.
+ */
+.paged-proposal-output .pagedjs_page:not(.pagedjs_first_page) {
+  counter-increment: proposal-sheet-number;
+}
+
+.paged-proposal-output
+  .pagedjs_page:not(.pagedjs_first_page)
+  .pagedjs_margin-top-left
+  .pagedjs_margin-content::after {
+  content: "Proposal";
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  padding-bottom: 4px;
+  margin-bottom: 2mm;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+/* Fallback selectors for Paged.js margin box class variations. */
+.paged-proposal-output
+  .pagedjs_page:not(.pagedjs_first_page)
+  [class*="pagedjs_margin-top"]
+  .pagedjs_margin-content::after {
+  content: "Proposal";
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  padding-bottom: 4px;
+  margin-bottom: 2mm;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.paged-proposal-output
+  .pagedjs_page:not(.pagedjs_first_page)
+  .pagedjs_margin-bottom-right
+  .pagedjs_margin-content::after {
+  content: "Page " counter(proposal-sheet-number);
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border-top: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding-top: 5px;
+  margin-top: 2mm;
+  text-align: right;
+  text-transform: none;
+}
+
+.paged-proposal-output
+  .pagedjs_page:not(.pagedjs_first_page)
+  [class*="pagedjs_margin-bottom"]
+  .pagedjs_margin-content::after {
+  content: "Page " counter(proposal-sheet-number);
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border-top: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding-top: 5px;
+  margin-top: 2mm;
+  text-align: right;
+  text-transform: none;
+}
+
+/* Used by Paged for layout; margin content is applied via rules above */
 @page {
   size: A4;
-  margin: 18mm 14mm 18mm;
-
-  @top-left {
-    border-bottom: 1px solid #e2e8f0;
-    color: #94a3b8;
-    content: "Proposal";
-    font-size: 9px;
-    letter-spacing: 0.08em;
-    padding-bottom: 4px;
-    text-transform: uppercase;
-  }
-
-  @bottom-right {
-    border-top: 1px solid #e2e8f0;
-    color: #94a3b8;
-    content: "Page " counter(page);
-    font-size: 10px;
-    padding-top: 5px;
-  }
+  margin: 18mm 14mm 20mm;
 }
 
-@page:first {
+/* Cover bleed uses named page proposal-cover (see public/paged-proposal-a4.css), not :first. */
+@page proposal-cover {
   margin: 0;
-
-  @top-left {
-    content: none;
-  }
-
-  @bottom-right {
-    content: none;
-  }
 }
 
-.proposal-document > section {
-  position: relative;
-  box-sizing: border-box;
-  counter-increment: proposal-page;
-}
-
-.proposal-document > section:not([data-proposal-section="cover"]) {
-  padding-top: 72px !important;
-  padding-bottom: 88px !important;
-}
-
-.proposal-document > section:not([data-proposal-section="cover"])::before {
-  content: "Proposal";
-  position: absolute;
-  left: 14mm;
-  right: 14mm;
-  top: 8mm;
-  border-bottom: 1px solid #e2e8f0;
-  padding-bottom: 4px;
-  font-size: 9px;
-  line-height: 1;
-  color: #94a3b8;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.proposal-document > section:not([data-proposal-section="cover"])::after {
-  content: "Page " counter(proposal-page);
-  position: absolute;
-  right: 14mm;
-  bottom: 10mm;
-  left: 14mm;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 5px;
-  text-align: right;
-  font-size: 10px;
-  line-height: 1;
-  color: #94a3b8;
-  letter-spacing: 0.02em;
+.proposal-document thead {
+  display: table-header-group;
 }
 
 @media print {
+  /* Match screen @page: interior margins + full-bleed first sheet (same as Paged layout) */
   @page {
     size: A4;
+    margin: 18mm 14mm 20mm;
+  }
+
+  @page proposal-cover {
     margin: 0;
   }
 
@@ -309,51 +477,45 @@
     background: white !important;
   }
 
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
   body * {
     visibility: hidden;
   }
 
-  .proposal-document,
-  .proposal-document * {
+  .paged-proposal-preview,
+  .paged-proposal-preview * {
     visibility: visible;
   }
 
-  .proposal-document {
-    position: absolute !important;
-    inset: 0 auto auto 0 !important;
-    width: 210mm !important;
-    background: white !important;
-    color: #1a2733 !important;
-  }
-
-  .proposal-document > section {
-    width: 210mm !important;
-    min-height: 297mm !important;
-    height: 297mm !important;
-    max-width: none !important;
-    margin: 0 !important;
-    box-shadow: none !important;
-    border: 0 !important;
-    break-after: page;
-    page-break-after: always;
-    overflow: hidden !important;
-  }
-
-  .proposal-document > footer {
-    display: none !important;
-  }
-
-  .paged-proposal-source-shell {
+  .paged-proposal-source-shell,
+  .paged-proposal-source-shell * {
+    visibility: hidden !important;
     display: none !important;
   }
 
   .paged-proposal-output .pagedjs_pages {
     display: block !important;
+    gap: 0 !important;
   }
 
   .paged-proposal-output .pagedjs_page {
     border: 0 !important;
     box-shadow: none !important;
     margin: 0 !important;
+    background: white !important;
+  }
+
+  .paged-proposal-output .pagedjs_proposal-cover_page .pagedjs_pagebox > .pagedjs_area {
+    padding: 0 !important;
+    border: none !important;
+  }
+
+  .paged-proposal-output .pagedjs_proposal-cover_page:has(.cover-page-elegant) .proposal-document {
+    background-color: #c5daf0 !important;
   }
 }

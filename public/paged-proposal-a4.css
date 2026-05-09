@@ -1,0 +1,43 @@
+/*
+ * Paged.js Polisher only ingests styles passed to Previewer.preview() plus its base (Letter).
+ * This sheet is fetched so chunker/page boxes match real A4 — 297mm cover height must not exceed
+ * an 11in (~279mm) internal page or the cover spills onto a second sheet.
+ *
+ * Full bleed must NOT use @page:first: if cover is off, the first sheet is normal body content and
+ * must keep normal margins — otherwise the next section “replaces” the cover visually.
+ */
+@page {
+  size: 210mm 297mm;
+  margin: 18mm 14mm 20mm;
+}
+
+@page proposal-cover {
+  margin: 0;
+}
+
+section[data-proposal-section="cover"] {
+  page: proposal-cover;
+}
+
+/* Elegante: el cargo debe quedar bajo el nombre en la misma hoja (no fragmentar entre párrafos). */
+section.cover-page-elegant .elegant-cover-footer-cluster,
+section.cover-page-elegant .elegant-cover-footer-text {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+section.cover-page-elegant .elegant-cover-footer-bar {
+  overflow: hidden;
+}
+
+/* Elegante header: fade frosted bar into image (works in Chrome print/Paged). */
+section.cover-page-elegant .elegant-cover-header-bar {
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* Elegante price band fade: apply mask to the background layer only (keep text solid). */
+section.cover-page-elegant .elegant-cover-price-fade {
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+}

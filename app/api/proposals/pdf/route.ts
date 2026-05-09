@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
     const page = await browser.newPage({
       viewport: { width: 1280, height: 1600 },
     });
+    /* Use print CSS from first paint so Paged.js + @page margins match the PDF engine */
+    await page.emulateMedia({ media: "print" });
 
     await page.addInitScript((storage) => {
       for (const [key, value] of Object.entries(storage ?? {})) {

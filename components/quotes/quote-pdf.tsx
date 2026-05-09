@@ -190,6 +190,19 @@ const s = StyleSheet.create({
   pageNumber: { fontSize: 7, color: c.muted },
 });
 
+function pdfContactInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+}
+
+function coverSelectedPrice(doc: QuoteDocument) {
+  if (doc.selectedOption === "Good") return doc.goodPrice;
+  if (doc.selectedOption === "Better") return doc.betterPrice;
+  return doc.bestPrice;
+}
+
 function CoverPage({
   doc,
   coverImageUrl,
@@ -199,6 +212,240 @@ function CoverPage({
   coverImageUrl: string;
   coverLayout: CoverLayout;
 }) {
+  if (coverLayout === "elegant") {
+    const bannerHeadline = doc.coverBannerHeadline?.trim() || "PROPOSED INVESTMENT";
+    const price = coverSelectedPrice(doc);
+    const detail = [doc.customerAddress, doc.projectName]
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("  |  ");
+    const displayCompanyName =
+      doc.elegantCoverBusinessName?.trim() || doc.companyName;
+    const displayLogoUrl =
+      doc.elegantCoverLogoUrl?.trim() || doc.companyLogoUrl?.trim() || "";
+    const displayPriceText =
+      doc.elegantCoverPriceDisplay?.trim() || formatMoney(price);
+    const displayContactName =
+      doc.elegantCoverContactName?.trim() ||
+      doc.contactName ||
+      doc.companyName;
+    const displayContactPhoto =
+      doc.elegantCoverContactPhotoUrl?.trim() || doc.contactPhotoUrl?.trim() || "";
+    const displayContactTitle =
+      doc.elegantCoverContactJobTitle?.trim() || doc.contactTitle?.trim() || "";
+    const initials = pdfContactInitials(displayContactName);
+
+    const frostedPriceDark = {
+      backgroundColor: "rgba(28, 30, 32, 0.78)",
+      borderColor: "rgba(255,255,255,0.15)",
+    } as const;
+    const buildersGreen = "#174c36";
+    const buildersNameMint = "#a7f3d0";
+    /** Alturas fijas (mm→pt ~2.835): cabecera y banda de precio no crecen con el contenido. */
+    const headerBarPt = 85;
+    /** ~36mm pie verde: foto + nombre + cargo */
+    const footerHeightPt = 102;
+    const priceBandHeightPt = 147;
+
+    const coverTitleFontPt = 36;
+    const coverPriceFontPt = 42;
+
+    return (
+      <Page size="A4" style={{ padding: 0, fontFamily: "Inter" }}>
+        <View style={{ width: "100%", height: "100%", position: "relative" }}>
+          <Image
+            src={coverImageUrl}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+            }}
+          />
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: headerBarPt,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 14,
+              overflow: "hidden",
+              backgroundColor: "rgba(22, 24, 26, 0.82)",
+              borderBottomWidth: 1,
+              borderBottomColor: "rgba(255,255,255,0.12)",
+            }}
+          >
+            {displayLogoUrl ? (
+              <Image
+                src={displayLogoUrl}
+                style={{
+                  height: 46,
+                  maxWidth: 140,
+                  objectFit: "contain",
+                  marginRight: 12,
+                }}
+              />
+            ) : null}
+            <Text
+              style={{
+                flexShrink: 1,
+                fontSize: coverTitleFontPt,
+                fontFamily: "Helvetica-Bold",
+                color: "#ffffff",
+                textAlign: displayLogoUrl ? "left" : "center",
+                maxWidth: "82%",
+                letterSpacing: 1.2,
+                textTransform: "uppercase",
+                lineHeight: 1.05,
+              }}
+            >
+              {displayCompanyName}
+            </Text>
+          </View>
+          <View
+            style={{
+              position: "absolute",
+              bottom: footerHeightPt,
+              left: 0,
+              right: 0,
+              height: priceBandHeightPt,
+              justifyContent: "center",
+              alignItems: "center",
+              paddingHorizontal: 16,
+              paddingVertical: 16,
+              ...frostedPriceDark,
+              borderTopWidth: 1,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 11,
+                color: "#ffffff",
+                textAlign: "center",
+                letterSpacing: 2.2,
+                textTransform: "uppercase",
+                fontFamily: "Inter",
+                fontWeight: 600,
+                opacity: 0.95,
+              }}
+            >
+              {bannerHeadline}
+            </Text>
+            <Text
+              style={{
+                marginTop: 8,
+                fontSize: coverPriceFontPt,
+                lineHeight: 1,
+                color: "#ffffff",
+                textAlign: "center",
+                fontFamily: "Helvetica-Bold",
+              }}
+            >
+              {displayPriceText}
+            </Text>
+            {detail ? (
+              <Text
+                style={{
+                  marginTop: 10,
+                  fontSize: 10,
+                  lineHeight: 1.45,
+                  color: "rgba(255,255,255,0.9)",
+                  textAlign: "center",
+                  fontFamily: "Inter",
+                  maxWidth: "198mm",
+                  letterSpacing: 0.6,
+                  textTransform: "uppercase",
+                }}
+              >
+                {detail}
+              </Text>
+            ) : null}
+          </View>
+          <View
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: footerHeightPt,
+              backgroundColor: buildersGreen,
+              flexDirection: "row",
+              justifyContent: "center",
+              alignItems: "center",
+              paddingHorizontal: 18,
+              paddingVertical: 6,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", maxWidth: "185mm" }}>
+              <View style={{ marginRight: 14 }}>
+                {displayContactPhoto ? (
+                  <Image
+                    src={displayContactPhoto}
+                    style={{
+                      width: 50,
+                      height: 50,
+                      borderRadius: 25,
+                      borderWidth: 2,
+                      borderColor: "rgba(255,255,255,0.4)",
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 50,
+                      height: 50,
+                      borderRadius: 25,
+                      borderWidth: 2,
+                      borderColor: "rgba(255,255,255,0.4)",
+                      backgroundColor: "rgba(255,255,255,0.1)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, color: "#ffffff", fontFamily: "Helvetica-Bold" }}>
+                      {initials}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={{ flexShrink: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 16,
+                    color: buildersNameMint,
+                    fontFamily: "Helvetica-Bold",
+                  }}
+                >
+                  {displayContactName}
+                </Text>
+                {displayContactTitle ? (
+                  <Text
+                    style={{
+                      marginTop: 5,
+                      fontSize: 12,
+                      color: "#ffffff",
+                      fontWeight: 600,
+                      opacity: 0.95,
+                    }}
+                  >
+                    {displayContactTitle}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </View>
+        </View>
+      </Page>
+    );
+  }
+
   if (coverLayout === "full") {
     return (
       <Page size="A4" style={{ padding: 0, backgroundColor: c.black }}>

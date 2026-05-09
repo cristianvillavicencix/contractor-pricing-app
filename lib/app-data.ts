@@ -37,7 +37,7 @@ export type ProposalCredentialPlacement =
   | "Before Signatures"
   | "After Scope"
   | "Footer";
-export type ProposalCoverLayout = "full" | "half" | "square";
+export type ProposalCoverLayout = "full" | "half" | "square" | "elegant";
 
 export type CompanyCredential = {
   id: string;
@@ -170,6 +170,10 @@ export type AppSettings = {
   companyProfile: {
     businessName: string;
     contactName: string;
+    /** Job title / role shown under the contact name on the elegant cover and PDF. */
+    contactJobTitle: string;
+    /** Headshot for the person who prepares proposals (elegant cover footer, PDF). */
+    contactPhotoUrl: string;
     email: string;
     phone: string;
     website: string;
@@ -374,6 +378,8 @@ export const defaultSettings: AppSettings = {
   companyProfile: {
     businessName: "Contractor Company",
     contactName: "",
+    contactJobTitle: "",
+    contactPhotoUrl: "/branding/default-contact-photo.png",
     email: "",
     phone: "",
     website: "",
@@ -521,7 +527,7 @@ export const defaultSettings: AppSettings = {
     },
   },
   branding: {
-    logoUrl: "",
+    logoUrl: "/branding/default-company-logo.png",
     primaryColor: "#111111",
     accentColor: "#737373",
     tagline: "",

@@ -2,6 +2,56 @@
 
 import type { CoverLayout, QuoteDocument } from "@/lib/pdf-generator";
 import { formatMoney } from "@/lib/pdf-generator";
+import {
+  CoverPageElegant,
+  ELEGANT_COVER_DEFAULT_HEADLINE,
+  getContactInitials,
+} from "@/components/proposals/cover-page-elegant";
+
+function elegantPropsFromDoc(doc: QuoteDocument, coverImageUrl: string) {
+  const price =
+    doc.selectedOption === "Good"
+      ? doc.goodPrice
+      : doc.selectedOption === "Better"
+        ? doc.betterPrice
+        : doc.bestPrice;
+  const detail = [doc.customerAddress, doc.projectName]
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("  |  ");
+
+  const displayCompanyName =
+    doc.elegantCoverBusinessName?.trim() || doc.companyName;
+  const displayLogo =
+    doc.elegantCoverLogoUrl?.trim() || doc.companyLogoUrl?.trim() || null;
+  const displayPrice =
+    doc.elegantCoverPriceDisplay?.trim() || formatMoney(price);
+  const displayContactName =
+    doc.elegantCoverContactName?.trim() ||
+    doc.contactName ||
+    doc.companyName;
+  const displaySubtitle =
+    doc.elegantCoverContactJobTitle?.trim() ||
+    doc.contactTitle?.trim() ||
+    "";
+  const displayContactPhoto =
+    doc.elegantCoverContactPhotoUrl?.trim() ||
+    doc.contactPhotoUrl?.trim() ||
+    null;
+
+  return {
+    coverPhotoUrl: coverImageUrl,
+    logoUrl: displayLogo,
+    companyName: displayCompanyName,
+    bannerHeadline: doc.coverBannerHeadline?.trim() || ELEGANT_COVER_DEFAULT_HEADLINE,
+    priceDisplay: displayPrice,
+    detailLine: detail || doc.customerName,
+    contactName: displayContactName,
+    contactSubtitle: displaySubtitle,
+    contactPhotoUrl: displayContactPhoto,
+    initials: getContactInitials(displayContactName),
+  } satisfies import("react").ComponentProps<typeof CoverPageElegant>;
+}
 
 export function QuotePreview({
   doc,
@@ -16,12 +66,22 @@ export function QuotePreview({
     .filter(Boolean)
     .join("  ·  ");
 
+  const elegant = coverLayout === "elegant";
+
   return (
-    <div className="mx-auto w-full max-w-[820px] bg-white font-sans text-[#111111] shadow-sm ring-1 ring-[#E5E7EB]">
+    <div
+      className={`mx-auto w-full bg-white font-sans text-[#111111] ${
+        elegant
+          ? "max-w-[210mm] shadow-none ring-0"
+          : "max-w-[820px] shadow-sm ring-1 ring-[#E5E7EB]"
+      }`}
+    >
       {/* ── Cover page ── */}
-      {coverImageUrl && (
+      {coverImageUrl && elegant ? (
+        <CoverPageElegant {...elegantPropsFromDoc(doc, coverImageUrl)} />
+      ) : coverImageUrl ? (
         <CoverPhoto url={coverImageUrl} layout={coverLayout} doc={doc} />
-      )}
+      ) : null}
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-6 border-b border-[#E5E7EB] px-14 py-10">

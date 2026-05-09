@@ -18,6 +18,7 @@ import {
 } from "@/lib/proposal-templates";
 import { readLocalStorage, writeLocalStorage } from "@/lib/use-local-storage";
 import { ProposalDocument } from "@/components/proposals/proposal-document";
+import { PagedProposalPreview } from "@/components/proposals/paged-proposal-preview";
 import type { CoverLayout } from "@/lib/pdf-generator";
 
 type AcceptanceState = "viewing" | "signing" | "accepted";
@@ -149,6 +150,16 @@ export default function ClientAcceptancePage() {
 
   const mergedSettings = mergeAppSettings(settings);
 
+  const pagedRenderKey = JSON.stringify({
+    quote,
+    settings: mergedSettings,
+    template,
+    coverPhotoUrl,
+    coverLayout,
+    existingPhotos,
+    existingPhotoCaptions,
+  });
+
   if (state === "accepted") {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-[#f5f8fa] px-6 text-center">
@@ -239,22 +250,38 @@ export default function ClientAcceptancePage() {
         </div>
       ) : null}
 
-      {/* Proposal document */}
-      <div className="mx-auto max-w-5xl py-8">
-        <ProposalDocument
-          template={template}
-          quote={quote}
-          settings={mergedSettings}
-          coverPhotoUrl={coverPhotoUrl}
-          coverLayout={coverLayout}
-          photos={existingPhotos}
-          photoCaptions={existingPhotoCaptions}
-          proposalNumber={quote.proposalNumber}
-          sectionOverrides={quote.sectionOverrides}
-          sectionLayouts={quote.sectionLayouts}
-          sectionOrder={quote.sectionOrder}
-          customSections={quote.customSections}
-        />
+      {/* Proposal document — same paginated view as editor preview, print route, and PDF */}
+      <div
+        className={
+          coverLayout === "elegant"
+            ? "mx-auto max-w-260 px-2 py-4"
+            : "mx-auto max-w-260 px-6 py-8"
+        }
+      >
+        <div
+          className={
+            coverLayout === "elegant"
+              ? "rounded border border-[#d9e2ec] bg-[#e9eef4] px-1 py-2 shadow-inner print:border-0 print:bg-white print:p-0 print:shadow-none"
+              : "rounded border border-[#d9e2ec] bg-[#e9eef4] px-6 py-8 shadow-inner print:border-0 print:bg-white print:p-0 print:shadow-none"
+          }
+        >
+          <PagedProposalPreview renderKey={pagedRenderKey}>
+            <ProposalDocument
+              template={template}
+              quote={quote}
+              settings={mergedSettings}
+              coverPhotoUrl={coverPhotoUrl}
+              coverLayout={coverLayout}
+              photos={existingPhotos}
+              photoCaptions={existingPhotoCaptions}
+              proposalNumber={quote.proposalNumber}
+              sectionOverrides={quote.sectionOverrides}
+              sectionLayouts={quote.sectionLayouts}
+              sectionOrder={quote.sectionOrder}
+              customSections={quote.customSections}
+            />
+          </PagedProposalPreview>
+        </div>
       </div>
 
       {/* Signing overlay */}

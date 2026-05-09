@@ -6,8 +6,9 @@ import {
   type Project,
   type Quote,
 } from "./app-data";
+import type { ProposalTemplate } from "./proposal-templates";
 
-export type CoverLayout = "full" | "half" | "square";
+export type CoverLayout = "full" | "half" | "square" | "elegant";
 
 export type QuoteDocument = {
   // Company
@@ -16,6 +17,8 @@ export type QuoteDocument = {
   companyEmail: string;
   companyWebsite: string;
   companyLogoUrl: string;
+  /** Headshot URL for proposal preparer (elegant cover / footer). */
+  contactPhotoUrl: string;
   companyTagline: string;
   companyFooterText: string;
   // Proposal meta
@@ -31,6 +34,17 @@ export type QuoteDocument = {
   // Project
   projectName: string;
   trade: string;
+  /** Uppercase line above hero price on the \"Elegante\" cover (from template). */
+  coverBannerHeadline?: string;
+  /** Elegante cover overrides (from proposal template). */
+  elegantCoverBusinessName?: string;
+  elegantCoverLogoUrl?: string;
+  elegantCoverPriceDisplay?: string;
+  elegantCoverContactName?: string;
+  elegantCoverContactPhotoUrl?: string;
+  elegantCoverContactJobTitle?: string;
+  contactName: string;
+  contactTitle: string;
   // Content
   scopeSummary: string;
   warrantyText: string;
@@ -91,7 +105,8 @@ export function getPricingDescriptions(settings: AppSettings): Record<"Good" | "
 export function buildQuoteDocument(
   quote: Quote,
   project: Project | undefined,
-  settings: AppSettings
+  settings: AppSettings,
+  proposalTemplate?: Pick<ProposalTemplate, "cover"> | null
 ): QuoteDocument {
   const mergedSettings = mergeAppSettings(settings);
   const projectAddress = project
@@ -108,6 +123,7 @@ export function buildQuoteDocument(
     companyEmail: mergedSettings.companyProfile.email,
     companyWebsite: mergedSettings.companyProfile.website,
     companyLogoUrl: mergedSettings.branding.logoUrl,
+    contactPhotoUrl: mergedSettings.companyProfile.contactPhotoUrl?.trim() || "",
     companyTagline: mergedSettings.branding.tagline,
     companyFooterText: mergedSettings.branding.footerText,
 
@@ -126,6 +142,15 @@ export function buildQuoteDocument(
 
     projectName: quote.projectName,
     trade: quote.trade || project?.trade || "",
+    coverBannerHeadline: proposalTemplate?.cover.bannerHeadline?.trim() || undefined,
+    elegantCoverBusinessName: proposalTemplate?.cover.elegantBusinessName?.trim() || undefined,
+    elegantCoverLogoUrl: proposalTemplate?.cover.elegantLogoUrl?.trim() || undefined,
+    elegantCoverPriceDisplay: proposalTemplate?.cover.elegantPriceDisplay?.trim() || undefined,
+    elegantCoverContactName: proposalTemplate?.cover.elegantContactName?.trim() || undefined,
+    elegantCoverContactPhotoUrl: proposalTemplate?.cover.elegantContactPhotoUrl?.trim() || undefined,
+    elegantCoverContactJobTitle: proposalTemplate?.cover.elegantContactJobTitle?.trim() || undefined,
+    contactName: mergedSettings.companyProfile.contactName || mergedSettings.companyProfile.businessName || "",
+    contactTitle: mergedSettings.companyProfile.contactJobTitle?.trim() || "",
 
     scopeSummary: quote.scopeSummary || "",
     warrantyText:

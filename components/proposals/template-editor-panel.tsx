@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { X, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import type { ProposalTemplate, MaterialItem, TimelinePhase } from "@/lib/proposal-templates";
 import { PROPOSAL_SECTIONS } from "@/lib/proposal-templates";
@@ -185,16 +185,138 @@ function SectionEditorHeader({ title, enabled, onToggle }: { title: string; enab
 
 // ── Cover ─────────────────────────────────────────────────────────────────────
 function CoverEditor({ section, onChange }: { section: ProposalTemplate["cover"]; onChange: (v: ProposalTemplate["cover"]) => void }) {
+  const elegantLogoRef = useRef<HTMLInputElement>(null);
+  const elegantPhotoRef = useRef<HTMLInputElement>(null);
+
   function set<K extends keyof typeof section>(key: K, val: (typeof section)[K]) {
     onChange({ ...section, [key]: val });
   }
+
+  function readImageFile(file: File, key: "elegantLogoUrl" | "elegantContactPhotoUrl") {
+    const MAX = 1.2 * 1024 * 1024;
+    if (!file.type.startsWith("image/") || file.size > MAX) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const r = reader.result;
+      if (typeof r === "string") set(key, r);
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div>
       <SectionEditorHeader title="Cover Page" enabled={section.enabled} onToggle={(v) => set("enabled", v)} />
       <FieldGroup label="Tagline">
         <Input value={section.tagline} onChange={(v) => set("tagline", v)} placeholder="Professional Services — Licensed, Insured & Warranted" />
       </FieldGroup>
-      <div className="flex gap-6">
+      <FieldGroup label="Banner headline (Elegante layout)">
+        <Input
+          value={section.bannerHeadline ?? ""}
+          onChange={(v) => set("bannerHeadline", v.trim() === "" ? undefined : v.trim())}
+          placeholder="PROPOSED INVESTMENT"
+        />
+      </FieldGroup>
+      <div className="mt-6 rounded-lg border border-[#e8eef5] bg-[#fafbfc] p-4">
+        <p className="mb-1 text-sm font-semibold text-[#213343]">Elegante — optional overrides</p>
+        <p className="mb-4 text-xs text-gray-500">
+          Used when the quote uses the Elegante cover layout. Leave blank to use Settings and the live quote total. The address line on the cover still comes from the quote.
+        </p>
+        <FieldGroup label="Company name">
+          <Input
+            value={section.elegantBusinessName ?? ""}
+            onChange={(v) => set("elegantBusinessName", v.trim() === "" ? undefined : v.trim())}
+            placeholder="From Settings if empty"
+          />
+        </FieldGroup>
+        <FieldGroup label="Header logo">
+          <input
+            ref={elegantLogoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) readImageFile(f, "elegantLogoUrl");
+            }}
+          />
+          {section.elegantLogoUrl ? (
+            <div className="mb-2 flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={section.elegantLogoUrl} alt="" className="h-12 max-w-[140px] border border-[#d9e2ec] bg-white object-contain p-1" />
+              <button
+                type="button"
+                className="text-xs text-[#ff5c35] underline"
+                onClick={() => set("elegantLogoUrl", undefined)}
+              >
+                Remove override
+              </button>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="rounded border border-[#d9e2ec] px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+            onClick={() => elegantLogoRef.current?.click()}
+          >
+            {section.elegantLogoUrl ? "Replace logo image" : "Upload logo image"}
+          </button>
+        </FieldGroup>
+        <FieldGroup label="Price text (hero)">
+          <Input
+            value={section.elegantPriceDisplay ?? ""}
+            onChange={(v) => set("elegantPriceDisplay", v.trim() === "" ? undefined : v)}
+            placeholder="Formatted quote total if empty"
+          />
+        </FieldGroup>
+        <FieldGroup label="Footer contact name">
+          <Input
+            value={section.elegantContactName ?? ""}
+            onChange={(v) => set("elegantContactName", v.trim() === "" ? undefined : v.trim())}
+            placeholder="From Settings if empty"
+          />
+        </FieldGroup>
+        <FieldGroup label="Footer job title">
+          <Input
+            value={section.elegantContactJobTitle ?? ""}
+            onChange={(v) => set("elegantContactJobTitle", v.trim() === "" ? undefined : v.trim())}
+            placeholder="From Settings if empty"
+          />
+        </FieldGroup>
+        <FieldGroup label="Footer contact photo">
+          <input
+            ref={elegantPhotoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) readImageFile(f, "elegantContactPhotoUrl");
+            }}
+          />
+          {section.elegantContactPhotoUrl ? (
+            <div className="mb-2 flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={section.elegantContactPhotoUrl} alt="" className="h-14 w-14 rounded-full border border-[#d9e2ec] object-cover" />
+              <button
+                type="button"
+                className="text-xs text-[#ff5c35] underline"
+                onClick={() => set("elegantContactPhotoUrl", undefined)}
+              >
+                Remove override
+              </button>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="rounded border border-[#d9e2ec] px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+            onClick={() => elegantPhotoRef.current?.click()}
+          >
+            {section.elegantContactPhotoUrl ? "Replace photo" : "Upload photo"}
+          </button>
+        </FieldGroup>
+      </div>
+      <div className="mt-6 flex gap-6">
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input type="checkbox" checked={section.showPreparedBy} onChange={(e) => set("showPreparedBy", e.target.checked)} className="accent-[#ff5c35]" />
           Show prepared date
