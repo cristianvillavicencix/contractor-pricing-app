@@ -10,6 +10,9 @@ export async function resolvePostAuthPath(
   supabase: SupabaseBrowser,
   next: string
 ): Promise<string> {
+  if (next === "/auth/update-password" || next.startsWith("/auth/update-password?")) {
+    return "/auth/update-password";
+  }
   try {
     const raw = await loadCompanySettings<AppSettings | null>(supabase);
     const settings = mergeAppSettings(raw ?? defaultSettings);

@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Calculator, Clock3, DollarSign, Settings, X } from "lucide-react";
+import { Calculator, Clock3, DollarSign, History, Settings, Trash2, X } from "lucide-react";
+import {
+  clearPricingSessionHistory,
+  dispatchRestorePricingSession,
+  loadPricingSessionHistory,
+  removePricingSessionHistory,
+  type PricingSessionHistoryEntry,
+} from "@/lib/pricing-session-history";
 
 type Operator = "+" | "-" | "x" | "/";
 type HistoryItem = {
@@ -15,8 +22,10 @@ const numberButtons = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0", "."];
 
 export function FloatingCalculatorButton() {
   const pathname = usePathname();
-  const calculatorRef = useRef<HTMLDivElement>(null);
+  const clusterRef = useRef<HTMLDivElement>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
+  const [sessionEntries, setSessionEntries] = useState<PricingSessionHistoryEntry[]>([]);
   const [display, setDisplay] = useState("0");
   const [storedValue, setStoredValue] = useState<number | null>(null);
   const [operator, setOperator] = useState<Operator | null>(null);
@@ -27,15 +36,40 @@ export function FloatingCalculatorButton() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [decimals, setDecimals] = useState(2);
   const [copied, setCopied] = useState(false);
-  const shouldHide = pathname.startsWith("/quotes/preview");
+  const shouldHide =
+    pathname.startsWith("/quotes/preview") ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/auth");
+
+  useEffect(() => {
+    if (!pathname.startsWith("/pricing")) {
+      queueMicrotask(() => setSessionPanelOpen(false));
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!sessionPanelOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        clusterRef.current &&
+        !clusterRef.current.contains(event.target as Node)
+      ) {
+        setSessionPanelOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [sessionPanelOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     function handlePointerDown(event: PointerEvent) {
       if (
-        calculatorRef.current &&
-        !calculatorRef.current.contains(event.target as Node)
+        clusterRef.current &&
+        !clusterRef.current.contains(event.target as Node)
       ) {
         setIsOpen(false);
       }
@@ -207,11 +241,134 @@ export function FloatingCalculatorButton() {
     ? formatCalculatorCurrency(Number(display))
     : display;
 
+  const showPricingSessions = pathname.startsWith("/pricing");
+
   return (
     <div
-      ref={calculatorRef}
-      className="fixed bottom-5 right-5 z-40 sm:bottom-6 sm:right-6"
+      ref={clusterRef}
+      className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6"
     >
+      {showPricingSessions ? (
+        <div className="relative">
+          {sessionPanelOpen ? (
+            <div className="absolute bottom-full right-0 z-50 mb-2 w-[min(100vw-2rem,22rem)] max-h-[min(70vh,26rem)] overflow-hidden rounded-lg border border-[#d9e2ec] bg-white shadow-[0_18px_50px_rgba(33,51,67,0.16)]">
+              <div className="flex items-center justify-between border-b border-[#d9e2ec] bg-[#f6f8fb] px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Pricing sessions
+                </p>
+                <div className="flex gap-2">
+                  {sessionEntries.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearPricingSessionHistory();
+                        setSessionEntries([]);
+                      }}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Clear all
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setSessionPanelOpen(false)}
+                    className="rounded p-1 text-gray-400 hover:bg-white hover:text-[#213343]"
+                    aria-label="Close history"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-[min(65vh,22rem)] overflow-y-auto p-2">
+                {sessionEntries.length === 0 ? (
+                  <p className="px-2 py-6 text-center text-xs text-gray-500">
+                    No saved sessions yet. On Quick Pricing, use &quot;Save session&quot; or finish
+                    creating a project to store a snapshot here.
+                  </p>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[#d9e2ec] text-[10px] uppercase tracking-wide text-gray-400">
+                        <th className="px-2 py-1.5 font-medium">When</th>
+                        <th className="px-2 py-1.5 font-medium">Summary</th>
+                        <th className="px-2 py-1.5 font-medium text-right"> </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {sessionEntries.map((entry) => (
+                        <tr key={entry.id} className="align-top">
+                          <td className="whitespace-nowrap px-2 py-2 text-gray-500">
+                            {new Date(entry.savedAt).toLocaleString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="px-2 py-2 text-[#213343]">
+                            <span className="line-clamp-2">{entry.label}</span>
+                            {entry.sourceProjectId ? (
+                              <span className="mt-0.5 block text-[10px] text-gray-400">
+                                Linked project
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-1 py-1 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                dispatchRestorePricingSession(entry);
+                                setSessionPanelOpen(false);
+                              }}
+                              className="rounded border border-[#d9e2ec] bg-white px-2 py-1 text-[10px] font-medium text-[#ff5c35] transition hover:bg-[#fff1ea]"
+                            >
+                              Restore
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                removePricingSessionHistory(entry.id);
+                                setSessionEntries(loadPricingSessionHistory());
+                              }}
+                              className="ml-1 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              aria-label="Remove from history"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              setSessionPanelOpen((prev) => {
+                const next = !prev;
+                if (next) {
+                  queueMicrotask(() => setSessionEntries(loadPricingSessionHistory()));
+                }
+                return next;
+              });
+            }}
+            aria-label="Pricing session history"
+            title="Pricing session history"
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium shadow-[0_6px_20px_rgba(33,51,67,0.12)] transition ${
+              sessionPanelOpen
+                ? "border-[#ff5c35] bg-[#fff1ea] text-[#ff5c35]"
+                : "border-[#d9e2ec] bg-white text-[#213343] hover:bg-[#f6f8fb]"
+            }`}
+          >
+            <History className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Historial</span>
+          </button>
+        </div>
+      ) : null}
+
       {isOpen ? (
         <div className="relative mb-3">
           {isHistoryOpen ? (
@@ -397,10 +554,11 @@ export function FloatingCalculatorButton() {
       ) : null}
 
       <button
+        type="button"
         onClick={() => setIsOpen((current) => !current)}
         aria-label="Open calculator"
         title="Open calculator"
-        className="ml-auto flex h-13 w-13 items-center justify-center rounded-lg border border-[#d9e2ec] bg-[#ff5c35] text-white shadow-[0_10px_30px_rgba(33,51,67,0.16)] transition hover:bg-[#e94820] focus:outline-none focus:ring-4 focus:ring-[#ff5c35]/20"
+        className="flex h-13 w-13 items-center justify-center rounded-lg border border-[#d9e2ec] bg-[#ff5c35] text-white shadow-[0_10px_30px_rgba(33,51,67,0.16)] transition hover:bg-[#e94820] focus:outline-none focus:ring-4 focus:ring-[#ff5c35]/20"
       >
         <Calculator className="h-5 w-5" />
       </button>

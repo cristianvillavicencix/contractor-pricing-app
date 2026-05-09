@@ -9,8 +9,6 @@ import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   formatMargin,
   formatMoney,
-  initialContacts,
-  initialProjects,
   quoteStatusOptions,
   type Contact,
   type PriceOptionName,
@@ -48,8 +46,8 @@ export default function QuotesPage() {
         listContacts(supabase),
       ]);
       setQuotes(dbQuotes);
-      setProjects(dbProjects.length ? dbProjects : initialProjects);
-      setContacts(dbContacts.length ? dbContacts : initialContacts);
+      setProjects(dbProjects);
+      setContacts(dbContacts);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load quotes");
     } finally {

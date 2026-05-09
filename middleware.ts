@@ -31,7 +31,8 @@ export async function middleware(request: NextRequest) {
   const isAuthRoute =
     path.startsWith("/login") ||
     path.startsWith("/auth/callback") ||
-    path.startsWith("/auth/complete");
+    path.startsWith("/auth/complete") ||
+    path.startsWith("/auth/update-password");
   const isPublicProposalClientPage = /^\/proposal\/[^/]+\/(accept|payment)$/.test(path);
   const isPublicProposalClientApi =
     /^\/api\/proposal\/[^/]+\/client(\/accept)?$/.test(path);

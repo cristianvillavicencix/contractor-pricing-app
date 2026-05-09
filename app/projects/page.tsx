@@ -11,6 +11,8 @@ import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
 import { mergeAppSettings } from "@/lib/app-data";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
+  deleteProject as deleteProjectDb,
+  deleteQuote as deleteQuoteDb,
   listContacts,
   listProjects,
   listQuotes,
@@ -28,8 +30,6 @@ import {
   formatMargin,
   formatMoney,
   getTotalCost,
-  initialContacts,
-  initialProjects,
   statusOptions,
   tradeOptions,
   type Contact,
@@ -92,6 +92,24 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     });
   }, [projects, search, statusFilter, tradeFilter]);
 
+  /** One pricing-engine run per project, only when data changes — not on every list re-render (e.g. opening the detail panel). */
+  const tablePricingByProjectId = useMemo(() => {
+    const map = new Map<
+      string,
+      { totalCost: number; betterSale: number; betterMargin: number }
+    >();
+    for (const project of projects) {
+      const pricing = calculateProjectPricing(project, settings);
+      const better = pricing.find((r) => r.name === "Better");
+      map.set(project.id, {
+        totalCost: getTotalCost(project.costs),
+        betterSale: better?.salePrice ?? 0,
+        betterMargin: better?.margin ?? 0,
+      });
+    }
+    return map;
+  }, [projects, settings]);
+
   const selectedProject = projects.find(
     (project) => project.id === selectedProjectId
   );
@@ -107,8 +125,8 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
         listQuotes(supabase),
       ]);
       setSettings(mergeAppSettings(dbSettings ?? defaultSettings));
-      setProjects(dbProjects.length ? dbProjects : initialProjects);
-      setContacts(dbContacts.length ? dbContacts : initialContacts);
+      setProjects(dbProjects);
+      setContacts(dbContacts);
       setQuotes(dbQuotes);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load data");
@@ -136,6 +154,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
 
   function createProject(project: Project) {
     setProjects((current) => [project, ...current]);
+    setInitialProjectTab("costs");
     setSelectedProjectId(project.id);
     setIsFormOpen(false);
     upsertProject(supabase, project).catch(() => undefined);
@@ -161,6 +180,21 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     return nextContact;
   }
 
+  async function removeProject(project: Project, opts: { deleteQuotes: boolean }) {
+    const linkedQuotes = quotes.filter((q) => q.projectId === project.id);
+    if (linkedQuotes.length > 0 && !opts.deleteQuotes) {
+      throw new Error("Confirm deletion of linked quotes to remove this project.");
+    }
+    for (const q of linkedQuotes) {
+      await deleteQuoteDb(supabase, q.id);
+    }
+    await deleteProjectDb(supabase, project.id);
+    setQuotes((current) => current.filter((q) => q.projectId !== project.id));
+    setProjects((current) => current.filter((p) => p.id !== project.id));
+    setSelectedProjectId(null);
+    setInitialProjectTab("costs");
+  }
+
   function duplicateProject(project: Project) {
     const copy: Project = {
       ...project,
@@ -171,6 +205,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       contactId: project.contactId,
     };
     setProjects((current) => [copy, ...current]);
+    setInitialProjectTab("costs");
     setSelectedProjectId(copy.id);
     upsertProject(supabase, copy).catch(() => undefined);
   }
@@ -362,14 +397,15 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
               </div>
               <div className="min-w-230 divide-y divide-gray-100">
                 {filteredProjects.map((project) => {
-                  const betterPrice = calculateProjectPricing(project, settings).find(
-                    (result) => result.name === "Better"
-                  );
+                  const row = tablePricingByProjectId.get(project.id);
 
                   return (
                     <button
                       key={project.id}
-                      onClick={() => setSelectedProjectId(project.id)}
+                      onClick={() => {
+                        setInitialProjectTab("costs");
+                        setSelectedProjectId(project.id);
+                      }}
                       className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                     >
                       <div className="min-w-0">
@@ -383,12 +419,12 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
                       <span className="text-gray-600">{project.trade}</span>
                       <ProjectStatusBadge status={project.status} />
                       <span className="font-medium">
-                        {formatMoney(getTotalCost(project.costs))}
+                        {formatMoney(row?.totalCost ?? 0)}
                       </span>
                       <span className="font-medium">
-                        {formatMoney(betterPrice?.salePrice ?? 0)}
+                        {formatMoney(row?.betterSale ?? 0)}
                       </span>
-                      <span>{formatMargin(betterPrice?.margin ?? 0)}</span>
+                      <span>{formatMargin(row?.betterMargin ?? 0)}</span>
                     </button>
                   );
                 })}
@@ -430,15 +466,19 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       {selectedProject ? (
         <ProjectDetailPanel
           project={selectedProject}
-          key={`${selectedProject.id}-${initialProjectTab}`}
+          key={selectedProject.id}
           settings={settings}
           pricingResults={pricingByProject[selectedProject.id]}
           initialTab={initialProjectTab}
-          onClose={() => setSelectedProjectId(null)}
+          onClose={() => {
+            setSelectedProjectId(null);
+            setInitialProjectTab("costs");
+          }}
           onUpdateProject={updateProject}
           onPriceProject={priceProject}
           onCreateQuote={createQuoteFromProject}
           onDuplicateProject={duplicateProject}
+          onDeleteProject={removeProject}
           quotes={quotes.filter((q) => q.projectId === selectedProject.id)}
           onPreviewQuote={(id) => router.push(`/quotes/preview?id=${id}`)}
         />

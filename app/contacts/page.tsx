@@ -9,8 +9,6 @@ import {
   formatMargin,
   formatMoney,
   getTodayLabel,
-  initialContacts,
-  initialProjects,
   type Contact,
   type Project,
   type Quote,
@@ -22,6 +20,7 @@ import {
   listProjects,
   listQuotes,
   upsertContact,
+  upsertProject,
 } from "@/lib/supabase/data";
 import { t } from "@/lib/ui-strings";
 
@@ -63,8 +62,8 @@ export default function ContactsPage() {
         listProjects(supabase),
         listQuotes(supabase),
       ]);
-      setContacts(dbContacts.length ? dbContacts : initialContacts);
-      setProjects(dbProjects.length ? dbProjects : initialProjects);
+      setContacts(dbContacts);
+      setProjects(dbProjects);
       setQuotes(dbQuotes);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load");
@@ -113,10 +112,18 @@ export default function ContactsPage() {
     upsertContact(supabase, updated).catch(() => undefined);
   }
 
-  function deleteContact(id: string) {
+  async function deleteContact(id: string) {
+    const linkedProjects = projects.filter((p) => p.contactId === id);
+    for (const p of linkedProjects) {
+      const next: Project = { ...p, contactId: undefined };
+      await upsertProject(supabase, next);
+    }
+    setProjects((prev) =>
+      prev.map((p) => (p.contactId === id ? { ...p, contactId: undefined } : p))
+    );
+    await deleteContactDb(supabase, id);
     setContacts((current) => current.filter((c) => c.id !== id));
     setSelectedContactId(null);
-    deleteContactDb(supabase, id).catch(() => undefined);
   }
 
   const selectedContact = contacts.find(
@@ -341,13 +348,15 @@ function ContactDetailPanel({
   quotes: Quote[];
   onClose: () => void;
   onUpdate: (contact: Contact) => void;
-  onDelete: () => void;
+  onDelete: () => Promise<void>;
   onOpenProject: (projectId: string) => void;
   onOpenQuote: (quoteId: string) => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<Contact>(contact);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteWorking, setDeleteWorking] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
 
   function saveEdit() {
     if (!draft.name.trim()) return;
@@ -543,19 +552,54 @@ function ContactDetailPanel({
         <div className="mt-6">
           {confirmDelete ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-              <p className="text-sm font-medium text-red-700">Delete this contact?</p>
-              <p className="mt-1 text-xs text-red-500">This cannot be undone. Projects and quotes will remain but won&apos;t be linked to this contact.</p>
-              <div className="mt-3 flex gap-3">
+              <p className="text-sm font-medium text-red-800">Delete this contact?</p>
+              <ul className="mt-2 list-inside list-disc space-y-1 text-xs text-red-800">
+                <li>
+                  <strong>{projects.length}</strong> project
+                  {projects.length === 1 ? "" : "s"} will be unlinked (contact removed from those
+                  jobs).
+                </li>
+                <li>
+                  <strong>{quotes.length}</strong> quote
+                  {quotes.length === 1 ? "" : "s"} stay in the app; open each proposal if you need to
+                  change the customer link.
+                </li>
+                <li>This cannot be undone.</li>
+              </ul>
+              {deleteErr ? (
+                <p className="mt-2 text-xs font-medium text-red-700">{deleteErr}</p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-3">
                 <button
-                  onClick={onDelete}
-                  className="flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-red-700"
+                  type="button"
+                  disabled={deleteWorking}
+                  onClick={async () => {
+                    setDeleteErr(null);
+                    setDeleteWorking(true);
+                    try {
+                      await onDelete();
+                      setConfirmDelete(false);
+                    } catch (e) {
+                      setDeleteErr(
+                        e instanceof Error ? e.message : "Could not delete contact"
+                      );
+                    } finally {
+                      setDeleteWorking(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-red-700 disabled:opacity-60"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Yes, delete
+                  {deleteWorking ? "Deleting…" : "Yes, delete"}
                 </button>
                 <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="rounded-md border border-[#d9e2ec] px-4 py-2 text-xs transition hover:bg-[#f6f8fb]"
+                  type="button"
+                  disabled={deleteWorking}
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    setDeleteErr(null);
+                  }}
+                  className="rounded-md border border-[#d9e2ec] bg-white px-4 py-2 text-xs transition hover:bg-[#f6f8fb]"
                 >
                   Cancel
                 </button>
@@ -563,7 +607,11 @@ function ContactDetailPanel({
             </div>
           ) : (
             <button
-              onClick={() => setConfirmDelete(true)}
+              type="button"
+              onClick={() => {
+                setDeleteErr(null);
+                setConfirmDelete(true);
+              }}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 py-2.5 text-xs font-medium text-red-500 transition hover:bg-red-50"
             >
               <Trash2 className="h-3.5 w-3.5" />

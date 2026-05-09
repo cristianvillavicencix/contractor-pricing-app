@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Copy, ExternalLink } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, ExternalLink, Trash2 } from "lucide-react";
 import {
   calculatePricingEngine,
   type PricingEngineInput,
@@ -55,6 +55,7 @@ export function ProjectDetailPanel({
   onPriceProject: _onPriceProject,
   onCreateQuote,
   onDuplicateProject,
+  onDeleteProject,
   quotes = [],
   onPreviewQuote,
 }: {
@@ -65,6 +66,10 @@ export function ProjectDetailPanel({
   onClose: () => void;
   onUpdateProject: (project: Project) => void;
   onPriceProject: (project: Project) => void;
+  onDeleteProject?: (
+    project: Project,
+    options: { deleteQuotes: boolean }
+  ) => Promise<void>;
   onCreateQuote: (
     project: Project,
     pricing: PricingResult[],
@@ -90,6 +95,10 @@ export function ProjectDetailPanel({
   const [selectedOption, setSelectedOption] = useState<PriceOptionName>("Better");
   const [message, setMessage] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteQuotesToo, setDeleteQuotesToo] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
 
   const [overheadPct, setOverheadPct] = useState(() =>
     mergedSettings.costRules.includeOverhead ? mergedSettings.costRules.defaultOverheadPercent : 0
@@ -866,6 +875,97 @@ export function ProjectDetailPanel({
             </button>
           </div>
         )}
+
+        {onDeleteProject ? (
+          <div className="mt-8 border-t border-[#d9e2ec] pt-6">
+            {!deleteOpen ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteErr(null);
+                  setDeleteQuotesToo(false);
+                  setDeleteOpen(true);
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete project
+              </button>
+            ) : (
+              <div className="rounded-lg border border-red-200 bg-red-50/80 p-4">
+                <p className="text-sm font-semibold text-red-800">Delete this project?</p>
+                <p className="mt-2 text-xs text-red-700">
+                  This cannot be undone.{" "}
+                  {quotes.length > 0 ? (
+                    <>
+                      There {quotes.length === 1 ? "is" : "are"}{" "}
+                      <strong>{quotes.length}</strong> quote
+                      {quotes.length === 1 ? "" : "s"} linked to this project.
+                    </>
+                  ) : (
+                    "No quotes are linked."
+                  )}
+                </p>
+                {quotes.length > 0 ? (
+                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-red-900">
+                    <input
+                      type="checkbox"
+                      checked={deleteQuotesToo}
+                      onChange={(e) => setDeleteQuotesToo(e.target.checked)}
+                      className="mt-0.5 rounded border-red-300"
+                    />
+                    <span>
+                      Also delete {quotes.length === 1 ? "this quote" : "these quotes"} from the
+                      database (required to remove the project).
+                    </span>
+                  </label>
+                ) : null}
+                {deleteErr ? (
+                  <p className="mt-2 text-xs font-medium text-red-700">{deleteErr}</p>
+                ) : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      deleteBusy || (quotes.length > 0 && !deleteQuotesToo)
+                    }
+                    onClick={async () => {
+                      if (quotes.length > 0 && !deleteQuotesToo) return;
+                      setDeleteErr(null);
+                      setDeleteBusy(true);
+                      try {
+                        await onDeleteProject(draftProject, {
+                          deleteQuotes: deleteQuotesToo && quotes.length > 0,
+                        });
+                      } catch (e) {
+                        setDeleteErr(
+                          e instanceof Error ? e.message : "Could not delete project"
+                        );
+                      } finally {
+                        setDeleteBusy(false);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {deleteBusy ? "Deleting…" : "Yes, delete"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleteBusy}
+                    onClick={() => {
+                      setDeleteOpen(false);
+                      setDeleteErr(null);
+                    }}
+                    className="rounded-md border border-[#d9e2ec] bg-white px-4 py-2 text-xs font-medium transition hover:bg-[#f6f8fb]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </aside>
     </div>
   );

@@ -9,7 +9,6 @@ import {
   formatMargin,
   formatMoney,
   getTodayLabel,
-  initialContacts,
   companyLevelOptions,
   mergeAppSettings,
   projectSizeOptions,
@@ -34,6 +33,11 @@ import {
   type PricingEngineInput,
   type PricingEngineOption,
 } from "@/lib/pricing-engine";
+import {
+  appendPricingSessionHistory,
+  PRICING_SESSION_RESTORE_EVENT,
+  type PricingSessionHistoryEntry,
+} from "@/lib/pricing-session-history";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   listContacts,
@@ -220,6 +224,10 @@ const emptyDraft: ProjectDraft = {
   city: "",
 };
 
+function cloneEngineInput(i: PricingEngineInput): PricingEngineInput {
+  return JSON.parse(JSON.stringify(i)) as PricingEngineInput;
+}
+
 function PricingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -231,7 +239,7 @@ function PricingPageInner() {
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyDraft);
   const [projectError, setProjectError] = useState("");
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [contacts, setContacts] = useState<Contact[]>(initialContacts);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [dataReady, setDataReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -254,7 +262,7 @@ function PricingPageInner() {
         if (cancelled) return;
         const merged = mergeAppSettings(rawSettings ?? defaultSettings);
         setSettings(merged);
-        setContacts(dbContacts.length ? dbContacts : initialContacts);
+        setContacts(dbContacts);
         setProjects(dbProjects);
         setDataReady(true);
       } catch (e) {
@@ -278,6 +286,28 @@ function PricingPageInner() {
     setInput(createInputFromSettings(mergedSettings, proj));
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [dataReady, loadError, projectIdFromUrl, projects, mergedSettings]);
+
+  useEffect(() => {
+    function onRestore(ev: Event) {
+      const e = ev as CustomEvent<PricingSessionHistoryEntry>;
+      const d = e.detail;
+      setInput(cloneEngineInput(d.input));
+      setProjectDraft({
+        contactId: d.projectDraft.contactId ?? "",
+        projectName: d.projectDraft.projectName ?? "",
+        customerName: d.projectDraft.customerName ?? "",
+        customerPhone: d.projectDraft.customerPhone ?? "",
+        customerEmail: d.projectDraft.customerEmail ?? "",
+        address: d.projectDraft.address ?? "",
+        city: d.projectDraft.city ?? "",
+      });
+      /* Avoid ?projectId= sync effect overwriting restored numbers — snapshot is source of truth. */
+      setSourceProject(null);
+      router.replace("/pricing");
+    }
+    window.addEventListener(PRICING_SESSION_RESTORE_EVENT, onRestore);
+    return () => window.removeEventListener(PRICING_SESSION_RESTORE_EVENT, onRestore);
+  }, [router]);
 
   const result = useMemo(() => calculatePricingEngine(input), [input]);
   const baseCost = result.baseCost;
@@ -316,6 +346,15 @@ function PricingPageInner() {
     setInput(createInputFromSettings(mergedSettings));
     setSourceProject(null);
     router.replace("/pricing");
+  }
+
+  function saveSessionToHistory() {
+    appendPricingSessionHistory({
+      label: `${input.setup.trade} · base ${formatMoney(baseCost)}`,
+      input: cloneEngineInput(input),
+      projectDraft: { ...projectDraft },
+      sourceProjectId: sourceProject?.id ?? null,
+    });
   }
 
   function saveProject() {
@@ -373,6 +412,12 @@ function PricingPageInner() {
     setProjects((prev) => [newProject, ...prev]);
     upsertContact(supabase, contact).catch(() => undefined);
     upsertProject(supabase, newProject).catch(() => undefined);
+    appendPricingSessionHistory({
+      label: `Saved: ${newProject.projectName}`,
+      input: cloneEngineInput(input),
+      projectDraft: { ...projectDraft },
+      sourceProjectId: newProject.id,
+    });
     closeModal();
     router.push(`/projects?projectId=${newProject.id}`);
   }
@@ -448,9 +493,10 @@ function PricingPageInner() {
                 </p>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {hasResults && (
                 <button
+                  type="button"
                   onClick={() => setShowProjectModal(true)}
                   className="flex items-center gap-2 rounded-md bg-[#ff5c35] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#e94820]"
                 >
@@ -459,6 +505,15 @@ function PricingPageInner() {
                 </button>
               )}
               <button
+                type="button"
+                onClick={saveSessionToHistory}
+                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                title="Store this scenario in Historial (next to the calculator) to restore later"
+              >
+                Save session
+              </button>
+              <button
+                type="button"
                 onClick={reset}
                 className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
               >

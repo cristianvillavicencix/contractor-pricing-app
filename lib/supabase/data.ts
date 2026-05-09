@@ -137,6 +137,16 @@ export async function upsertQuote(supabase: SupabaseClient, quote: Quote) {
   if (error) throw error;
 }
 
+export async function deleteQuote(supabase: SupabaseClient, quoteId: string) {
+  const companyId = await requireCompanyId(supabase);
+  const { error } = await supabase
+    .from("quotes")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("id", quoteId);
+  if (error) throw error;
+}
+
 export async function listContacts(supabase: SupabaseClient): Promise<Contact[]> {
   const companyId = await requireCompanyId(supabase);
   const { data, error } = await supabase
