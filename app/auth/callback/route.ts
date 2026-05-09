@@ -1,0 +1,18 @@
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+export async function GET(request: Request) {
+  const { searchParams, origin } = new URL(request.url);
+  const code = searchParams.get("code");
+  const next = searchParams.get("next") ?? "/";
+
+  if (code) {
+    const supabase = await createSupabaseServerClient();
+    await supabase.auth.exchangeCodeForSession(code);
+  }
+
+  const complete = new URL("/auth/complete", origin);
+  complete.searchParams.set("next", next.startsWith("/") ? next : "/");
+  return NextResponse.redirect(complete.toString());
+}
+

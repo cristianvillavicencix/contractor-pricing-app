@@ -2,23 +2,34 @@
 
 import { useRouter } from "next/navigation";
 import { Plus, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import { ProjectDetailPanel } from "@/components/projects/project-detail-panel";
 import { ProjectForm } from "@/components/projects/project-form";
 import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
+import { mergeAppSettings } from "@/lib/app-data";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  listContacts,
+  listProjects,
+  listQuotes,
+  loadCompanySettings,
+  upsertContact,
+  upsertProject,
+  upsertQuote,
+} from "@/lib/supabase/data";
 import {
   calculateProjectPricing,
+  computeNextProposalNumber,
   defaultSettings,
   getExpirationLabel,
-  getNextProposalNumber,
   getTodayLabel,
   formatMargin,
   formatMoney,
   getTotalCost,
   initialContacts,
   initialProjects,
-  storageKeys,
   statusOptions,
   tradeOptions,
   type Contact,
@@ -30,7 +41,8 @@ import {
   type Quote,
   type Trade,
 } from "@/lib/projects";
-import { useLocalStorageState, writeLocalStorage } from "@/lib/use-local-storage";
+import { t } from "@/lib/ui-strings";
+// keep writeLocalStorage import-free: this screen is Supabase-backed
 
 
 type StatusFilter = "All" | ProjectStatus;
@@ -39,42 +51,18 @@ type ProjectDetailTab = "overview" | "costs" | "quote" | "notes";
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  /**
-   * This screen is powered by localStorage (via useLocalStorageState).
-   * During SSR, the server cannot read localStorage, which can cause hydration mismatches
-   * when the client loads the real data.
-   */
-  if (!mounted) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-[#213343]">
-        <div className="text-center">
-          <p className="text-lg font-semibold">Loading…</p>
-          <p className="mt-2 text-sm text-gray-500">Preparing your projects.</p>
-        </div>
-      </div>
-    );
-  }
-
   return <ProjectsPageClient router={router} />;
 }
 
 function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }) {
-  const [projects, setProjects] = useLocalStorageState<Project[]>(
-    storageKeys.projects,
-    initialProjects
-  );
-  const [contacts, setContacts] = useLocalStorageState<Contact[]>(
-    storageKeys.contacts,
-    initialContacts
-  );
-  const [quotes, setQuotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
-  const [settings] = useLocalStorageState<AppSettings>(
-    storageKeys.settings,
-    defaultSettings
-  );
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [tradeFilter, setTradeFilter] = useState<TradeFilter>("All");
@@ -108,20 +96,49 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     (project) => project.id === selectedProjectId
   );
 
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [dbSettings, dbProjects, dbContacts, dbQuotes] = await Promise.all([
+        loadCompanySettings<AppSettings>(supabase),
+        listProjects(supabase),
+        listContacts(supabase),
+        listQuotes(supabase),
+      ]);
+      setSettings(mergeAppSettings(dbSettings ?? defaultSettings));
+      setProjects(dbProjects.length ? dbProjects : initialProjects);
+      setContacts(dbContacts.length ? dbContacts : initialContacts);
+      setQuotes(dbQuotes);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount fetch updates list state
+    void loadData();
+  }, [loadData]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const projectId = params.get("projectId");
 
     if (!projectId) return;
 
+    /* eslint-disable react-hooks/set-state-in-effect -- URL query → panel state on mount */
     setSelectedProjectId(projectId);
     setInitialProjectTab(getProjectTab(params.get("projectTab")));
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   function createProject(project: Project) {
     setProjects((current) => [project, ...current]);
     setSelectedProjectId(project.id);
     setIsFormOpen(false);
+    upsertProject(supabase, project).catch(() => undefined);
   }
 
   function createContact(contact: Omit<Contact, "id" | "createdAt">) {
@@ -140,6 +157,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       createdAt: getTodayLabel(),
     };
     setContacts((current) => [nextContact, ...current]);
+    upsertContact(supabase, nextContact).catch(() => undefined);
     return nextContact;
   }
 
@@ -154,6 +172,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     };
     setProjects((current) => [copy, ...current]);
     setSelectedProjectId(copy.id);
+    upsertProject(supabase, copy).catch(() => undefined);
   }
 
   function updateProject(updatedProject: Project) {
@@ -162,6 +181,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
         project.id === updatedProject.id ? updatedProject : project
       )
     );
+    upsertProject(supabase, updatedProject).catch(() => undefined);
   }
 
   function priceProject(project: Project) {
@@ -176,8 +196,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       [project.id]: calculateProjectPricing(pricedProject, settings),
     }));
     setSelectedProjectId(project.id);
-    writeLocalStorage(storageKeys.projectForPricing, project.id);
-    router.push("/pricing");
+    router.push(`/pricing?projectId=${encodeURIComponent(project.id)}`);
   }
 
   function createQuoteFromProject(
@@ -215,7 +234,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       customerAddress: snapshot?.customerAddress,
       trade: snapshot?.trade,
       proposalTitle: snapshot?.proposalTitle,
-      proposalNumber: getNextProposalNumber(),
+      proposalNumber: computeNextProposalNumber(quotes),
       warrantyText: snapshot?.warrantyText,
       termsText: snapshot?.termsText,
       good: pricing[0],
@@ -233,10 +252,36 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       ...current,
       [project.id]: pricing,
     }));
+    upsertProject(supabase, nextProject).catch(() => undefined);
+    upsertQuote(supabase, quote).catch(() => undefined);
+  }
+
+  if (isLoading && !loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+        <AppSidebar />
+        <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+          <PageSkeleton rows={8} />
+        </main>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-md">
+            <ErrorPanel message={loadError} onRetry={() => void loadData()} />
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
@@ -254,7 +299,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
 
             <button
               onClick={() => setIsFormOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-[#ff5c35] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#e94820]"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
             >
               <Plus className="h-4 w-4" />
               New Project
@@ -352,11 +397,22 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
           ) : (
             <section className="mt-6 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
               <p className="text-lg font-semibold tracking-tight">
-                No projects found
+                {projects.length === 0 ? t("emptyProjects") : "No projects match filters"}
               </p>
               <p className="mt-2 text-sm text-gray-500">
-                Try a different search or create a new project.
+                {projects.length === 0
+                  ? t("emptyProjectsHint")
+                  : "Try a different search or filter."}
               </p>
+              {projects.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setIsFormOpen(true)}
+                  className="mt-4 rounded-md bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--brand-accent-hover)]"
+                >
+                  New project
+                </button>
+              ) : null}
             </section>
           )}
         </div>
@@ -375,6 +431,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
         <ProjectDetailPanel
           project={selectedProject}
           key={`${selectedProject.id}-${initialProjectTab}`}
+          settings={settings}
           pricingResults={pricingByProject[selectedProject.id]}
           initialTab={initialProjectTab}
           onClose={() => setSelectedProjectId(null)}

@@ -8,7 +8,6 @@ import {
   type PricingEngineOption,
 } from "@/lib/pricing-engine";
 import {
-  defaultSettings,
   formatMargin,
   formatMoney,
   getTotalCost,
@@ -18,7 +17,6 @@ import {
   stateOptions,
   statusOptions,
   strategyOptions,
-  storageKeys,
   tradeOptions,
   TYPICAL_COSTS,
   type AppSettings,
@@ -33,7 +31,6 @@ import {
   type Strategy,
   type Trade,
 } from "@/lib/app-data";
-import { useLocalStorageState } from "@/lib/use-local-storage";
 import { ProjectStatusBadge } from "./project-status-badge";
 
 type Tab = "overview" | "costs" | "quote" | "notes";
@@ -50,6 +47,7 @@ const costFields: { key: keyof CostBreakdown; label: string }[] = [
 
 export function ProjectDetailPanel({
   project,
+  settings,
   pricingResults: _pricingResults,
   initialTab = "costs",
   onClose,
@@ -61,6 +59,7 @@ export function ProjectDetailPanel({
   onPreviewQuote,
 }: {
   project: Project;
+  settings: AppSettings;
   pricingResults?: PricingResult[];
   initialTab?: Tab;
   onClose: () => void;
@@ -84,10 +83,6 @@ export function ProjectDetailPanel({
   quotes?: import("@/lib/app-data").Quote[];
   onPreviewQuote?: (quoteId: string) => void;
 }) {
-  const [settings] = useLocalStorageState<AppSettings>(
-    storageKeys.settings,
-    defaultSettings
-  );
   const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [draftProject, setDraftProject] = useState(project);

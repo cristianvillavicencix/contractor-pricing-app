@@ -4,7 +4,7 @@ export {
   formatMargin,
   formatMoney,
   getExpirationLabel,
-  getNextProposalNumber,
+  computeNextProposalNumber,
   getTotalCost,
   getTodayLabel,
   initialContacts,

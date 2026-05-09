@@ -1,50 +1,49 @@
 "use client";
 
 import { Check, ChevronDown, Pencil, Plus, RotateCcw, Save } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
-import { storageKeys } from "@/lib/app-data";
-import { useLocalStorageState } from "@/lib/use-local-storage";
+import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   blankTemplate,
   mergeProposalTemplates,
   type ProposalTemplate,
 } from "@/lib/proposal-templates";
 import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  listProposalTemplates,
+  loadCompanySettings,
+  saveCompanySettings,
+  upsertProposalTemplate,
+} from "@/lib/supabase/data";
+import type {
+  AppSettings,
+  CompanyLevel,
+  ProjectSize,
+  ProjectState,
+  ProposalCredentialPlacement,
+  ProposalCoverLayout,
+  RiskLevel,
+  SettingsTrade,
+  Strategy,
+} from "@/lib/app-data";
+import {
+  companyLevelOptions,
+  defaultSettings,
+  mergeAppSettings,
+  projectSizeOptions,
+  riskLevelOptions,
+  settingsTradeOptions,
+  stateOptions,
+  strategyOptions,
+  tradeOptions,
+} from "@/lib/app-data";
+import { getAppSettingsValidationError } from "@/lib/settings-validation";
 
-type Trade =
-  | "Roofing"
-  | "Siding"
-  | "Painting"
-  | "Drywall"
-  | "Gutters"
-  | "Remodeling"
-  | "General Contractor";
-
-type CompanyLevel =
-  | "Solo Owner"
-  | "Small Crew"
-  | "Established Company"
-  | "Premium Company";
-
-type Strategy = "Competitive" | "Balanced" | "Premium";
-type RiskLevel = "Low" | "Medium" | "High";
-type ProjectSize = "Small" | "Medium" | "Large";
+type Trade = SettingsTrade;
 type Level = "Low" | "Medium" | "High";
-type ProposalCredentialPlacement =
-  | "Before Signatures"
-  | "After Scope"
-  | "Footer";
-type ProposalCoverLayout = "full" | "half" | "square" | "elegant";
-type CompanyCredential = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  documentName?: string;
-  documentType?: string;
-  documentDataUrl?: string;
-  uploadedAt?: string;
-};
+
 type SettingsSection =
   | "Company Profile"
   | "Pricing Defaults"
@@ -55,126 +54,6 @@ type SettingsSection =
   | "Branding"
   | "App Preferences"
   | "Data";
-
-type AppSettings = {
-  companyProfile: {
-    businessName: string;
-    contactName: string;
-    contactJobTitle: string;
-    contactPhotoUrl: string;
-    email: string;
-    phone: string;
-    website: string;
-    licenseNumber: string;
-    insuranceProvider: string;
-    mainTrade: Trade;
-    companyLevel: CompanyLevel;
-    certifications: CompanyCredential[];
-  };
-  pricingDefaults: {
-    goodMargin: number;
-    betterMargin: number;
-    bestMargin: number;
-    minimumSafeMargin: number;
-    defaultStrategy: Strategy;
-    defaultRiskLevel: RiskLevel;
-    defaultProjectSize: ProjectSize;
-    tradeAdjustments: Record<string, number>;
-    sizeAdjustments: Record<string, number>;
-    riskAdjustments: Record<string, number>;
-    strategyAdjustments: Record<string, number>;
-    companyAdjustments: Record<string, number>;
-  };
-  marketLocation: {
-    defaultState: string;
-    defaultCity: string;
-    defaultZipCode: string;
-    marketCompetitiveness: Level;
-    customerPriceSensitivity: Level;
-    serviceAreaNotes: string;
-    stateAdjustments: Record<string, number>;
-  };
-  costRules: {
-    monthlyOverhead: number;
-    overheadAllocationMethod:
-      | "Percentage"
-      | "Flat Per Project"
-      | "Project Duration"
-      | "Ignore For Now";
-    defaultOverheadPercent: number;
-    flatOverheadPerProject: number;
-    monthlyBillableDays: number;
-    defaultProjectDurationDays: number;
-    laborBurdenPercent: number;
-    minimumJobPrice: number;
-    financingFeePercent: number;
-    creditCardFeePercent: number;
-    taxPercent: number;
-    permitBuffer: number;
-    miscellaneousBufferPercent: number;
-    includeOverhead: boolean;
-    includeFinancingFee: boolean;
-    includeCreditCardFee: boolean;
-    includeTax: boolean;
-    includeMiscellaneousBuffer: boolean;
-  };
-  proposalSettings: {
-    defaultProposalTitle: string;
-    defaultWarrantyText: string;
-    defaultTerms: string;
-    defaultExpirationDays: number;
-    showGoodBetterBest: boolean;
-    highlightBetterRecommended: boolean;
-    showProfitInternallyOnly: boolean;
-    showFinancingNote: boolean;
-    financingNote: string;
-    showTaxSeparately: boolean;
-    requireCustomerSignature: boolean;
-    showCertifications: boolean;
-    showLicenseNumber: boolean;
-    showInsuranceBadges: boolean;
-    credentialPlacement: ProposalCredentialPlacement;
-    goodDescription: string;
-    betterDescription: string;
-    bestDescription: string;
-    defaultIncludedServices: string[];
-  };
-  pricingThresholds: {
-    riskyMarginPercent: number;
-    tightMarginPercent: number;
-    safePriceCushionPercent: number;
-    warningMarginLowPercent: number;
-    warningMarginHighPercent: number;
-    warningCommissionPercent: number;
-    warningFeeProfitPercent: number;
-    safeMarginRiskBonusPercent: number;
-    safeMarginSmallBonusPercent: number;
-    marginClampMinPercent: number;
-    marginClampMaxPercent: number;
-  };
-  contentDefaults: {
-    tradeServices: Record<string, string[]>;
-    scopeTemplates: Record<string, string[]>;
-  };
-  branding: {
-    logoUrl: string;
-    primaryColor: string;
-    accentColor: string;
-    tagline: string;
-    footerText: string;
-    proposalStyle: "Minimal" | "Premium" | "Contractor" | "Modern";
-    proposalCoverLayout: ProposalCoverLayout;
-  };
-  appPreferences: {
-    defaultLandingPage: "Dashboard" | "Projects" | "Pricing";
-    currency: "USD";
-    numberFormat: "1,000.00" | "1000.00";
-    theme: "Light" | "Dark" | "System";
-    compactMode: boolean;
-    showAdvancedPricingBreakdown: boolean;
-    showPricingWarnings: boolean;
-  };
-};
 
 const sectionItems: SettingsSection[] = [
   "Company Profile",
@@ -188,37 +67,7 @@ const sectionItems: SettingsSection[] = [
   "Data",
 ];
 
-const tradeOptions: Trade[] = [
-  "Roofing",
-  "Siding",
-  "Painting",
-  "Drywall",
-  "Gutters",
-  "Remodeling",
-  "General Contractor",
-];
-
-const companyLevelOptions: CompanyLevel[] = [
-  "Solo Owner",
-  "Small Crew",
-  "Established Company",
-  "Premium Company",
-];
-
-const stateOptions = [
-  "Alabama", "Arizona", "Arkansas", "California", "Colorado",
-  "Connecticut", "Florida", "Georgia", "Idaho", "Illinois",
-  "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
-  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
-  "Missouri", "Montana", "Nebraska", "Nevada", "New Jersey",
-  "New Mexico", "New York", "North Carolina", "Ohio", "Oklahoma",
-  "Oregon", "Pennsylvania", "South Carolina", "Tennessee", "Texas",
-  "Utah", "Virginia", "Washington", "West Virginia", "Wisconsin",
-];
 const levelOptions: Level[] = ["Low", "Medium", "High"];
-const strategyOptions: Strategy[] = ["Competitive", "Balanced", "Premium"];
-const riskLevelOptions: RiskLevel[] = ["Low", "Medium", "High"];
-const projectSizeOptions: ProjectSize[] = ["Small", "Medium", "Large"];
 const credentialPlacementOptions: ProposalCredentialPlacement[] = [
   "Before Signatures",
   "After Scope",
@@ -231,211 +80,107 @@ const coverLayoutOptions: { value: ProposalCoverLayout; label: string }[] = [
   { value: "elegant", label: "Elegante" },
 ];
 
-const defaultCompanyCredentials: CompanyCredential[] = [
-  { id: "licensed-insured", name: "Licensed & Insured", enabled: true },
-  {
-    id: "general-liability",
-    name: "General Liability Insurance",
-    enabled: true,
-  },
-  {
-    id: "workers-compensation",
-    name: "Workers' Compensation Insurance",
-    enabled: true,
-  },
-  {
-    id: "state-license",
-    name: "State Contractor License",
-    enabled: true,
-  },
-];
-
-const defaultSettings: AppSettings = {
-  companyProfile: {
-    businessName: "Contractor Company",
-    contactName: "",
-    contactJobTitle: "",
-    contactPhotoUrl: "/branding/default-contact-photo.png",
-    email: "",
-    phone: "",
-    website: "",
-    licenseNumber: "",
-    insuranceProvider: "",
-    mainTrade: "Roofing",
-    companyLevel: "Small Crew",
-    certifications: defaultCompanyCredentials,
-  },
-  pricingDefaults: {
-    goodMargin: 28,
-    betterMargin: 35,
-    bestMargin: 42,
-    minimumSafeMargin: 20,
-    defaultStrategy: "Balanced",
-    defaultRiskLevel: "Medium",
-    defaultProjectSize: "Medium",
-    tradeAdjustments: { Roofing: 2, Siding: 1, Painting: 0, Drywall: -1, Gutters: 1, Remodeling: 3 },
-    sizeAdjustments: { Small: 5, Medium: 0, Large: -4 },
-    riskAdjustments: { Low: -1, Medium: 0, High: 5 },
-    strategyAdjustments: { Competitive: -2, Balanced: 0, Premium: 3 },
-    companyAdjustments: { "Solo Owner": -3, "Small Crew": 0, "Established Company": 3, "Premium Company": 5 },
-  },
-  marketLocation: {
-    defaultState: "Connecticut",
-    defaultCity: "",
-    defaultZipCode: "",
-    marketCompetitiveness: "Medium",
-    customerPriceSensitivity: "Medium",
-    serviceAreaNotes: "",
-    stateAdjustments: {
-      California: 5, Massachusetts: 4, "New York": 3, Washington: 3,
-      Colorado: 2, Maryland: 2, "New Jersey": 2, Virginia: 2,
-      Arizona: 1, Georgia: 1, Illinois: 1, Minnesota: 1, Nevada: 1,
-      "North Carolina": 1, Oregon: 1, Pennsylvania: 1,
-      Connecticut: 0, Michigan: 0, Ohio: 0, Wisconsin: 0,
-      Idaho: -1, Indiana: -1, Missouri: -1, "New Mexico": -1,
-      "South Carolina": -1, Tennessee: -1, Texas: -1, Utah: -1,
-      Alabama: -2, Florida: -2, Iowa: -2, Kansas: -2, Kentucky: -2, Louisiana: -2,
-      Montana: -2, Nebraska: -2, Oklahoma: -2, "West Virginia": -2,
-      Arkansas: -3, Mississippi: -3,
-    },
-  },
-  costRules: {
-    monthlyOverhead: 5000,
-    overheadAllocationMethod: "Percentage",
-    defaultOverheadPercent: 10,
-    flatOverheadPerProject: 500,
-    monthlyBillableDays: 20,
-    defaultProjectDurationDays: 1,
-    laborBurdenPercent: 18,
-    minimumJobPrice: 850,
-    financingFeePercent: 3,
-    creditCardFeePercent: 3,
-    taxPercent: 0,
-    permitBuffer: 0,
-    miscellaneousBufferPercent: 5,
-    includeOverhead: true,
-    includeFinancingFee: false,
-    includeCreditCardFee: false,
-    includeTax: false,
-    includeMiscellaneousBuffer: true,
-  },
-  proposalSettings: {
-    defaultProposalTitle: "Project Proposal",
-    defaultWarrantyText:
-      "Warranty details will be provided based on the selected package and final scope of work.",
-    defaultTerms:
-      "Proposal pricing is valid until the expiration date shown. Any hidden conditions or scope changes may require price adjustment.",
-    defaultExpirationDays: 14,
-    showGoodBetterBest: true,
-    highlightBetterRecommended: true,
-    showProfitInternallyOnly: true,
-    showFinancingNote: false,
-    financingNote: "Financing options may be available upon approval.",
-    showTaxSeparately: false,
-    requireCustomerSignature: false,
-    showCertifications: true,
-    showLicenseNumber: true,
-    showInsuranceBadges: true,
-    credentialPlacement: "Before Signatures",
-    goodDescription: "Competitive option for budget-conscious customers.",
-    betterDescription: "Recommended option with balanced value and quality.",
-    bestDescription: "Premium option for enhanced service and long-term value.",
-    defaultIncludedServices: ["Materials", "Labor", "Cleanup", "Disposal", "Warranty", "Licensed & Insured"],
-  },
-  pricingThresholds: {
-    riskyMarginPercent: 25,
-    tightMarginPercent: 35,
-    safePriceCushionPercent: 8,
-    warningMarginLowPercent: 30,
-    warningMarginHighPercent: 55,
-    warningCommissionPercent: 8,
-    warningFeeProfitPercent: 10,
-    safeMarginRiskBonusPercent: 3,
-    safeMarginSmallBonusPercent: 2,
-    marginClampMinPercent: 15,
-    marginClampMaxPercent: 65,
-  },
-  contentDefaults: {
-    tradeServices: {
-      Roofing: ["Remove & Dispose of Old Roofing","Install Underlayment","Install Ice & Water Shield","Install Shingles","Install Ridge Cap","Flash Valleys & Penetrations","Install Drip Edge","Inspect & Replace Decking","Ventilation","Gutters & Downspouts"],
-      Siding: ["Remove Old Siding","Install House Wrap / Moisture Barrier","Install New Siding","Corner Trim","Window & Door Trim","Soffit & Fascia","Caulking & Sealing","Paint Touch-up"],
-      Painting: ["Pressure Washing","Surface Prep & Sanding","Priming","Interior Painting","Exterior Painting","Trim & Detail Work","Ceiling Painting","Touch-up & Final Walk"],
-      Drywall: ["Tear-out & Demo","Install New Drywall","Tape & Mud","Sand & Finish","Texture Matching","Prime"],
-      Gutters: ["Remove Old Gutters","Install Seamless Gutters","Install Downspouts","Leaf Guards","Seal & Test"],
-      Remodeling: ["Demolition","Framing","Plumbing Rough-in","Electrical Rough-in","Insulation","Drywall","Flooring","Trim & Molding","Painting","Final Cleanup"],
-    },
-    scopeTemplates: {
-      Roofing: ["Remove and dispose of existing roofing materials. Install new underlayment, ice & water shield, and architectural shingles. Flash all valleys, penetrations, and perimeter. Install ridge cap and ventilation. Final clean-up included.","Full roof replacement including tear-off, new decking inspection and repair where needed, synthetic underlayment, and premium architectural shingles. All flashing replaced. 5-year workmanship warranty.","Roof repair and spot replacement. Address damaged or missing shingles, re-flash affected areas, and reseal penetrations. Includes debris removal and site clean-up."],
-      Siding: ["Remove existing siding and trim. Install moisture barrier and house wrap. Install new fiber cement siding with matching corner trim, window wraps, and caulking. Paint-ready finish.","Full re-siding including removal, new sheathing wrap, premium vinyl siding installation, corner trim, soffit, and fascia. All seams caulked and sealed.","Partial siding repair and replacement. Match existing profile and color as closely as possible. Includes caulking, priming, and touch-up paint."],
-      Painting: ["Power wash all surfaces. Scrape, sand, and prime as needed. Apply two coats of premium exterior paint on all siding, trim, doors, and shutters. Final walk-through included.","Interior painting of all walls and ceilings. Protect floors and furnishings. Patch nail holes and minor imperfections. Apply two coats of low-VOC paint throughout. Clean-up included.","Full interior and exterior paint package. Includes surface prep, spot priming, two finish coats on all surfaces, trim work, and final punch-list touch-ups."],
-      Drywall: ["Tear out damaged drywall sections. Install new 5/8\" drywall, tape, mud, and sand to a Level 5 finish. Ready for primer and paint.","Install new drywall on all walls and ceilings. Tape, bed, and sand to smooth finish. Includes texture matching where applicable.","Patch and repair drywall damage. Match existing texture, prime patched areas, and prepare for final paint."],
-      Gutters: ["Remove existing gutters and downspouts. Install new seamless aluminum gutters sized for roof area. Add downspout extensions to direct water away from foundation. Seal all joints.","Full seamless gutter installation with leaf guards. Install all downspouts and underground drainage extensions. Final test with water.","Gutter cleaning, resealing, and spot repair. Re-secure any loose sections, reseal end caps and seams, and flush all downspouts."],
-      Remodeling: ["Complete kitchen remodel including demo, new cabinets, countertops, backsplash, plumbing fixtures, and electrical updates. Flooring and painting included.","Bathroom remodel including tile removal, new shower/tub surround, vanity, fixtures, toilet, and tile floor. Permit included where required.","Basement finishing including framing, insulation, drywall, electrical, lighting, and flooring. Bathroom rough-in optional."],
-    },
-  },
-  branding: {
-    logoUrl: "/branding/default-company-logo.png",
-    primaryColor: "#111111",
-    accentColor: "#737373",
-    tagline: "",
-    footerText: "Thank you for the opportunity to earn your business.",
-    proposalStyle: "Minimal",
-    proposalCoverLayout: "full",
-  },
-  appPreferences: {
-    defaultLandingPage: "Dashboard",
-    currency: "USD",
-    numberFormat: "1,000.00",
-    theme: "Light",
-    compactMode: false,
-    showAdvancedPricingBreakdown: true,
-    showPricingWarnings: true,
-  },
-};
+const TRADE_KEYS = tradeOptions;
 
 export default function SettingsPage() {
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [activeSection, setActiveSection] =
     useState<SettingsSection>("Company Profile");
-  const [savedSettings, setSavedSettings] =
-    useLocalStorageState<AppSettings>(storageKeys.settings, defaultSettings);
+  const [savedSettings, setSavedSettings] = useState<AppSettings>(defaultSettings);
   const normalizedSavedSettings = useMemo(
-    () => mergeSettings(savedSettings),
+    () => mergeAppSettings(savedSettings),
     [savedSettings]
   );
   const [settings, setSettings] = useState<AppSettings>(() =>
-    mergeSettings(savedSettings)
+    mergeAppSettings(savedSettings)
   );
   const [message, setMessage] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadSettings = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const db = await loadCompanySettings<AppSettings | null>(supabase);
+      const merged = mergeAppSettings(db ?? defaultSettings);
+      setSavedSettings(merged);
+      setSettings(merged);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load settings");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount fetch hydrates form state
+    void loadSettings();
+  }, [loadSettings]);
 
   const hasUnsavedChanges = useMemo(
     () => JSON.stringify(settings) !== JSON.stringify(normalizedSavedSettings),
     [settings, normalizedSavedSettings]
   );
 
-  const validationMessage = getValidationMessage(settings);
+  const validationMessage = getAppSettingsValidationError(settings);
 
   function resetSettings() {
     setSettings(defaultSettings);
-    setSavedSettings(defaultSettings);
     setMessage("");
+    saveCompanySettings(supabase, defaultSettings)
+      .then(() => setSavedSettings(defaultSettings))
+      .catch((e) =>
+        setMessage(e instanceof Error ? e.message : "Failed to reset settings")
+      );
   }
 
   function saveSettings() {
-    const validation = getValidationMessage(settings);
+    const validation = getAppSettingsValidationError(settings);
     if (validation) {
       setMessage(validation);
       return;
     }
 
-    setSavedSettings(settings);
-    setMessage("");
-    setSaveStatus("saved");
-    setTimeout(() => setSaveStatus("idle"), 2500);
+    saveCompanySettings(supabase, settings)
+      .then(() => {
+        setSavedSettings(settings);
+        setMessage("");
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2500);
+      })
+      .catch((e) =>
+        setMessage(e instanceof Error ? e.message : "Failed to save settings")
+      );
+  }
+
+  if (isLoading && !loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+          <PageSkeleton rows={5} />
+        </main>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-md">
+            <ErrorPanel message={loadError} onRetry={() => void loadSettings()} />
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
@@ -554,7 +299,27 @@ export default function SettingsPage() {
                   setSettings={setSettings}
                 />
               ) : null}
-              {activeSection === "Data" ? <DataSection /> : null}
+              {activeSection === "Data" ? (
+                <DataSection
+                  onExportSettings={() => {
+                    const blob = new Blob([JSON.stringify(settings, null, 2)], {
+                      type: "application/json",
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `company-settings-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  onResetOnboarding={async () => {
+                    const next = mergeAppSettings({ ...settings, onboardingCompletedAt: undefined });
+                    setSettings(next);
+                    await saveCompanySettings(supabase, next);
+                    window.location.href = "/onboarding";
+                  }}
+                />
+              ) : null}
             </div>
           </div>
         </div>
@@ -718,7 +483,7 @@ function CompanyProfileSection({
         <SelectField
           label="Main Trade"
           value={profile.mainTrade}
-          options={tradeOptions}
+          options={settingsTradeOptions}
           helperText="Default trade in the Calculator and new projects."
           tooltip="Used as the default trade when you open the Calculator or create a new project. You can always change it per job. Pick the trade that represents most of your revenue."
           onChange={(value) =>
@@ -1136,7 +901,9 @@ function MarketLocationSection({ settings, setSettings }: SectionProps) {
           value={market.defaultState}
           options={stateOptions}
           helperText="Pre-filled in the Calculator for every new job."
-          onChange={(value) => updateMarket(setSettings, "defaultState", value)}
+          onChange={(value) =>
+            updateMarket(setSettings, "defaultState", value as ProjectState)
+          }
         />
         <TextField
           label="Default City"
@@ -1191,7 +958,7 @@ function MarketLocationSection({ settings, setSettings }: SectionProps) {
               <NumberField
                 key={key}
                 label={label}
-                value={market.stateAdjustments[key]}
+                value={market.stateAdjustments[key as ProjectState] ?? 0}
                 allowNegative
                 onChange={(value) =>
                   setSettings((current) => ({
@@ -2095,7 +1862,6 @@ function PricingThresholdsSection({ settings, setSettings }: SectionProps) {
   );
 }
 
-const TRADE_KEYS = ["Roofing", "Siding", "Painting", "Drywall", "Gutters", "Remodeling"] as const;
 
 function ContentDefaultsSection({ settings, setSettings }: SectionProps) {
   const content = settings.contentDefaults ?? defaultSettings.contentDefaults;
@@ -2166,83 +1932,8 @@ function ContentDefaultsSection({ settings, setSettings }: SectionProps) {
   );
 }
 
-function mergeSettings(settings: AppSettings): AppSettings {
-  return {
-    ...defaultSettings,
-    ...settings,
-    companyProfile: {
-      ...defaultSettings.companyProfile,
-      ...settings.companyProfile,
-      certifications:
-        settings.companyProfile?.certifications ??
-        defaultSettings.companyProfile.certifications,
-    },
-    pricingDefaults: {
-      ...defaultSettings.pricingDefaults,
-      ...settings.pricingDefaults,
-      tradeAdjustments: { ...defaultSettings.pricingDefaults.tradeAdjustments, ...settings.pricingDefaults?.tradeAdjustments },
-      sizeAdjustments: { ...defaultSettings.pricingDefaults.sizeAdjustments, ...settings.pricingDefaults?.sizeAdjustments },
-      riskAdjustments: { ...defaultSettings.pricingDefaults.riskAdjustments, ...settings.pricingDefaults?.riskAdjustments },
-      strategyAdjustments: { ...defaultSettings.pricingDefaults.strategyAdjustments, ...settings.pricingDefaults?.strategyAdjustments },
-      companyAdjustments: { ...defaultSettings.pricingDefaults.companyAdjustments, ...settings.pricingDefaults?.companyAdjustments },
-    },
-    pricingThresholds: { ...defaultSettings.pricingThresholds, ...settings.pricingThresholds },
-    contentDefaults: {
-      tradeServices: { ...defaultSettings.contentDefaults.tradeServices, ...settings.contentDefaults?.tradeServices },
-      scopeTemplates: { ...defaultSettings.contentDefaults.scopeTemplates, ...settings.contentDefaults?.scopeTemplates },
-    },
-    marketLocation: {
-      ...defaultSettings.marketLocation,
-      ...settings.marketLocation,
-      stateAdjustments: {
-        ...defaultSettings.marketLocation.stateAdjustments,
-        ...settings.marketLocation?.stateAdjustments,
-      },
-    },
-    costRules: {
-      ...defaultSettings.costRules,
-      ...settings.costRules,
-    },
-    proposalSettings: {
-      ...defaultSettings.proposalSettings,
-      ...settings.proposalSettings,
-    },
-    branding: {
-      ...defaultSettings.branding,
-      ...settings.branding,
-    },
-    appPreferences: {
-      ...defaultSettings.appPreferences,
-      ...settings.appPreferences,
-    },
-  };
-}
-
 function clampMargin(value: number) {
   return Math.min(Math.max(value, 0), 80);
-}
-
-function getValidationMessage(settings: AppSettings) {
-  if (!settings.companyProfile.businessName.trim()) {
-    return "Business name should not be empty.";
-  }
-
-  if (settings.proposalSettings.defaultExpirationDays < 1) {
-    return "Default expiration days cannot be below 1.";
-  }
-
-  const { goodMargin, betterMargin, bestMargin } = settings.pricingDefaults;
-  if (goodMargin >= betterMargin) {
-    return "Good margin must be lower than Better margin.";
-  }
-  if (betterMargin >= bestMargin) {
-    return "Better margin must be lower than Best margin.";
-  }
-  if (goodMargin < 5 || bestMargin > 80) {
-    return "Margins must be between 5% and 80%.";
-  }
-
-  return "";
 }
 
 function updatePricingDefault<K extends keyof AppSettings["pricingDefaults"]>(
@@ -2468,36 +2159,59 @@ function ProposalThumbnail({ template }: { template: ProposalTemplate }) {
 }
 
 function TemplatesSection() {
-  const [savedTemplates, setSavedTemplates] = useLocalStorageState<ProposalTemplate[]>(
-    storageKeys.proposalTemplates,
-    []
-  );
-  const templates = useMemo(
-    () => mergeProposalTemplates(savedTemplates),
-    [savedTemplates]
-  );
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [savedTemplates, setSavedTemplates] = useState<ProposalTemplate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const templates = useMemo(() => mergeProposalTemplates(savedTemplates), [savedTemplates]);
   const [editingTemplate, setEditingTemplate] = useState<ProposalTemplate | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [newTradeName, setNewTradeName] = useState("");
   const [newTradeError, setNewTradeError] = useState("");
 
-  function handleSave(updated: ProposalTemplate) {
-    setSavedTemplates((prev) => {
-      const existing = prev.findIndex(
-        (t) => t.trade === updated.trade && t.id === updated.id
-      );
-      if (existing >= 0) {
-        const next = [...prev];
-        next[existing] = updated;
-        return next;
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setIsLoading(true);
+      setLoadError(null);
+      try {
+        const db = await listProposalTemplates(supabase);
+        if (cancelled) return;
+        setSavedTemplates(db);
+      } catch (e) {
+        if (cancelled) return;
+        setLoadError(e instanceof Error ? e.message : "Failed to load templates");
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-      return [...prev, updated];
-    });
-    setEditingTemplate(null);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  function handleSave(updated: ProposalTemplate) {
+    upsertProposalTemplate(supabase, updated)
+      .then(() => {
+        setSavedTemplates((prev) => {
+          const idx = prev.findIndex((t) => t.trade === updated.trade);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = updated;
+            return next;
+          }
+          return [...prev, updated];
+        });
+        setEditingTemplate(null);
+      })
+      .catch(() => undefined);
   }
 
   function handleDelete(template: ProposalTemplate) {
-    setSavedTemplates((prev) => prev.filter((t) => t.id !== template.id));
+    // For now just remove locally; server delete can be added once you want it.
+    setSavedTemplates((prev) => prev.filter((t) => t.trade !== template.trade));
   }
 
   function handleCreateNew() {
@@ -2522,10 +2236,19 @@ function TemplatesSection() {
         title="Proposal Templates"
         description="Customize the 10-section proposal document for each trade. Click any card to open the editor, or create a new template for any service you offer."
       >
+        {loadError ? (
+          <div className="mb-4 rounded-lg border border-[#ffe0d5] bg-[#fff1ea] p-4 text-sm text-[#b42318]">
+            {loadError}
+          </div>
+        ) : isLoading ? (
+          <div className="mb-4 rounded-lg border border-[#d9e2ec] bg-white p-4 text-sm text-gray-500">
+            Loading templates…
+          </div>
+        ) : null}
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {/* Existing templates */}
           {templates.map((template) => {
-            const savedEntry = savedTemplates.find((t) => t.id === template.id);
+            const savedEntry = savedTemplates.find((t) => t.trade === template.trade);
             const isModified = Boolean(savedEntry?.lastModified);
             const isCustom = !["default-roofing", "default-siding", "default-painting", "default-drywall", "default-gutters", "default-remodeling", "default-general-contractor"].includes(template.id);
 
@@ -2675,139 +2398,63 @@ function TemplatesSection() {
   );
 }
 
-function DataSection() {
-  const [importError, setImportError] = useState("");
-  const [importSuccess, setImportSuccess] = useState("");
-
-  function exportData() {
-    const data: Record<string, unknown> = {};
-    for (const key of Object.values(storageKeys)) {
-      try {
-        const raw = window.localStorage.getItem(key);
-        if (raw) data[key] = JSON.parse(raw);
-      } catch {
-        // skip corrupted keys
-      }
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `contractor-pricing-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    setImportError("");
-    setImportSuccess("");
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.target?.result as string) as Record<string, unknown>;
-        const validKeys = new Set<string>(Object.values(storageKeys));
-        let count = 0;
-        for (const [k, v] of Object.entries(parsed)) {
-          if (validKeys.has(k as string)) {
-            window.localStorage.setItem(k, JSON.stringify(v));
-            count++;
-          }
-        }
-        setImportSuccess(`Imported ${count} data section${count !== 1 ? "s" : ""}. Reload the page to see changes.`);
-      } catch {
-        setImportError("Invalid backup file. Please export a valid JSON backup first.");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  }
-
-  function clearAllData() {
-    for (const key of Object.values(storageKeys)) {
-      window.localStorage.removeItem(key);
-    }
-    window.location.reload();
-  }
+function DataSection({
+  onExportSettings,
+  onResetOnboarding,
+}: {
+  onExportSettings: () => void;
+  onResetOnboarding: () => Promise<void>;
+}) {
+  const [onboardingBusy, setOnboardingBusy] = useState(false);
 
   return (
     <SettingsSection
       title="Data"
-      description="Export a full backup of your local data, restore from a previous backup, or clear all app data."
+      description="Projects, quotes, and contacts live in your Supabase database. Use this section for settings backup and re-running setup."
     >
       <div className="space-y-6">
-        {/* Export */}
         <div className="rounded-lg border border-[#d9e2ec] p-5">
-          <p className="text-sm font-medium text-black">Export Data</p>
+          <p className="text-sm font-medium text-black">Where your data lives</p>
           <p className="mt-1 text-sm text-gray-500">
-            Download all projects, quotes, contacts, and settings as a JSON file.
+            Production data is not tied to this browser. Set{" "}
+            <code className="rounded bg-gray-100 px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
+            <code className="rounded bg-gray-100 px-1">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, and{" "}
+            <code className="rounded bg-gray-100 px-1">SUPABASE_SERVICE_ROLE_KEY</code> on Vercel so every deploy uses
+            the same backend.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-[#d9e2ec] p-5">
+          <p className="text-sm font-medium text-black">Export company settings</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Downloads the current settings JSON from this page (not projects or quotes). For full database backups, use
+            the Supabase dashboard.
           </p>
           <button
-            onClick={exportData}
+            type="button"
+            onClick={onExportSettings}
             className="mt-4 rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
           >
-            Download Backup
+            Download settings JSON
           </button>
         </div>
 
-        {/* Import */}
         <div className="rounded-lg border border-[#d9e2ec] p-5">
-          <p className="text-sm font-medium text-black">Import Data</p>
+          <p className="text-sm font-medium text-black">Re-run setup wizard</p>
           <p className="mt-1 text-sm text-gray-500">
-            Restore from a previously exported backup. Existing data will be overwritten.
-          </p>
-          <label className="mt-4 inline-block cursor-pointer rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]">
-            Choose Backup File
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={handleImport}
-              className="hidden"
-            />
-          </label>
-          {importError && (
-            <p className="mt-3 text-sm text-red-600">{importError}</p>
-          )}
-          {importSuccess && (
-            <p className="mt-3 text-sm text-green-700">{importSuccess}</p>
-          )}
-        </div>
-
-        {/* Re-run Onboarding */}
-        <div className="rounded-lg border border-[#d9e2ec] p-5">
-          <p className="text-sm font-medium text-black">Re-run Setup Wizard</p>
-          <p className="mt-1 text-sm text-gray-500">
-            Go through the onboarding flow again to update your company profile, pricing defaults, and market settings.
+            Clears the onboarding flag and sends you through the wizard again. Changes are saved to Supabase when you
+            finish.
           </p>
           <button
+            type="button"
+            disabled={onboardingBusy}
             onClick={() => {
-              window.localStorage.removeItem(storageKeys.onboarding);
-              window.location.href = "/onboarding";
+              setOnboardingBusy(true);
+              onResetOnboarding().catch(() => setOnboardingBusy(false));
             }}
-            className="mt-4 rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+            className="mt-4 rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb] disabled:opacity-50"
           >
-            Re-run Onboarding
-          </button>
-        </div>
-
-        {/* Clear */}
-        <div className="rounded-lg border border-red-100 p-5">
-          <p className="text-sm font-medium text-red-700">Clear All Data</p>
-          <p className="mt-1 text-sm text-gray-500">
-            Permanently removes all locally stored data. This cannot be undone.
-          </p>
-          <button
-            onClick={() => {
-              if (window.confirm("Delete all app data? This cannot be undone.")) {
-                clearAllData();
-              }
-            }}
-            className="mt-4 rounded-md border border-red-200 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50"
-          >
-            Clear All Data
+            {onboardingBusy ? "Saving…" : "Re-run onboarding"}
           </button>
         </div>
       </div>

@@ -1,75 +1,124 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Check, ExternalLink, Shield } from "lucide-react";
 import {
   defaultSettings,
   formatMoney,
   mergeAppSettings,
-  storageKeys,
   type AppSettings,
-  type Project,
+  type PriceOptionName,
   type Quote,
 } from "@/lib/app-data";
-import {
-  mergeProposalTemplates,
-  type ProposalTemplate,
-} from "@/lib/proposal-templates";
-import { readLocalStorage, writeLocalStorage } from "@/lib/use-local-storage";
+import type { ProposalTemplate } from "@/lib/proposal-templates";
+import { CLIENT_CONTRACT_CHECKLIST } from "@/lib/proposal-client-portal";
 import { ProposalDocument } from "@/components/proposals/proposal-document";
 import { PagedProposalPreview } from "@/components/proposals/paged-proposal-preview";
 import type { CoverLayout } from "@/lib/pdf-generator";
 
-type AcceptanceState = "viewing" | "signing" | "accepted";
+type LoadState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "missing_token" }
+  | {
+      kind: "ready";
+      quote: Quote;
+      settings: AppSettings;
+      template: ProposalTemplate;
+      coverPhotoUrl: string | null;
+      coverLayout: CoverLayout;
+      existingPhotos: string[];
+      existingPhotoCaptions: string[];
+      expired: boolean;
+      alreadyAccepted: boolean;
+    };
 
-const ACCEPTED_KEY = "contractor-pricing-app:accepted-signatures";
+type AcceptanceState = "viewing" | "signing";
 
-export default function ClientAcceptancePage() {
+function AcceptPageInner() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get("t")?.trim() ?? "";
 
-  const [quote, setQuote] = useState<Quote | null | undefined>(undefined); // undefined = loading
-  const [settings, setSettings] = useState(defaultSettings);
-  const [template, setTemplate] = useState<ProposalTemplate | null>(null);
-  const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(null);
-  const [coverLayout, setCoverLayout] = useState<CoverLayout>("full");
-  const [existingPhotos, setExistingPhotos] = useState<string[]>([]);
-  const [existingPhotoCaptions, setExistingPhotoCaptions] = useState<string[]>([]);
+  const [load, setLoad] = useState<LoadState>({ kind: "loading" });
+  const [clientSelectedOption, setClientSelectedOption] = useState<PriceOptionName>("Better");
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [state, setState] = useState<AcceptanceState>("viewing");
   const [signatureName, setSignatureName] = useState("");
   const [signatureError, setSignatureError] = useState("");
+  const [submitBusy, setSubmitBusy] = useState(false);
 
   useEffect(() => {
-    const quotes = readLocalStorage<Quote[]>(storageKeys.quotes, []);
-    const found = quotes.find((q) => q.id === id) ?? null;
-    setQuote(found);
-
-    const rawSettings = readLocalStorage<AppSettings>(storageKeys.settings, defaultSettings);
-    setSettings(mergeAppSettings(rawSettings));
-
-    const savedTemplates = readLocalStorage<ProposalTemplate[]>(storageKeys.proposalTemplates, []);
-    const templates = mergeProposalTemplates(savedTemplates);
-    setTemplate(templates.find((t) => t.trade === found?.trade) ?? templates[0]);
-
-    // Load persisted photos for this quote
-    if (id) {
-      const photos = readLocalStorage<{
-        coverImageUrl: string | null;
-        existingPhotos: string[];
-        existingPhotoCaptions?: string[];
-        coverLayout?: CoverLayout;
-      }>(
-        `contractor-pricing-app:quote-photos:${id}`,
-        { coverImageUrl: null, existingPhotos: [] }
-      );
-      setCoverPhotoUrl(photos.coverImageUrl);
-      setCoverLayout(photos.coverLayout ?? rawSettings.branding.proposalCoverLayout);
-      setExistingPhotos(photos.existingPhotos);
-      setExistingPhotoCaptions(photos.existingPhotoCaptions ?? []);
+    if (!id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- validate route params on mount
+      setLoad({ kind: "error", message: "Invalid proposal link." });
+      return;
     }
-  }, [id]);
+    if (!token) {
+      setLoad({ kind: "missing_token" });
+      return;
+    }
 
-  if (quote === undefined) {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/proposal/${id}/client?t=${encodeURIComponent(token)}`);
+        const body = (await res.json()) as Record<string, unknown>;
+        if (!res.ok) {
+          if (!cancelled) {
+            setLoad({
+              kind: "error",
+              message: (body.error as string) || "Could not load this proposal.",
+            });
+          }
+          return;
+        }
+
+        const quote = body.quote as Quote;
+        const settings = body.settings as AppSettings;
+        const template = body.template as ProposalTemplate;
+        const coverPhotoUrl = (body.coverPhotoUrl as string | null) ?? null;
+        const coverLayout = (body.coverLayout as CoverLayout) ?? "full";
+        const existingPhotos = (body.existingPhotos as string[]) ?? [];
+        const existingPhotoCaptions = (body.existingPhotoCaptions as string[]) ?? [];
+        const expired = Boolean(body.expired);
+        const alreadyAccepted = Boolean(body.alreadyAccepted);
+
+        if (!cancelled) {
+          setClientSelectedOption(quote.selectedOption ?? "Better");
+          setLoad({
+            kind: "ready",
+            quote,
+            settings,
+            template,
+            coverPhotoUrl,
+            coverLayout,
+            existingPhotos,
+            existingPhotoCaptions,
+            expired,
+            alreadyAccepted,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setLoad({ kind: "error", message: "Network error loading proposal." });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, token]);
+
+  const mergedSettings = useMemo(() => {
+    if (load.kind !== "ready") return mergeAppSettings(defaultSettings);
+    return mergeAppSettings(load.settings);
+  }, [load]);
+
+  if (load.kind === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
         <p className="text-sm text-gray-400">Loading proposal…</p>
@@ -77,26 +126,55 @@ export default function ClientAcceptancePage() {
     );
   }
 
-  if (!quote || !template) {
+  if (load.kind === "missing_token") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
-        <div className="text-center">
-          <p className="text-2xl font-bold text-[#213343]">Proposal Not Found</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-6">
+        <div className="max-w-md text-center">
+          <p className="text-2xl font-bold text-[#213343]">Link incomplete</p>
           <p className="mt-2 text-gray-500">
-            This proposal link is no longer valid or the proposal has been removed.
+            Open the full link your contractor sent you (it should include a security token after{" "}
+            <code className="rounded bg-gray-100 px-1">?t=</code>).
           </p>
         </div>
       </div>
     );
   }
 
-  const isExpired = isProposalExpired(quote);
+  if (load.kind === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-6">
+        <div className="max-w-md text-center">
+          <p className="text-2xl font-bold text-[#213343]">Proposal unavailable</p>
+          <p className="mt-2 text-gray-500">{load.message}</p>
+        </div>
+      </div>
+    );
+  }
 
-  function handleSign() {
-    if (isExpired) {
-      setSignatureError("This proposal has expired. Please request an updated proposal before signing.");
-      return;
-    }
+  const { quote, template, coverPhotoUrl, coverLayout, existingPhotos, existingPhotoCaptions, expired, alreadyAccepted } =
+    load;
+
+  const showTiers = mergedSettings.proposalSettings.showGoodBetterBest !== false;
+  const effectiveOption = showTiers ? clientSelectedOption : quote.selectedOption;
+  const selectedResult =
+    effectiveOption === "Good" ? quote.good : effectiveOption === "Better" ? quote.better : quote.best;
+
+  const pagedRenderKey = JSON.stringify({
+    quote: { ...quote, selectedOption: effectiveOption },
+    settings: mergedSettings,
+    template,
+    coverPhotoUrl,
+    coverLayout,
+    existingPhotos,
+    existingPhotoCaptions,
+  });
+
+  const checklistComplete = CLIENT_CONTRACT_CHECKLIST.every((item) => checklist[item.id]);
+  const canOpenSign =
+    !expired && !alreadyAccepted && checklistComplete && (showTiers ? Boolean(clientSelectedOption) : true);
+
+  async function handleSign() {
+    if (expired || alreadyAccepted) return;
 
     const name = signatureName.trim();
     if (!name) {
@@ -108,149 +186,165 @@ export default function ClientAcceptancePage() {
       return;
     }
 
-    const record = {
-      quoteId: id,
-      customerName: quote!.customerName,
-      signedAs: name,
-      signedAt: new Date().toISOString(),
-      proposalNumber: quote!.proposalNumber,
-    };
-
-    const existing = readLocalStorage<typeof record[]>(ACCEPTED_KEY, []);
-    writeLocalStorage(ACCEPTED_KEY, [...existing, record]);
-    const quotes = readLocalStorage<Quote[]>(storageKeys.quotes, []);
-    writeLocalStorage(
-      storageKeys.quotes,
-      quotes.map((item) =>
-        item.id === quote!.id
-          ? { ...item, status: "Accepted", signedAt: record.signedAt, signedBy: name }
-          : item
-      )
-    );
-
-    if (quote!.projectId) {
-      const projects = readLocalStorage<Project[]>(storageKeys.projects, []);
-      writeLocalStorage(
-        storageKeys.projects,
-        projects.map((project) =>
-          project.id === quote!.projectId ? { ...project, status: "Won" } : project
-        )
-      );
+    setSubmitBusy(true);
+    setSignatureError("");
+    try {
+      const res = await fetch(`/api/proposal/${id}/client/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          selectedOption: effectiveOption,
+          signedName: name,
+          contractChecklist: checklist,
+        }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setSignatureError(body.error || "Could not complete signing.");
+        setSubmitBusy(false);
+        return;
+      }
+      router.replace(`/proposal/${id}/payment?t=${encodeURIComponent(token)}`);
+    } catch {
+      setSignatureError("Network error. Try again.");
+      setSubmitBusy(false);
     }
-
-    setState("accepted");
   }
 
-  const selectedResult =
-    quote.selectedOption === "Good"
-      ? quote.good
-      : quote.selectedOption === "Better"
-      ? quote.better
-      : quote.best;
-
-  const mergedSettings = mergeAppSettings(settings);
-
-  const pagedRenderKey = JSON.stringify({
-    quote,
-    settings: mergedSettings,
-    template,
-    coverPhotoUrl,
-    coverLayout,
-    existingPhotos,
-    existingPhotoCaptions,
-  });
-
-  if (state === "accepted") {
+  if (alreadyAccepted) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-[#f5f8fa] px-6 text-center">
         <div className="rounded-full bg-green-50 p-6">
           <Check className="h-12 w-12 text-green-600" />
         </div>
-        <h1 className="text-3xl font-bold text-[#213343]">Thank You, {quote.customerName}!</h1>
+        <h1 className="text-3xl font-bold text-[#213343]">Proposal already accepted</h1>
         <p className="max-w-md text-gray-500">
-          Your proposal has been accepted and signed.{" "}
-          {mergedSettings.companyProfile.contactName || mergedSettings.companyProfile.businessName} will
-          be in touch shortly to confirm your project schedule.
+          This proposal was signed earlier. You can continue to payment when you are ready.
         </p>
-
-        {template.acceptance.paymentScheduleText && (
-          <div className="mt-4 max-w-md rounded-lg border border-[#d9e2ec] bg-white p-5 text-left">
-            <p className="text-sm font-semibold text-[#213343]">Payment Schedule</p>
-            <p className="mt-2 text-sm text-gray-600">{template.acceptance.paymentScheduleText}</p>
-          </div>
-        )}
-
-        {template.acceptance.paymentLinkUrl && (
-          <a
-            href={template.acceptance.paymentLinkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-flex items-center gap-2 rounded-lg bg-[#ff5c35] px-6 py-3 font-semibold text-white shadow transition hover:bg-[#e94820]"
-          >
-            Proceed to Payment Portal
-            <ExternalLink className="h-4 w-4" />
-          </a>
-        )}
-
-        <div className="mt-4 rounded-lg border border-[#d9e2ec] bg-white px-6 py-4 text-sm text-gray-500">
-          <p>
-            Signed by: <strong className="text-[#213343]">{signatureName}</strong>
-          </p>
-          <p className="mt-1">
-            Date:{" "}
-            {new Date().toLocaleDateString("en-US", {
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })}
-          </p>
-          <p className="mt-1">
-            Amount:{" "}
-            <strong>{formatMoney(selectedResult.salePrice)}</strong> ({quote.selectedOption} option)
-          </p>
-        </div>
+        <a
+          href={`/proposal/${id}/payment?t=${encodeURIComponent(token)}`}
+          className="inline-flex items-center gap-2 rounded-lg bg-[#ff5c35] px-6 py-3 font-semibold text-white shadow transition hover:bg-[#e94820]"
+        >
+          Go to payment
+          <ExternalLink className="h-4 w-4" />
+        </a>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#f5f8fa]">
-      {/* Client banner */}
       <div className="sticky top-0 z-30 border-b border-[#d9e2ec] bg-white px-6 py-3 shadow-sm">
-        <div className="mx-auto flex max-w-5xl items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[#213343]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-[#213343]">
               {mergedSettings.companyProfile.businessName}
             </p>
             <p className="text-xs text-gray-400">
               Proposal {quote.proposalNumber} · For {quote.customerName}
-              {isExpired ? " · Expired" : ""}
+              {expired ? " · Expired" : ""}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-xs text-gray-400">
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="hidden items-center gap-1.5 text-xs text-gray-400 sm:flex">
               <Shield className="h-3.5 w-3.5" />
               Secure
             </span>
-            {state === "viewing" && !isExpired && (
+            {state === "viewing" && !expired && (
               <button
-                onClick={() => setState("signing")}
-                className="rounded-lg bg-[#ff5c35] px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-[#e94820]"
+                type="button"
+                disabled={!canOpenSign}
+                onClick={() => canOpenSign && setState("signing")}
+                className="rounded-lg bg-[#ff5c35] px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-[#e94820] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Accept & Sign →
+                Sign to accept →
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {isExpired ? (
+      {expired ? (
         <div className="border-b border-red-100 bg-red-50 px-6 py-3 text-center text-sm font-medium text-red-700">
           This proposal expired on {quote.expiresAt}. Please request an updated proposal before signing.
         </div>
       ) : null}
 
-      {/* Proposal document — same paginated view as editor preview, print route, and PDF */}
+      <div className="mx-auto max-w-3xl px-6 py-6">
+        {showTiers && !expired ? (
+          <div className="mb-6 rounded-xl border border-[#d9e2ec] bg-white p-5 shadow-sm">
+            <p className="text-sm font-semibold text-[#213343]">Choose your option</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Select Good, Better, or Best. Your choice is part of this agreement.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {(["Good", "Better", "Best"] as const).map((tier) => {
+                const tierResult = tier === "Good" ? quote.good : tier === "Better" ? quote.better : quote.best;
+                const recommended =
+                  tier === "Better" && mergedSettings.proposalSettings.highlightBetterRecommended !== false;
+                const active = clientSelectedOption === tier;
+                return (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() => setClientSelectedOption(tier)}
+                    className={`rounded-lg border p-4 text-left transition ${
+                      active
+                        ? "border-[#ff5c35] bg-[#fff8f5] ring-2 ring-[#ff5c35]/30"
+                        : "border-[#d9e2ec] hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-[#213343]">{tier}</span>
+                      {recommended ? (
+                        <span className="rounded bg-[#213343] px-2 py-0.5 text-[10px] font-medium text-white">
+                          Recommended
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-xl font-bold text-[#213343]">{formatMoney(tierResult.salePrice)}</p>
+                    <p className="mt-1 line-clamp-3 text-xs text-gray-500">{tierResult.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {!expired ? (
+          <div className="mb-6 rounded-xl border border-[#d9e2ec] bg-white p-5 shadow-sm">
+            <p className="text-sm font-semibold text-[#213343]">Contract acknowledgments</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Check each box to confirm before you sign. Your signature applies to both the proposal and these terms.
+            </p>
+            <ul className="mt-4 space-y-3">
+              {CLIENT_CONTRACT_CHECKLIST.map((item) => (
+                <li key={item.id}>
+                  <label className="flex cursor-pointer gap-3 text-sm text-[#213343]">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 shrink-0 rounded border-[#d9e2ec] accent-[#ff5c35]"
+                      checked={Boolean(checklist[item.id])}
+                      onChange={(e) =>
+                        setChecklist((prev) => ({
+                          ...prev,
+                          [item.id]: e.target.checked,
+                        }))
+                      }
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {!checklistComplete ? (
+              <p className="mt-3 text-xs text-amber-700">Confirm all items above to enable signing.</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
       <div
         className={
           coverLayout === "elegant"
@@ -268,7 +362,7 @@ export default function ClientAcceptancePage() {
           <PagedProposalPreview renderKey={pagedRenderKey}>
             <ProposalDocument
               template={template}
-              quote={quote}
+              quote={{ ...quote, selectedOption: effectiveOption }}
               settings={mergedSettings}
               coverPhotoUrl={coverPhotoUrl}
               coverLayout={coverLayout}
@@ -284,37 +378,24 @@ export default function ClientAcceptancePage() {
         </div>
       </div>
 
-      {/* Signing overlay */}
-      {state === "signing" && (
+      {state === "signing" && !expired && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-6 sm:items-center">
           <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl">
-            <h2 className="text-xl font-bold text-[#213343]">Sign & Accept Proposal</h2>
+            <h2 className="text-xl font-bold text-[#213343]">Sign to accept proposal & contract</h2>
             <p className="mt-2 text-sm text-gray-500">
-              By signing below you accept the scope of work, pricing, and terms described in this
-              proposal.
+              By typing your name you accept the option below, the proposal, and the contract terms you confirmed.
             </p>
 
             <div className="mt-6 rounded-lg border border-[#d9e2ec] bg-[#f5f8fa] p-4">
-              <div className="flex items-baseline justify-between">
-                <p className="text-sm font-medium text-[#213343]">{quote.selectedOption} Option</p>
-                <p className="text-2xl font-bold text-[#213343]">
-                  {formatMoney(selectedResult.salePrice)}
-                </p>
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-sm font-medium text-[#213343]">{effectiveOption} option</p>
+                <p className="text-2xl font-bold text-[#213343]">{formatMoney(selectedResult.salePrice)}</p>
               </div>
-              <p className="mt-1 text-xs text-gray-400">
-                {selectedResult.description}
-              </p>
-              {template.acceptance.paymentScheduleText && (
-                <p className="mt-3 text-xs text-gray-500">
-                  {template.acceptance.paymentScheduleText}
-                </p>
-              )}
+              <p className="mt-1 text-xs text-gray-400">{selectedResult.description}</p>
             </div>
 
             <div className="mt-6">
-              <label className="mb-1.5 block text-sm font-medium text-[#213343]">
-                Type your full name to sign
-              </label>
+              <label className="mb-1.5 block text-sm font-medium text-[#213343]">Type your full name to sign</label>
               <input
                 value={signatureName}
                 onChange={(e) => {
@@ -324,11 +405,9 @@ export default function ClientAcceptancePage() {
                 placeholder={quote.customerName}
                 className="w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-lg font-medium italic outline-none focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
               />
-              {signatureError && (
-                <p className="mt-1.5 text-xs text-red-500">{signatureError}</p>
-              )}
+              {signatureError ? <p className="mt-1.5 text-xs text-red-500">{signatureError}</p> : null}
               <p className="mt-2 text-xs text-gray-400">
-                Typed signatures are legally binding. Date:{" "}
+                Typed signatures carry legal effect in many jurisdictions. Date:{" "}
                 {new Date().toLocaleDateString("en-US", {
                   month: "long",
                   day: "numeric",
@@ -339,19 +418,23 @@ export default function ClientAcceptancePage() {
 
             <div className="mt-6 flex gap-3">
               <button
+                type="button"
+                disabled={submitBusy}
                 onClick={() => {
                   setState("viewing");
                   setSignatureError("");
                 }}
-                className="flex-1 rounded-lg border border-[#d9e2ec] py-3 text-sm text-gray-500 transition hover:bg-gray-50"
+                className="flex-1 rounded-lg border border-[#d9e2ec] py-3 text-sm text-gray-500 transition hover:bg-gray-50 disabled:opacity-50"
               >
-                Cancel
+                Back
               </button>
               <button
+                type="button"
+                disabled={submitBusy}
                 onClick={handleSign}
-                className="flex-1 rounded-lg bg-[#ff5c35] py-3 text-sm font-semibold text-white shadow transition hover:bg-[#e94820]"
+                className="flex-1 rounded-lg bg-[#ff5c35] py-3 text-sm font-semibold text-white shadow transition hover:bg-[#e94820] disabled:opacity-50"
               >
-                Accept & Sign
+                {submitBusy ? "Saving…" : "Accept & sign"}
               </button>
             </div>
           </div>
@@ -361,7 +444,16 @@ export default function ClientAcceptancePage() {
   );
 }
 
-function isProposalExpired(quote: Quote) {
-  if (!quote.expiresAt || quote.status === "Accepted") return false;
-  return new Date(quote.expiresAt) < new Date();
+export default function ClientAcceptancePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
+          <p className="text-sm text-gray-400">Loading…</p>
+        </div>
+      }
+    >
+      <AcceptPageInner />
+    </Suspense>
+  );
 }

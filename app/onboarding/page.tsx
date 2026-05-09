@@ -1,33 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check, ChevronLeft, Minus, Plus } from "lucide-react";
-import { storageKeys } from "@/lib/app-data";
-import { writeLocalStorage } from "@/lib/use-local-storage";
-
-type Trade =
-  | "Roofing"
-  | "Siding"
-  | "Painting"
-  | "Drywall"
-  | "Gutters"
-  | "Remodeling"
-  | "General Contractor";
-
-type CompanyLevel =
-  | "Solo Owner"
-  | "Small Crew"
-  | "Established Company"
-  | "Premium Company";
+import { ArrowRight, Check, ChevronLeft, Info, Minus, Plus, X } from "lucide-react";
+import {
+  companyLevelOptionsWithDesc,
+  defaultSettings,
+  mergeAppSettings,
+  onboardingTradeOptions,
+  stateOptions,
+  type AppSettings,
+  type CompanyLevel,
+  type ProjectState,
+  type SettingsTrade,
+} from "@/lib/app-data";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { loadCompanySettings, saveCompanySettings } from "@/lib/supabase/data";
 
 type WizardState = {
   businessName: string;
   contactName: string;
   phone: string;
   email: string;
-  trade: Trade;
-  state: string;
+  trade: SettingsTrade;
+  state: ProjectState;
   companyLevel: CompanyLevel;
   overheadMode: "manual" | "estimate";
   monthlyOverhead: number;
@@ -43,34 +39,13 @@ type WizardState = {
   betterMargin: number;
   bestMargin: number;
   minimumSafeMargin: number;
+  /** manual mode only: single number vs itemized lines */
+  manualOverheadStyle: "total" | "lineItems";
+  /** When non-empty in manual+lineItems, monthly total = sum(amounts) */
+  overheadLineItems: OverheadLine[];
 };
 
-const STATE_OPTIONS = [
-  "Alabama","Arizona","Arkansas","California","Colorado","Connecticut",
-  "Florida","Georgia","Idaho","Illinois","Indiana","Iowa","Kansas",
-  "Kentucky","Louisiana","Maryland","Massachusetts","Michigan","Minnesota",
-  "Mississippi","Missouri","Montana","Nebraska","Nevada","New Jersey",
-  "New Mexico","New York","North Carolina","Ohio","Oklahoma","Oregon",
-  "Pennsylvania","South Carolina","Tennessee","Texas","Utah","Virginia",
-  "Washington","West Virginia","Wisconsin",
-];
-
-const TRADE_OPTIONS: { value: Trade; desc: string }[] = [
-  { value: "Roofing",            desc: "Shingles, flat roofs, repairs" },
-  { value: "Siding",             desc: "Fiber cement, vinyl, trim" },
-  { value: "Painting",           desc: "Interior & exterior" },
-  { value: "Drywall",            desc: "Hang, tape, finish" },
-  { value: "Gutters",            desc: "Install, clean, repair" },
-  { value: "Remodeling",         desc: "Kitchen, bath, basement" },
-  { value: "General Contractor", desc: "Multi-trade projects" },
-];
-
-const COMPANY_LEVEL_OPTIONS: { value: CompanyLevel; desc: string }[] = [
-  { value: "Solo Owner",          desc: "Just me — I do the work" },
-  { value: "Small Crew",          desc: "2–5 people on jobs" },
-  { value: "Established Company", desc: "5+ years, steady clients" },
-  { value: "Premium Company",     desc: "High-end brand, premium pricing" },
-];
+type OverheadLine = { id: string; label: string; amount: number };
 
 function computeEstimate(s: WizardState): number {
   return (
@@ -92,27 +67,245 @@ const INITIAL: WizardState = {
   vehicles: 1, hasOffice: false, officeRent: 0, nonJobStaff: 0,
   insurance: 500, phonesInternet: 200, otherCosts: 0,
   goodMargin: 28, betterMargin: 35, bestMargin: 42, minimumSafeMargin: 20,
+  manualOverheadStyle: "total",
+  overheadLineItems: [],
 };
+
+const OVERHEAD_LINE_TEMPLATES = [
+  "Office or shop rent",
+  "Vehicles (payments, insurance, fuel)",
+  "General liability + workers comp",
+  "Phone, internet, software",
+  "Admin / estimator payroll (non-field)",
+  "Equipment leases or tool purchases",
+  "Marketing & advertising",
+  "Other fixed monthly costs",
+] as const;
+
+function sumOverheadLines(lines: OverheadLine[]): number {
+  return lines.reduce((s, row) => s + Math.max(0, row.amount), 0);
+}
+
+function linesFromEstimate(d: WizardState): OverheadLine[] {
+  const rows: OverheadLine[] = [];
+  if (d.vehicles > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: `Work vehicles (${d.vehicles} × $700/mo est.)`,
+      amount: d.vehicles * 700,
+    });
+  }
+  if (d.hasOffice && d.officeRent > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Office or shop rent",
+      amount: d.officeRent,
+    });
+  }
+  if (d.nonJobStaff > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: `Non-field staff (${d.nonJobStaff} × $3,500/mo est.)`,
+      amount: d.nonJobStaff * 3500,
+    });
+  }
+  if (d.insurance > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Insurance (GL, workers comp, etc.)",
+      amount: d.insurance,
+    });
+  }
+  if (d.phonesInternet > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Phone, internet, software",
+      amount: d.phonesInternet,
+    });
+  }
+  if (d.otherCosts > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      label: "Other monthly costs",
+      amount: d.otherCosts,
+    });
+  }
+  return rows;
+}
+
+function getEffectiveMonthlyOverhead(d: WizardState): number {
+  if (d.overheadMode === "estimate") return computeEstimate(d);
+  if (d.manualOverheadStyle === "lineItems" && d.overheadLineItems.length > 0) {
+    return sumOverheadLines(d.overheadLineItems);
+  }
+  return d.monthlyOverhead;
+}
+
+type MarginSuggestion = {
+  goodMargin: number;
+  betterMargin: number;
+  bestMargin: number;
+  minimumSafeMargin: number;
+  summary: string;
+};
+
+function suggestMarginsFromWizard(d: WizardState): MarginSuggestion {
+  const overhead = getEffectiveMonthlyOverhead(d);
+  const burden = d.laborBurdenPercent;
+  let good = 28;
+  let better = 35;
+  let best = 42;
+  let minSafe = 20;
+
+  switch (d.companyLevel) {
+    case "Solo Owner":
+      good = 30;
+      better = 38;
+      best = 46;
+      minSafe = 22;
+      break;
+    case "Small Crew":
+      good = 28;
+      better = 35;
+      best = 42;
+      minSafe = 20;
+      break;
+    case "Established Company":
+      good = 27;
+      better = 34;
+      best = 41;
+      minSafe = 20;
+      break;
+    case "Premium Company":
+      good = 32;
+      better = 40;
+      best = 48;
+      minSafe = 24;
+      break;
+    default:
+      break;
+  }
+
+  let pressure = 0;
+  if (overhead > 12_000) pressure = 3;
+  else if (overhead > 7_000) pressure = 2;
+  else if (overhead > 3_500) pressure = 1;
+
+  good += pressure;
+  better += pressure;
+  best += pressure;
+
+  if (burden >= 26) {
+    good += 1;
+    better += 1;
+    best += 1;
+    minSafe += 1;
+  } else if (burden >= 22) {
+    minSafe += 1;
+  }
+
+  minSafe = Math.min(minSafe, good - 5);
+  minSafe = Math.max(12, minSafe);
+  good = Math.min(75, good);
+  better = Math.min(78, Math.max(good + 5, better));
+  best = Math.min(80, Math.max(better + 5, best));
+
+  const summary =
+    pressure > 0 || burden >= 22
+      ? `Based on your company size, monthly overhead (~$${overhead.toLocaleString()}), and labor burden (${burden}%): higher fixed costs usually mean you need a few extra points of margin to stay safe.`
+      : `Based on your company size and typical overhead. Adjust if you already know your numbers — these are starting points.`;
+
+  return { goodMargin: good, betterMargin: better, bestMargin: best, minimumSafeMargin: minSafe, summary };
+}
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardState>(INITIAL);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    try {
-      if (localStorage.getItem(storageKeys.onboarding) === "completed") {
-        router.replace("/");
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await loadCompanySettings<AppSettings | null>(supabase);
+        if (cancelled) return;
+        if (raw && mergeAppSettings(raw).onboardingCompletedAt) {
+          router.replace("/");
+        }
+      } catch {
+        /* not logged in or network */
       }
-    } catch { /* SSR */ }
-  }, [router]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, router]);
 
   function set<K extends keyof WizardState>(key: K, value: WizardState[K]) {
     setData((prev) => {
       const next = { ...prev, [key]: value };
+      if (key === "overheadMode" && value === "estimate") {
+        next.overheadLineItems = [];
+        next.manualOverheadStyle = "total";
+      }
+      if (key === "overheadMode" && value === "manual" && prev.overheadMode === "estimate") {
+        next.overheadLineItems = [];
+        next.manualOverheadStyle = "total";
+        next.monthlyOverhead = computeEstimate(prev);
+      }
+      if (
+        key === "manualOverheadStyle" &&
+        value === "total" &&
+        prev.manualOverheadStyle === "lineItems"
+      ) {
+        const sum = sumOverheadLines(prev.overheadLineItems);
+        if (sum > 0) next.monthlyOverhead = sum;
+        next.overheadLineItems = [];
+      }
+      if (
+        key === "manualOverheadStyle" &&
+        value === "lineItems" &&
+        prev.manualOverheadStyle === "total"
+      ) {
+        next.overheadLineItems =
+          prev.monthlyOverhead > 0
+            ? [{ id: crypto.randomUUID(), label: "Monthly overhead", amount: prev.monthlyOverhead }]
+            : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
+      }
       if (next.overheadMode === "estimate") {
         next.monthlyOverhead = computeEstimate(next);
+      }
+      if (next.overheadMode === "manual" && next.manualOverheadStyle === "lineItems") {
+        next.monthlyOverhead = sumOverheadLines(next.overheadLineItems);
+      }
+      return next;
+    });
+  }
+
+  function patchWizard(patch: Partial<WizardState>) {
+    setData((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.overheadMode === "estimate") {
+        next.overheadLineItems = [];
+        next.manualOverheadStyle = "total";
+      }
+      if (patch.manualOverheadStyle === "total") {
+        const sum = sumOverheadLines(prev.overheadLineItems);
+        if (
+          prev.manualOverheadStyle === "lineItems" &&
+          sum > 0 &&
+          patch.monthlyOverhead === undefined
+        ) {
+          next.monthlyOverhead = sum;
+        }
+        next.overheadLineItems = [];
+      }
+      if (next.overheadMode === "estimate") {
+        next.monthlyOverhead = computeEstimate(next);
+      } else if (next.manualOverheadStyle === "lineItems") {
+        next.monthlyOverhead = sumOverheadLines(next.overheadLineItems);
       }
       return next;
     });
@@ -140,37 +333,48 @@ export default function OnboardingPage() {
     setStep((s) => Math.max(0, s - 1));
   }
 
-  function complete() {
-    const settings = {
-      companyProfile: {
-        businessName: data.businessName.trim() || "My Company",
-        contactName: data.contactName.trim(),
-        email: data.email.trim(),
-        phone: data.phone.trim(),
-        website: "",
-        licenseNumber: "",
-        insuranceProvider: "",
-        mainTrade: data.trade,
-        companyLevel: data.companyLevel,
-      },
-      pricingDefaults: {
-        goodMargin: data.goodMargin,
-        betterMargin: data.betterMargin,
-        bestMargin: data.bestMargin,
-        minimumSafeMargin: data.minimumSafeMargin,
-      },
-      marketLocation: { defaultState: data.state },
-      costRules: {
-        monthlyOverhead: data.monthlyOverhead,
-        laborBurdenPercent: data.laborBurdenPercent,
-        includeOverhead: true,
-        includeMiscellaneousBuffer: true,
-        miscellaneousBufferPercent: 5,
-      },
-    };
-    writeLocalStorage(storageKeys.settings, settings);
-    try { localStorage.setItem(storageKeys.onboarding, "completed"); } catch { /* */ }
-    router.push("/");
+  async function complete() {
+    try {
+      const raw = await loadCompanySettings<AppSettings | null>(supabase);
+      const base = mergeAppSettings(raw ?? defaultSettings);
+      const state = data.state as ProjectState;
+      const next = mergeAppSettings({
+        ...base,
+        companyProfile: {
+          ...base.companyProfile,
+          businessName: data.businessName.trim() || "My Company",
+          contactName: data.contactName.trim(),
+          email: data.email.trim(),
+          phone: data.phone.trim(),
+          mainTrade: data.trade,
+          companyLevel: data.companyLevel,
+        },
+        pricingDefaults: {
+          ...base.pricingDefaults,
+          goodMargin: data.goodMargin,
+          betterMargin: data.betterMargin,
+          bestMargin: data.bestMargin,
+          minimumSafeMargin: data.minimumSafeMargin,
+        },
+        marketLocation: {
+          ...base.marketLocation,
+          defaultState: state,
+        },
+        costRules: {
+          ...base.costRules,
+          monthlyOverhead: getEffectiveMonthlyOverhead(data),
+          laborBurdenPercent: data.laborBurdenPercent,
+          includeOverhead: true,
+          includeMiscellaneousBuffer: true,
+          miscellaneousBufferPercent: 5,
+        },
+        onboardingCompletedAt: new Date().toISOString(),
+      });
+      await saveCompanySettings(supabase, next);
+      router.push("/");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save settings");
+    }
   }
 
   return (
@@ -183,8 +387,10 @@ export default function OnboardingPage() {
         <div className="rounded-2xl border border-[#d9e2ec] bg-white p-8 shadow-sm">
           {step === 0 && <StepWelcome onNext={() => setStep(1)} />}
           {step === 1 && <StepBusiness data={data} set={set} error={error} onNext={next} onBack={back} />}
-          {step === 2 && <StepOverhead data={data} set={set} onNext={next} onBack={back} />}
-          {step === 3 && <StepMargins data={data} set={set} error={error} onNext={next} onBack={back} />}
+          {step === 2 && <StepOverhead data={data} set={set} patch={patchWizard} onNext={next} onBack={back} />}
+          {step === 3 && (
+            <StepMargins data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />
+          )}
           {step === 4 && <StepDone data={data} onComplete={complete} />}
         </div>
 
@@ -251,6 +457,7 @@ function StepWelcome({ onNext }: { onNext: () => void }) {
 type StepProps = {
   data: WizardState;
   set: <K extends keyof WizardState>(key: K, value: WizardState[K]) => void;
+  patch?: (patch: Partial<WizardState>) => void;
   error?: string;
   onNext: () => void;
   onBack: () => void;
@@ -297,10 +504,10 @@ function StepBusiness({ data, set, error, onNext, onBack }: StepProps) {
           <Field label="Main Trade">
             <select
               value={data.trade}
-              onChange={(e) => set("trade", e.target.value as Trade)}
+              onChange={(e) => set("trade", e.target.value as SettingsTrade)}
               className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
             >
-              {TRADE_OPTIONS.map((t) => (
+              {onboardingTradeOptions.map((t) => (
                 <option key={t.value} value={t.value}>{t.value}</option>
               ))}
             </select>
@@ -308,10 +515,10 @@ function StepBusiness({ data, set, error, onNext, onBack }: StepProps) {
           <Field label="State">
             <select
               value={data.state}
-              onChange={(e) => set("state", e.target.value)}
+              onChange={(e) => set("state", e.target.value as ProjectState)}
               className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
             >
-              {STATE_OPTIONS.map((s) => (
+              {stateOptions.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -320,7 +527,7 @@ function StepBusiness({ data, set, error, onNext, onBack }: StepProps) {
 
         <Field label="Company Size">
           <div className="mt-2 grid grid-cols-2 gap-2">
-            {COMPANY_LEVEL_OPTIONS.map((opt) => (
+            {companyLevelOptionsWithDesc.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
@@ -345,8 +552,212 @@ function StepBusiness({ data, set, error, onNext, onBack }: StepProps) {
   );
 }
 
-function StepOverhead({ data, set, onNext, onBack }: StepProps) {
+function OverheadDetailModal({
+  open,
+  draft,
+  onChangeDraft,
+  onApply,
+  onClose,
+}: {
+  open: boolean;
+  draft: OverheadLine[];
+  onChangeDraft: (lines: OverheadLine[]) => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  const total = sumOverheadLines(draft);
+
+  function addRow() {
+    onChangeDraft([...draft, { id: crypto.randomUUID(), label: "", amount: 0 }]);
+  }
+
+  function addSuggestedCategories() {
+    const taken = new Set(draft.map((r) => r.label.trim().toLowerCase()).filter(Boolean));
+    const toAdd: OverheadLine[] = [];
+    for (const label of OVERHEAD_LINE_TEMPLATES) {
+      const key = label.toLowerCase();
+      if (!taken.has(key)) {
+        toAdd.push({ id: crypto.randomUUID(), label, amount: 0 });
+        taken.add(key);
+      }
+    }
+    if (toAdd.length === 0) return;
+    onChangeDraft([...draft, ...toAdd]);
+  }
+
+  function updateRow(id: string, patch: Partial<Pick<OverheadLine, "label" | "amount">>) {
+    onChangeDraft(draft.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  function removeRow(id: string) {
+    onChangeDraft(draft.filter((r) => r.id !== id));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+      <div
+        className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl border border-[#d9e2ec] bg-white shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="overhead-detail-title"
+      >
+        <div className="flex items-start justify-between border-b border-[#d9e2ec] px-5 py-4">
+          <div>
+            <h3 id="overhead-detail-title" className="text-lg font-bold text-[#213343]">
+              Monthly overhead — line by line
+            </h3>
+            <p className="mt-1 text-xs text-[#6B7280]">
+              Add every fixed monthly cost. The total updates as you go — include rent, vehicles, insurance,
+              software, admin payroll, marketing, and anything else you pay every month whether you work or not.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-[#9CA3AF] transition hover:bg-[#f6f8fb] hover:text-[#213343]"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="max-h-[min(60vh,420px)] overflow-y-auto px-5 py-4">
+          <div className="space-y-3">
+            {draft.map((row) => (
+              <div key={row.id} className="flex gap-2 rounded-xl border border-[#d9e2ec] bg-[#f9fafb] p-3">
+                <div className="min-w-0 flex-1">
+                  <label className="sr-only">Description</label>
+                  <input
+                    type="text"
+                    value={row.label}
+                    placeholder="e.g. Shop rent"
+                    onChange={(e) => updateRow(row.id, { label: e.target.value })}
+                    className="w-full rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
+                  />
+                </div>
+                <div className="flex w-28 shrink-0 flex-col">
+                  <label className="sr-only">Amount per month</label>
+                  <div className="flex items-center rounded-lg border border-[#d9e2ec] bg-white px-2">
+                    <span className="text-xs text-[#9CA3AF]">$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.amount || ""}
+                      onChange={(e) =>
+                        updateRow(row.id, { amount: Math.max(0, Number(e.target.value) || 0) })
+                      }
+                      className="w-full min-w-0 border-0 bg-transparent py-2 pl-1 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="self-center rounded-lg p-2 text-[#9CA3AF] transition hover:bg-red-50 hover:text-red-600"
+                  aria-label="Remove line"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={addRow}
+              className="inline-flex items-center gap-1 rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium text-[#213343] transition hover:border-[#ff5c35]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add line
+            </button>
+            <button
+              type="button"
+              onClick={addSuggestedCategories}
+              className="rounded-lg border border-dashed border-[#b7c7d6] bg-white px-3 py-2 text-xs font-medium text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#213343]"
+            >
+              Add common categories
+            </button>
+          </div>
+        </div>
+
+        <div className="border-t border-[#d9e2ec] bg-[#f6f8fb] px-5 py-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-sm font-medium text-[#213343]">Total (this month)</span>
+            <span className="text-lg font-bold text-[#213343]">${total.toLocaleString()}</span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-lg border border-[#d9e2ec] bg-white py-2.5 text-sm font-medium text-[#6B7280] transition hover:bg-[#f9fafb]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onApply}
+              className="flex-1 rounded-lg bg-[#ff5c35] py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
+            >
+              Apply total
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
   const estimated = computeEstimate(data);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailDraft, setDetailDraft] = useState<OverheadLine[]>([]);
+  const effective = getEffectiveMonthlyOverhead(data);
+
+  /** Optional: prefills line items from the estimate and switches to manual — no popup until user taps Edit. */
+  function applyEstimateBreakdown() {
+    const raw = linesFromEstimate(data);
+    const lines = raw.length ? raw : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
+    const withIds = lines.map((l) => ({ ...l, id: crypto.randomUUID() }));
+    patch?.({
+      overheadMode: "manual",
+      manualOverheadStyle: "lineItems",
+      overheadLineItems: withIds,
+      monthlyOverhead: sumOverheadLines(withIds),
+    });
+  }
+
+  /** Opens the line-item editor only when the user explicitly asks (button). */
+  function openDetailModal() {
+    const lines =
+      data.overheadLineItems.length > 0
+        ? data.overheadLineItems.map((l) => ({ ...l }))
+        : data.monthlyOverhead > 0
+          ? [{ id: crypto.randomUUID(), label: "Monthly overhead", amount: data.monthlyOverhead }]
+          : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
+    if (data.manualOverheadStyle !== "lineItems") {
+      patch?.({
+        manualOverheadStyle: "lineItems",
+        overheadLineItems: lines,
+        monthlyOverhead: sumOverheadLines(lines),
+      });
+    }
+    setDetailDraft(lines.map((l) => ({ ...l })));
+    setDetailOpen(true);
+  }
+
+  function applyDetail() {
+    const lines = detailDraft.length
+      ? detailDraft
+      : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
+    patch?.({
+      overheadMode: "manual",
+      manualOverheadStyle: "lineItems",
+      overheadLineItems: lines,
+      monthlyOverhead: sumOverheadLines(lines),
+    });
+    setDetailOpen(false);
+  }
 
   return (
     <div>
@@ -428,20 +839,87 @@ function StepOverhead({ data, set, onNext, onBack }: StepProps) {
               <p className="mt-1 text-2xl font-bold">${estimated.toLocaleString()}/mo</p>
               <p className="mt-1 text-xs text-white/50">You can refine this anytime in Settings</p>
             </div>
+
+            <button
+              type="button"
+              onClick={applyEstimateBreakdown}
+              className="w-full rounded-xl border border-[#d9e2ec] bg-white py-3 text-sm font-medium text-[#213343] transition hover:border-[#ff5c35]"
+            >
+              Break into line items (optional)
+            </button>
+            <p className="text-center text-[11px] text-[#9CA3AF]">
+              Only if you want a breakdown. Prefills from your answers above — use &quot;Edit line items&quot; to open
+              the detailed editor.
+            </p>
           </div>
         ) : (
-          <div className="mt-5">
-            <Field label="Monthly overhead ($)" hint="All fixed costs: rent, insurance, vehicles, phones, software">
-              <input
-                type="number"
-                value={data.monthlyOverhead || ""}
-                min={0}
-                placeholder="3000"
-                onChange={(e) => set("monthlyOverhead", Number(e.target.value) || 0)}
-                className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none focus:border-[#ff5c35]"
-              />
-            </Field>
-            <p className="mt-2 text-xs text-[#9CA3AF]">Not sure? Switch to &quot;Help me estimate&quot; above.</p>
+          <div className="mt-5 space-y-4">
+            <div className="flex gap-2 rounded-xl bg-[#f6f8fb] p-1">
+              {(["total", "lineItems"] as const).map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => {
+                    if (style === "lineItems") {
+                      set("manualOverheadStyle", "lineItems");
+                    } else {
+                      patch?.({ manualOverheadStyle: "total" });
+                    }
+                  }}
+                  className={`flex-1 rounded-lg py-2 text-xs font-medium transition sm:text-sm ${
+                    data.manualOverheadStyle === style
+                      ? "bg-white text-[#213343] shadow-sm"
+                      : "text-[#9CA3AF]"
+                  }`}
+                >
+                  {style === "total" ? "One monthly total" : "Itemize (detailed)"}
+                </button>
+              ))}
+            </div>
+
+            {data.manualOverheadStyle === "total" ? (
+              <>
+                <Field
+                  label="Monthly overhead ($)"
+                  hint="All fixed costs: rent, insurance, vehicles, phones, software"
+                >
+                  <input
+                    type="number"
+                    value={data.monthlyOverhead || ""}
+                    min={0}
+                    placeholder="3000"
+                    onChange={(e) => set("monthlyOverhead", Number(e.target.value) || 0)}
+                    className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none focus:border-[#ff5c35]"
+                  />
+                </Field>
+                <p className="text-xs text-[#9CA3AF]">Not sure? Switch to &quot;Help me estimate&quot; above.</p>
+                <button
+                  type="button"
+                  onClick={openDetailModal}
+                  className="w-full rounded-xl border border-dashed border-[#b7c7d6] py-3 text-sm font-medium text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#213343]"
+                >
+                  Enter detailed line items instead…
+                </button>
+              </>
+            ) : (
+              <div className="rounded-xl border border-[#d9e2ec] bg-[#f9fafb] px-4 py-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-[#9CA3AF]">
+                  Itemized total
+                </p>
+                <p className="mt-1 text-2xl font-bold text-[#213343]">${effective.toLocaleString()}/mo</p>
+                <p className="mt-1 text-xs text-[#6B7280]">
+                  {data.overheadLineItems.length} line{data.overheadLineItems.length === 1 ? "" : "s"} — sum updates
+                  automatically
+                </p>
+                <button
+                  type="button"
+                  onClick={openDetailModal}
+                  className="mt-3 w-full rounded-lg bg-[#213343] py-2.5 text-sm font-semibold text-white transition hover:bg-[#2d4a5e]"
+                >
+                  Edit line items
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -465,23 +943,123 @@ function StepOverhead({ data, set, onNext, onBack }: StepProps) {
         </div>
       </div>
 
+      <OverheadDetailModal
+        open={detailOpen}
+        draft={detailDraft}
+        onChangeDraft={setDetailDraft}
+        onApply={applyDetail}
+        onClose={() => setDetailOpen(false)}
+      />
+
       <NavButtons onNext={onNext} onBack={onBack} showBack />
     </div>
   );
 }
 
-function StepMargins({ data, set, error, onNext, onBack }: StepProps) {
+function MarginsInfoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+      <div
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#d9e2ec] bg-white p-6 shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="margins-info-title"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h3 id="margins-info-title" className="text-lg font-bold text-[#213343]">
+            How to think about margins
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-[#9CA3AF] transition hover:bg-[#f6f8fb]"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mt-4 space-y-3 text-sm text-[#6B7280]">
+          <p>
+            <span className="font-medium text-[#213343]">Good / Better / Best</span> are three price tiers you can
+            offer on proposals. Customers pick a package; each tier should still clear your true cost plus the profit
+            you need.
+          </p>
+          <p>
+            <span className="font-medium text-[#213343]">Margin</span> here means:{" "}
+            <span className="font-mono text-xs text-[#213343]">(Price − full job cost) ÷ Price × 100</span>. Full job
+            cost includes materials, field labor, burden, equipment, and a fair share of monthly overhead spread across
+            your work.
+          </p>
+          <p>
+            <span className="font-medium text-[#213343]">What to factor in:</span> callbacks and punch-list time,
+            warranty reserves, financing or card fees, slow months (overhead still runs), sales commissions, and
+            taxes. If overhead or labor burden is high, you usually need higher margins to stay safe.
+          </p>
+          <p>
+            <span className="font-medium text-[#213343]">Minimum safe margin</span> is your floor — the lowest margin
+            you&apos;re willing to accept before walking away. Keep it below &quot;Good&quot; so you still have room
+            for standard tiers.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-6 w-full rounded-lg bg-[#213343] py-2.5 text-sm font-semibold text-white transition hover:bg-[#2d4a5e]"
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StepMargins({ data, set, patch, error, onNext, onBack }: StepProps) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const suggestion = useMemo(() => suggestMarginsFromWizard(data), [data]);
+
+  function applySuggestion() {
+    const s = suggestMarginsFromWizard(data);
+    patch?.({
+      goodMargin: s.goodMargin,
+      betterMargin: s.betterMargin,
+      bestMargin: s.bestMargin,
+      minimumSafeMargin: s.minimumSafeMargin,
+    });
+  }
+
   return (
     <div>
-      <StepHeader
-        step={3}
-        title="Your Target Margins"
-        desc="Margin is what you keep after all costs. We've pre-filled industry averages — you can leave these as-is."
-      />
+      <div className="relative pr-12">
+        <StepHeader
+          step={3}
+          title="Your Target Margins"
+          desc="Margin is what you keep after all costs. We've pre-filled industry averages — you can leave these as-is."
+        />
+        <button
+          type="button"
+          onClick={() => setInfoOpen(true)}
+          className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full border border-[#d9e2ec] text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#ff5c35]"
+          aria-label="How margins work"
+        >
+          <Info className="h-4 w-4" />
+        </button>
+      </div>
 
       <div className="mt-5 rounded-xl bg-[#f6f8fb] px-4 py-3 text-xs text-[#6B7280]">
         Formula: <span className="font-mono font-semibold text-[#213343]">Margin % = (Price − Cost) ÷ Price × 100</span>
         <span className="ml-2 text-[#9CA3AF]">— 35% on a $10k job = $3,500 profit</span>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-[#e8edf2] bg-white px-4 py-3">
+        <p className="text-xs text-[#6B7280]">{suggestion.summary}</p>
+        <button
+          type="button"
+          onClick={applySuggestion}
+          className="mt-2 text-sm font-semibold text-[#ff5c35] transition hover:text-[#e94820]"
+        >
+          Use suggested margins
+        </button>
       </div>
 
       <div className="mt-5 grid grid-cols-3 gap-3">
@@ -501,9 +1079,7 @@ function StepMargins({ data, set, error, onNext, onBack }: StepProps) {
                   Recommended
                 </span>
               )}
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#9CA3AF]">
-                {labels[tier]}
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#9CA3AF]">{labels[tier]}</p>
               <input
                 type="number"
                 value={data[key]}
@@ -519,23 +1095,34 @@ function StepMargins({ data, set, error, onNext, onBack }: StepProps) {
       </div>
 
       <div className="mt-4">
-        <Field
-          label="Minimum safe margin %"
-          hint="Never price below this, even to win a job. At 20% on a $10k job = $2,000 minimum profit."
-        >
-          <div className="mt-1.5 flex items-center gap-3">
-            <input
-              type="number"
-              value={data.minimumSafeMargin}
-              min={1}
-              max={50}
-              onChange={(e) => set("minimumSafeMargin", Math.max(1, Number(e.target.value) || 1))}
-              className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none focus:border-[#ff5c35]"
-            />
-            <span className="text-sm text-[#9CA3AF]">% floor — leave at 20% if unsure</span>
-          </div>
-        </Field>
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-[#213343]">Minimum safe margin %</label>
+          <button
+            type="button"
+            onClick={() => setInfoOpen(true)}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-[#d9e2ec] text-[#9CA3AF] transition hover:border-[#ff5c35] hover:text-[#ff5c35]"
+            aria-label="About minimum safe margin"
+          >
+            <Info className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <p className="mt-0.5 text-xs text-[#9CA3AF]">
+          Never price below this, even to win a job. At 20% on a $10k job = $2,000 minimum profit.
+        </p>
+        <div className="mt-1.5 flex items-center gap-3">
+          <input
+            type="number"
+            value={data.minimumSafeMargin}
+            min={1}
+            max={50}
+            onChange={(e) => set("minimumSafeMargin", Math.max(1, Number(e.target.value) || 1))}
+            className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none focus:border-[#ff5c35]"
+          />
+          <span className="text-sm text-[#9CA3AF]">% floor — leave at 20% if unsure</span>
+        </div>
       </div>
+
+      <MarginsInfoModal open={infoOpen} onClose={() => setInfoOpen(false)} />
 
       {error && <p className="mt-4 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
       <NavButtons onNext={onNext} onBack={onBack} showBack nextLabel="Finish Setup" />
@@ -556,7 +1143,10 @@ function StepDone({ data, onComplete }: { data: WizardState; onComplete: () => v
         <SummaryRow label="Business" value={data.businessName || "—"} />
         <SummaryRow label="Main Trade" value={data.trade} />
         <SummaryRow label="State" value={data.state} />
-        <SummaryRow label="Monthly Overhead" value={`$${data.monthlyOverhead.toLocaleString()}/mo`} />
+        <SummaryRow
+          label="Monthly Overhead"
+          value={`$${getEffectiveMonthlyOverhead(data).toLocaleString()}/mo`}
+        />
         <SummaryRow label="Labor Burden" value={`${data.laborBurdenPercent}%`} />
         <SummaryRow
           label="Margins (G/B/B)"

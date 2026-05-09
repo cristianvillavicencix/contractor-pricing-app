@@ -2,43 +2,46 @@
 
 import Link from "next/link";
 import { ArrowRight, TrendingUp } from "lucide-react";
-import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   formatMargin,
   formatMoney,
-  initialProjects,
-  storageKeys,
-  type Project,
+  mergeAppSettings,
+  defaultSettings,
   type Quote,
+  type AppSettings,
 } from "@/lib/app-data";
-import { useLocalStorageState } from "@/lib/use-local-storage";
+import { t } from "@/lib/ui-strings";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { listProjects, listQuotes, loadCompanySettings } from "@/lib/supabase/data";
 
 export default function DashboardPage() {
-  const router = useRouter();
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
-  useEffect(() => {
-    try {
-      if (localStorage.getItem(storageKeys.onboarding) !== "completed") {
-        router.replace("/onboarding");
-      }
-    } catch { /* SSR */ }
-  }, [router]);
-  const [projects] = useLocalStorageState<Project[]>(
-    storageKeys.projects,
-    initialProjects
-  );
-  const [quotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
+  const { data, isPending, isError, error, refetch } = useQuery({
+    queryKey: ["dashboard", "lists"],
+    queryFn: async () => {
+      const [rawSettings, dbProjects, dbQuotes] = await Promise.all([
+        loadCompanySettings<AppSettings | null>(supabase),
+        listProjects(supabase),
+        listQuotes(supabase),
+      ]);
+      const settings = mergeAppSettings(rawSettings ?? defaultSettings);
+      return { settings, projects: dbProjects, quotes: dbQuotes };
+    },
+  });
 
-  // Pipeline: sum of Better prices for active (non-Won/Lost) projects
+  const projects = data?.projects ?? [];
+  const quotes = data?.quotes ?? [];
+
   const activeProjects = projects.filter(
     (p) => p.status !== "Won" && p.status !== "Lost" && p.status !== "Archived"
   );
   const wonProjects = projects.filter((p) => p.status === "Won");
-  const pendingQuotes = quotes.filter(
-    (q) => q.status === "Draft" || q.status === "Sent"
-  );
+  const pendingQuotes = quotes.filter((q) => q.status === "Draft" || q.status === "Sent");
   const acceptedQuotes = quotes.filter((q) => q.status === "Accepted");
   const recentlySignedQuotes = useMemo(
     () =>
@@ -49,8 +52,7 @@ export default function DashboardPage() {
       }),
     [acceptedQuotes]
   );
-  const winRate =
-    quotes.length > 0 ? acceptedQuotes.length / quotes.length : 0;
+  const winRate = quotes.length > 0 ? acceptedQuotes.length / quotes.length : 0;
 
   const pipelineValue = activeProjects.reduce((sum, p) => {
     const matchedQuote = quotes
@@ -77,8 +79,36 @@ export default function DashboardPage() {
     .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))
     .slice(0, 5);
 
+  if (isPending) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+        <AppSidebar />
+        <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+          <PageSkeleton rows={6} />
+        </main>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-md">
+            <ErrorPanel
+              title="Could not load dashboard"
+              message={error instanceof Error ? error.message : "Failed to load"}
+              onRetry={() => void refetch()}
+            />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
@@ -86,23 +116,20 @@ export default function DashboardPage() {
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Dashboard</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Overview
-              </h2>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Overview</h2>
               <p className="mt-3 max-w-2xl text-gray-500">
                 Your business at a glance — pipeline, quotes, and margins.
               </p>
             </div>
             <Link
               href="/pricing"
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-[#ff5c35] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#e94820]"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
             >
               New Pricing
               <ArrowRight className="h-4 w-4" />
             </Link>
           </header>
 
-          {/* KPI row */}
           <section className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
               label="Pipeline Value"
@@ -119,7 +146,11 @@ export default function DashboardPage() {
               label="Quotes Pending"
               value={String(pendingQuotes.length)}
               detail={`${acceptedQuotes.length} accepted`}
-              badge={recentlySignedQuotes.length > 0 ? `${recentlySignedQuotes.length} signed this week` : undefined}
+              badge={
+                recentlySignedQuotes.length > 0
+                  ? `${recentlySignedQuotes.length} signed this week`
+                  : undefined
+              }
             />
             <MetricCard
               label="Win Rate"
@@ -129,21 +160,13 @@ export default function DashboardPage() {
           </section>
 
           <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_320px]">
-            {/* Recent quotes */}
             <div className="rounded-lg border border-[#d9e2ec] bg-white">
               <div className="flex items-center justify-between border-b border-[#d9e2ec] p-5 sm:p-6">
                 <div>
-                  <h3 className="text-base font-semibold tracking-tight">
-                    Recent Quotes
-                  </h3>
-                  <p className="mt-0.5 text-sm text-gray-500">
-                    Latest proposals across all projects.
-                  </p>
+                  <h3 className="text-base font-semibold tracking-tight">Recent Quotes</h3>
+                  <p className="mt-0.5 text-sm text-gray-500">Latest proposals across all projects.</p>
                 </div>
-                <Link
-                  href="/quotes"
-                  className="text-xs font-medium text-gray-400 transition hover:text-black"
-                >
+                <Link href="/quotes" className="text-xs font-medium text-gray-400 transition hover:text-black">
                   View all →
                 </Link>
               </div>
@@ -158,22 +181,12 @@ export default function DashboardPage() {
                         className="grid gap-3 p-5 text-sm sm:grid-cols-[1.5fr_1fr_1fr_1fr_100px] sm:items-center sm:p-6"
                       >
                         <div>
-                          <p className="font-medium text-black">
-                            {quote.projectName}
-                          </p>
-                          <p className="mt-0.5 text-xs text-gray-500">
-                            {quote.customerName}
-                          </p>
+                          <p className="font-medium text-black">{quote.projectName}</p>
+                          <p className="mt-0.5 text-xs text-gray-500">{quote.customerName}</p>
                         </div>
-                        <span className="text-gray-600">
-                          {quote.selectedOption}
-                        </span>
-                        <span className="font-medium">
-                          {formatMoney(selected.salePrice)}
-                        </span>
-                        <span className="text-gray-600">
-                          {formatMargin(selected.margin)}
-                        </span>
+                        <span className="text-gray-600">{quote.selectedOption}</span>
+                        <span className="font-medium">{formatMoney(selected.salePrice)}</span>
+                        <span className="text-gray-600">{formatMargin(selected.margin)}</span>
                         <QuoteStatusBadge status={quote.status} />
                       </div>
                     );
@@ -181,77 +194,62 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="p-10 text-center">
-                  <p className="font-semibold tracking-tight">No quotes yet</p>
-                  <p className="mt-2 text-sm text-gray-500">
-                    Open a project, enter costs, and create a quote.
-                  </p>
+                  <p className="font-semibold tracking-tight">{t("emptyDashboardQuotes")}</p>
+                  <p className="mt-2 text-sm text-gray-500">{t("emptyQuotesHint")}</p>
+                  <Link
+                    href="/projects"
+                    className="mt-4 inline-block text-sm font-medium text-[var(--brand-accent)] hover:underline"
+                  >
+                    Go to projects →
+                  </Link>
                 </div>
               )}
             </div>
 
-            {/* Right column */}
             <div className="space-y-5">
-              {/* Project status breakdown */}
               <div className="rounded-lg border border-[#d9e2ec] bg-white p-5">
-                <h3 className="text-sm font-semibold tracking-tight">
-                  Projects by Status
-                </h3>
+                <h3 className="text-sm font-semibold tracking-tight">Projects by Status</h3>
                 <div className="mt-4 space-y-2">
-                  {(["Draft", "Pricing", "Quoted", "Won", "Lost", "Archived"] as const).map(
-                    (status) => {
-                      const count = statusCounts[status] ?? 0;
-                      const pct =
-                        projects.length > 0
-                          ? (count / projects.length) * 100
-                          : 0;
-                      return (
-                        <div key={status}>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-gray-600">{status}</span>
-                            <span className="font-medium text-black">
-                              {count}
-                            </span>
-                          </div>
-                          <div className="mt-1 h-1.5 w-full rounded-full bg-[#f0f4f8]">
-                            <div
-                              className="h-1.5 rounded-full bg-[#213343]"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
+                  {(["Draft", "Pricing", "Quoted", "Won", "Lost", "Archived"] as const).map((status) => {
+                    const count = statusCounts[status] ?? 0;
+                    const pct = projects.length > 0 ? (count / projects.length) * 100 : 0;
+                    return (
+                      <div key={status}>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">{status}</span>
+                          <span className="font-medium text-black">{count}</span>
                         </div>
-                      );
-                    }
-                  )}
+                        <div className="mt-1 h-1.5 w-full rounded-full bg-[#f0f4f8]">
+                          <div
+                            className="h-1.5 rounded-full bg-[var(--brand-navy)]"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Profit summary */}
               {quotes.length > 0 && (
                 <div className="rounded-lg border border-[#d9e2ec] bg-white p-5">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="h-4 w-4 text-gray-400" />
-                    <h3 className="text-sm font-semibold tracking-tight">
-                      Quote Averages
-                    </h3>
+                    <h3 className="text-sm font-semibold tracking-tight">Quote Averages</h3>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-gray-500">Avg Margin</p>
-                      <p className="mt-1 text-xl font-semibold">
-                        {formatMargin(avgMargin)}
-                      </p>
+                      <p className="mt-1 text-xl font-semibold">{formatMargin(avgMargin)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Avg Profit</p>
-                      <p className="mt-1 text-xl font-semibold">
-                        {formatMoney(avgProfit)}
-                      </p>
+                      <p className="mt-1 text-xl font-semibold">{formatMoney(avgProfit)}</p>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Nav shortcuts */}
               <div className="space-y-2">
                 {[
                   { title: "Projects", href: "/projects", desc: `${projects.length} total` },
@@ -264,9 +262,7 @@ export default function DashboardPage() {
                     className="flex items-center justify-between rounded-lg border border-[#d9e2ec] bg-white px-4 py-3 transition hover:border-[#b7c7d6] hover:bg-[#f6f8fb]"
                   >
                     <div>
-                      <p className="text-sm font-medium text-black">
-                        {item.title}
-                      </p>
+                      <p className="text-sm font-medium text-black">{item.title}</p>
                       <p className="text-xs text-gray-500">{item.desc}</p>
                     </div>
                     <ArrowRight className="h-4 w-4 text-gray-400" />
@@ -298,13 +294,9 @@ function MetricCard({
     <article
       className={`rounded-lg border p-5 sm:p-6 ${accent ? "border-[#111111] bg-[#111111] text-white" : "border-[#d9e2ec] bg-white"}`}
     >
-      <p className={`text-sm font-medium ${accent ? "text-white/70" : "text-gray-500"}`}>
-        {label}
-      </p>
+      <p className={`text-sm font-medium ${accent ? "text-white/70" : "text-gray-500"}`}>{label}</p>
       <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
-      <p className={`mt-2 text-sm ${accent ? "text-white/60" : "text-gray-500"}`}>
-        {detail}
-      </p>
+      <p className={`mt-2 text-sm ${accent ? "text-white/60" : "text-gray-500"}`}>{detail}</p>
       {badge ? (
         <p
           className={`mt-3 inline-flex rounded-md px-2 py-1 text-xs font-medium ${

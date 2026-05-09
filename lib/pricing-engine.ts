@@ -332,6 +332,18 @@ export function calculatePricingEngine(
   };
 }
 
+/**
+ * Retail (client) sale price from loaded job costs and a target **net margin on revenue**.
+ *
+ * Let F = fixedCostBeforeSaleBasedFees (direct job costs + burden + buffer + allocated overhead + permit buffer),
+ * m = targetMargin (decimal), and p = sum of sale-price-based deductions as decimals (tax, card, financing, commission %).
+ * With optional flat commission C added to the cost side:
+ *
+ *   salePrice = (F + C) / (1 - m - p)
+ *
+ * So (1 - m - p) of revenue covers F + C; the engine then sets commission/card/financing/tax as **percent of salePrice**,
+ * and reported **margin** = netProfit / salePrice after those amounts (should match m when minimum job price does not bind).
+ */
 function solveSalePrice({
   fixedCostBeforeSaleBasedFees,
   targetMargin,
@@ -371,6 +383,7 @@ function solveSalePrice({
     denominator > 0
       ? (fixedCostBeforeSaleBasedFees + flatCommission) / denominator
       : 0;
+  // denominator ≤ 0 means target margin + fee % ≥ 100% — price is undefined; UI should keep totals & toggles realistic
   const salePrice = enforceMinimumJobPrice
     ? Math.max(rawSalePrice, input.businessCosts.minimumJobPrice)
     : rawSalePrice;
@@ -467,6 +480,24 @@ function getWarnings({
     better.creditCardFeeCost + better.financingFeeCost + better.commissionCost;
 
   if (baseCost === 0) warnings.push("Base cost is 0.");
+  const betterDenomCheck =
+    1 -
+    better.finalMargin -
+    (input.businessCosts.includeCreditCardFee
+      ? percentToDecimal(input.businessCosts.creditCardFeePercent)
+      : 0) -
+    (input.businessCosts.includeFinancingFee
+      ? percentToDecimal(input.businessCosts.financingFeePercent)
+      : 0) -
+    (input.commission.includeCommission && input.commission.commissionType === "Percentage"
+      ? percentToDecimal(input.commission.commissionPercentage)
+      : 0) -
+    getTaxPercent(input);
+  if (betterDenomCheck <= 0 && baseCost > 0) {
+    warnings.push(
+      "Target margin plus tax/fees/commission reach or exceed 100% — sale price cannot be computed. Lower margins or fee rates."
+    );
+  }
   if (good.salePrice < minimumSafePrice) {
     warnings.push("Good price is below Minimum Safe Price.");
   }

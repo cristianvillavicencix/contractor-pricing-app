@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { FloatingCalculatorButton } from "@/components/floating-calculator-button";
+import { OnboardingGate } from "@/components/onboarding-gate";
+import { AppProviders } from "@/components/providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,11 +33,13 @@ export default function RootLayout({
           ${geistMono.variable}
           font-sans
           antialiased
-          bg-[#f5f8fa]
-          text-[#213343]
+          bg-[var(--page-bg)]
+          text-[var(--brand-navy)]
         `}
       >
-        {children}
+        <AppProviders>
+          <OnboardingGate>{children}</OnboardingGate>
+        </AppProviders>
         <FloatingCalculatorButton />
       </body>
     </html>

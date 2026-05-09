@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -12,7 +12,6 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
-  FileText,
   GripVertical,
   ImagePlus,
   Plus,
@@ -34,12 +33,22 @@ import {
   getEnabledCompanyCredentialDocuments,
   getEnabledCompanyCredentials,
   mergeAppSettings,
-  storageKeys,
   type AppSettings,
   type Project,
   type Quote,
 } from "@/lib/app-data";
-import { readLocalStorage, writeLocalStorage } from "@/lib/use-local-storage";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  getQuote,
+  getProposalTemplateForTrade,
+  listQuoteVersions,
+  loadCompanySettings,
+  saveQuoteVersion,
+  upsertProposalTemplate,
+  upsertQuote,
+  uploadImageViaApi,
+  getSignedUrlViaApi,
+} from "@/lib/supabase/data";
 import {
   mergeProposalTemplates,
   PROPOSAL_SECTIONS,
@@ -73,21 +82,15 @@ type QuoteVersionSnapshot = {
   sectionOrder: string[];
   customSections: CustomSection[];
 };
-type QuotePhotos = {
-  coverImageUrl: string | null;
-  existingPhotos: string[];
+type QuotePhotosFields = {
+  coverImagePath?: string | null;
+  existingPhotoPaths?: string[];
   existingPhotoCaptions?: string[];
   coverLayout?: CoverLayout;
 };
 
 const SERVICES_COLLAPSE_AT = 6;
-function quotePhotosKey(id: string) {
-  return `contractor-pricing-app:quote-photos:${id}`;
-}
-
-function quoteVersionsKey(id: string) {
-  return `contractor-pricing-app:quote-versions:${id}`;
-}
+// localStorage keys removed — this screen is Supabase-backed
 
 const COVER_LAYOUTS: { id: CoverLayout; label: string }[] = [
   { id: "full", label: "Full" },
@@ -99,37 +102,17 @@ const COVER_LAYOUTS: { id: CoverLayout; label: string }[] = [
 function QuotePreviewContent() {
   const searchParams = useSearchParams();
   const quoteId = searchParams.get("id");
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  /**
-   * This screen is driven by localStorage. During SSR, we don't have access to it.
-   * IMPORTANT: never return early before declaring the rest of the hooks in this file.
-   * We mount-gate by rendering a separate component instead.
-   */
-  if (!mounted) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-[#213343]">
-        <div className="text-center">
-          <p className="text-lg font-semibold">Loading…</p>
-          <p className="mt-2 text-sm text-gray-500">Preparing your quote preview.</p>
-        </div>
-      </div>
-    );
-  }
-
   return <QuotePreviewContentClient quoteId={quoteId} />;
 }
 
 function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
-  const quotes = readLocalStorage<Quote[]>(storageKeys.quotes, []);
-  const projects = readLocalStorage<Project[]>(storageKeys.projects, []);
-  const settings = mergeAppSettings(
-    readLocalStorage<AppSettings>(storageKeys.settings, defaultSettings)
-  );
-
-  const quote = quotes.find((q) => q.id === quoteId);
-  const project = projects.find((p) => p.id === quote?.projectId);
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [quote, setQuote] = useState<Quote | null | undefined>(undefined);
+  const [project, setProject] = useState<Project | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [quoteVersions, setQuoteVersions] = useState<QuoteVersionSnapshot[]>([]);
 
   // Cover/customer editable fields (stored on the quote)
   const [customerName, setCustomerName] = useState(quote?.customerName ?? "");
@@ -187,18 +170,11 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const [showVersions, setShowVersions] = useState(false);
   const [newService, setNewService] = useState("");
   const [newCert, setNewCert] = useState("");
-  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(() => {
-    if (!quoteId) return null;
-    return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), { coverImageUrl: null, existingPhotos: [] }).coverImageUrl;
-  });
+  const [coverImagePath, setCoverImagePath] = useState<string | null>(null);
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
+  const [existingPhotoPaths, setExistingPhotoPaths] = useState<string[]>([]);
   const [coverLayout, setCoverLayout] = useState<CoverLayout>(
-    () => {
-      if (!quoteId) return settings.branding.proposalCoverLayout;
-      return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), {
-        coverImageUrl: null,
-        existingPhotos: [],
-      }).coverLayout ?? settings.branding.proposalCoverLayout;
-    }
+    () => settings.branding.proposalCoverLayout
   );
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -209,6 +185,12 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const [dragOverSectionIndex, setDragOverSectionIndex] = useState<number | null>(null);
   const isInitialized = useRef(false);
 
+  // Proposal modal + photos + template editor
+  const [showProposalModal, setShowProposalModal] = useState(false);
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [existingPhotos, setExistingPhotos] = useState<string[]>([]);
+  const [existingPhotoCaptions, setExistingPhotoCaptions] = useState<string[]>([]);
+
   // Collapsible panel state
   const [showScope, setShowScope] = useState(false);
   const [showServices, setShowServices] = useState(true);
@@ -218,46 +200,107 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const [activeProposalSection, setActiveProposalSection] = useState<
     string | null
   >("cover");
-  const [quoteVersions, setQuoteVersions] = useState<QuoteVersionSnapshot[]>(
-    () => {
-      if (!quoteId) return [];
-      return readLocalStorage<QuoteVersionSnapshot[]>(
-        quoteVersionsKey(quoteId),
-        []
-      );
-    }
-  );
 
-  // Proposal modal + photos + template editor
-  const [showProposalModal, setShowProposalModal] = useState(false);
-  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
-  const [existingPhotos, setExistingPhotos] = useState<string[]>(() => {
-    if (!quoteId) return [];
-    return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), { coverImageUrl: null, existingPhotos: [] }).existingPhotos;
+  const [proposalTemplate, setProposalTemplate] = useState<ProposalTemplate>(() => {
+    const defaults = mergeProposalTemplates([]);
+    return defaults[0]!;
   });
-  const [existingPhotoCaptions, setExistingPhotoCaptions] = useState<string[]>(
-    () => {
-      if (!quoteId) return [];
-      return readLocalStorage<QuotePhotos>(quotePhotosKey(quoteId), {
-        coverImageUrl: null,
-        existingPhotos: [],
-      }).existingPhotoCaptions ?? [];
-    }
-  );
 
-  const [proposalTemplate, setProposalTemplate] = useState<ProposalTemplate>(
-    () => {
-      const savedTemplates = readLocalStorage<ProposalTemplate[]>(
-        storageKeys.proposalTemplates,
-        []
-      );
-      const proposalTemplates = mergeProposalTemplates(savedTemplates);
-      return (
-        proposalTemplates.find((template) => template.trade === quote?.trade) ??
-        proposalTemplates[0]
-      );
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!quoteId) return;
+      setIsLoading(true);
+      setLoadError(null);
+      try {
+        const [dbSettings, dbQuote] = await Promise.all([
+          loadCompanySettings<AppSettings>(supabase),
+          getQuote(supabase, quoteId),
+        ]);
+        if (cancelled) return;
+        const mergedSettings = mergeAppSettings(dbSettings ?? defaultSettings);
+        setSettings(mergedSettings);
+
+        let quoteForSession = dbQuote;
+        if (dbQuote && !dbQuote.clientPortalToken) {
+          const withToken = { ...dbQuote, clientPortalToken: crypto.randomUUID() };
+          await upsertQuote(supabase, withToken);
+          quoteForSession = withToken;
+        }
+        setQuote(quoteForSession);
+        setProject(undefined);
+
+        const qWithPhotos = quoteForSession as (Quote & QuotePhotosFields) | null;
+        setCoverLayout(qWithPhotos?.coverLayout ?? mergedSettings.branding.proposalCoverLayout);
+        setCoverImagePath(qWithPhotos?.coverImagePath ?? null);
+        setExistingPhotoPaths(qWithPhotos?.existingPhotoPaths ?? []);
+        setExistingPhotoCaptions(qWithPhotos?.existingPhotoCaptions ?? []);
+
+        // Signed URLs for preview
+        const coverPath = qWithPhotos?.coverImagePath ?? undefined;
+        if (coverPath) {
+          getSignedUrlViaApi({ bucket: "proposal-photos", path: coverPath })
+            .then((url) => setCoverImageUrl(url))
+            .catch(() => setCoverImageUrl(null));
+        } else {
+          setCoverImageUrl(null);
+        }
+
+        const paths = qWithPhotos?.existingPhotoPaths ?? [];
+        if (paths.length) {
+          Promise.all(
+            paths.map((p) =>
+              getSignedUrlViaApi({ bucket: "proposal-photos", path: p }).catch(() => "")
+            )
+          ).then((urls) => setExistingPhotos(urls.filter(Boolean)));
+        } else {
+          setExistingPhotos([]);
+        }
+
+        // Template for this trade
+        const dbTemplate = await getProposalTemplateForTrade(supabase, quoteForSession?.trade);
+        const defaults = mergeProposalTemplates([]);
+        setProposalTemplate(
+          dbTemplate ??
+            defaults.find((t) => t.trade === quoteForSession?.trade) ??
+            defaults[0]
+        );
+
+        const versions = await listQuoteVersions(supabase, quoteId);
+        if (!cancelled) {
+          setQuoteVersions(
+            versions.map((v) => {
+              const snap = v.snapshot as Record<string, unknown> | null | undefined;
+              return {
+                id: v.id,
+                savedAt: v.savedAt,
+                proposalNumber: snap?.proposalNumber as string | undefined,
+                scopeSummary: (snap?.scopeSummary as string) ?? "",
+                warrantyText: (snap?.warrantyText as string) ?? "",
+                termsText: (snap?.termsText as string) ?? "",
+                includedServices: (snap?.includedServices as string[]) ?? [],
+                certifications: (snap?.certifications as string[]) ?? [],
+                pricingDescriptions:
+                  (snap?.pricingDescriptions as QuoteVersionSnapshot["pricingDescriptions"]) ?? {},
+                sectionOverrides: (snap?.sectionOverrides as SectionOverrides) ?? {},
+                sectionLayouts: (snap?.sectionLayouts as SectionLayouts) ?? {},
+                sectionOrder: (snap?.sectionOrder as string[]) ?? [],
+                customSections: (snap?.customSections as CustomSection[]) ?? [],
+              };
+            })
+          );
+        }
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to load quote");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
     }
-  );
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteId, supabase]);
 
   const photoUploadRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -265,31 +308,30 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const elegantContactPhotoInputRef = useRef<HTMLInputElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
 
-  if (!quote) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
-        <div className="text-center">
-          <p className="text-lg font-semibold">Quote not found</p>
-          <Link href="/quotes" className="mt-3 block text-sm text-[#ff5c35] underline">
-            Back to Quotes
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const blockingState = loadError
+    ? ("error" as const)
+    : quote === undefined || isLoading
+      ? ("loading" as const)
+      : !quote
+        ? ("notFound" as const)
+        : null;
 
-  const quoteForDoc: Quote = {
-    ...quote,
-    customerName,
-    customerAddress,
-    customerPhone,
-    customerEmail,
-    projectName,
-    selectedOption,
-  };
+  const quoteForDoc: Quote | null =
+    quote && !blockingState
+      ? {
+          ...quote,
+          customerName,
+          customerAddress,
+          customerPhone,
+          customerEmail,
+          projectName,
+          selectedOption,
+        }
+      : null;
 
-  const doc: QuoteDocument = {
-    ...buildQuoteDocument(quoteForDoc, project, settings, proposalTemplate),
+  const doc: QuoteDocument | null = quoteForDoc
+    ? {
+        ...buildQuoteDocument(quoteForDoc, project, settings, proposalTemplate),
     scopeSummary: scope,
     warrantyText: warranty,
     termsText: terms,
@@ -309,35 +351,43 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
           )
         )
       : [],
-  };
+      }
+    : null;
   const mergedProfile = mergeAppSettings(settings).companyProfile;
   const elegantPriceAuto = formatMoney(
-    selectedOption === "Good"
-      ? quote.good.salePrice
-      : selectedOption === "Better"
-        ? quote.better.salePrice
-        : quote.best.salePrice
+    quote
+      ? selectedOption === "Good"
+        ? quote.good.salePrice
+        : selectedOption === "Better"
+          ? quote.better.salePrice
+          : quote.best.salePrice
+      : 0
   );
-  const proposalQuote: Quote = {
-    ...quoteForDoc,
-    good: { ...quote.good, description: pricingDescriptions.Good },
-    better: { ...quote.better, description: pricingDescriptions.Better },
-    best: { ...quote.best, description: pricingDescriptions.Best },
-    scopeSummary: scope,
-    warrantyText: warranty,
-    termsText: terms,
-    includedServices: services.filter((s) => s.visible).map((s) => s.name),
-    certifications: certs.filter((c) => c.visible).map((c) => c.name),
-    sectionOverrides,
-    sectionLayouts,
-    sectionOrder,
-    customSections,
-    selectedOption,
-  };
+  const proposalQuote: Quote | null =
+    quote && quoteForDoc
+      ? {
+          ...quoteForDoc,
+          good: { ...quote.good, description: pricingDescriptions.Good },
+          better: { ...quote.better, description: pricingDescriptions.Better },
+          best: { ...quote.best, description: pricingDescriptions.Best },
+          scopeSummary: scope,
+          warrantyText: warranty,
+          termsText: terms,
+          includedServices: services.filter((s) => s.visible).map((s) => s.name),
+          certifications: certs.filter((c) => c.visible).map((c) => c.name),
+          sectionOverrides,
+          sectionLayouts,
+          sectionOrder,
+          customSections,
+          selectedOption,
+        }
+      : null;
 
-  const tradeSuggestions = (settings.contentDefaults.tradeServices[doc.trade] ?? doc.tradeServiceSuggestions ?? []).filter(
-    (s) => !services.some((item) => item.name === s)
-  );
+  const tradeSuggestions = doc
+    ? (settings.contentDefaults.tradeServices[doc.trade] ?? doc.tradeServiceSuggestions ?? []).filter(
+        (s) => !services.some((item) => item.name === s)
+      )
+    : [];
 
   useEffect(() => {
     if (!activeProposalSection) return;
@@ -377,62 +427,79 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
 
   function saveProposal({ manual }: { manual: boolean }) {
     if (!quote) return;
-    const all = readLocalStorage<Quote[]>(storageKeys.quotes, []);
-    const updated = all.map((q) =>
-      q.id === quote.id
-        ? {
-            ...q,
-           customerName,
-           customerAddress,
-           customerPhone,
-           customerEmail,
-           projectName,
-           selectedOption,
-            good: { ...q.good, description: pricingDescriptions.Good },
-            better: { ...q.better, description: pricingDescriptions.Better },
-            best: { ...q.best, description: pricingDescriptions.Best },
-            scopeSummary: scope,
-            warrantyText: warranty,
-            termsText: terms,
-            includedServices: services.filter((s) => s.visible).map((s) => s.name),
-            certifications: certs.filter((c) => c.visible).map((c) => c.name),
-            sectionOverrides,
-            sectionLayouts,
-            sectionOrder,
-            customSections,
-          }
-        : q
-    );
-    writeLocalStorage(storageKeys.quotes, updated);
-    // Persist photos separately (base64 can be large — keep out of main quotes array)
-    writeLocalStorage<QuotePhotos>(quotePhotosKey(quote.id), {
-      coverImageUrl: coverImageUrl ?? null,
-      existingPhotos,
+    const nextQuote: Quote & {
+      coverImagePath?: string | null;
+      existingPhotoPaths?: string[];
+      existingPhotoCaptions?: string[];
+      coverLayout?: CoverLayout;
+    } = {
+      ...quote,
+      customerName,
+      customerAddress,
+      customerPhone,
+      customerEmail,
+      projectName,
+      selectedOption,
+      good: { ...quote.good, description: pricingDescriptions.Good },
+      better: { ...quote.better, description: pricingDescriptions.Better },
+      best: { ...quote.best, description: pricingDescriptions.Best },
+      scopeSummary: scope,
+      warrantyText: warranty,
+      termsText: terms,
+      includedServices: services.filter((s) => s.visible).map((s) => s.name),
+      certifications: certs.filter((c) => c.visible).map((c) => c.name),
+      sectionOverrides,
+      sectionLayouts,
+      sectionOrder,
+      customSections,
+      coverImagePath,
+      existingPhotoPaths,
       existingPhotoCaptions,
       coverLayout,
-    });
-    persistTemplate(proposalTemplate);
+    };
+
+    upsertQuote(supabase, nextQuote).catch(() => undefined);
+    setQuote(nextQuote);
+    upsertProposalTemplate(supabase, proposalTemplate).catch(() => undefined);
     if (manual) {
-      const nextVersions = [
-        {
-          id: crypto.randomUUID(),
-          savedAt: new Date().toISOString(),
-          proposalNumber: quote.proposalNumber,
-          scopeSummary: scope,
-          warrantyText: warranty,
-          termsText: terms,
-          includedServices: services.filter((s) => s.visible).map((s) => s.name),
-          certifications: certs.filter((c) => c.visible).map((c) => c.name),
-          pricingDescriptions,
-          sectionOverrides,
-          sectionLayouts,
-          sectionOrder,
-          customSections,
-        },
-        ...quoteVersions,
-      ].slice(0, 10);
-      writeLocalStorage(quoteVersionsKey(quote.id), nextVersions);
-      setQuoteVersions(nextVersions);
+      saveQuoteVersion(supabase, quote.id, {
+        proposalNumber: quote.proposalNumber,
+        scopeSummary: scope,
+        warrantyText: warranty,
+        termsText: terms,
+        includedServices: services.filter((s) => s.visible).map((s) => s.name),
+        certifications: certs.filter((c) => c.visible).map((c) => c.name),
+        pricingDescriptions,
+        sectionOverrides,
+        sectionLayouts,
+        sectionOrder,
+        customSections,
+      })
+        .then(async () => {
+          const versions = await listQuoteVersions(supabase, quote.id);
+          setQuoteVersions(
+            versions.map((v) => {
+              const snap = v.snapshot as Record<string, unknown> | null | undefined;
+              return {
+                id: v.id,
+                savedAt: v.savedAt,
+                proposalNumber: snap?.proposalNumber as string | undefined,
+                scopeSummary: (snap?.scopeSummary as string) ?? "",
+                warrantyText: (snap?.warrantyText as string) ?? "",
+                termsText: (snap?.termsText as string) ?? "",
+                includedServices: (snap?.includedServices as string[]) ?? [],
+                certifications: (snap?.certifications as string[]) ?? [],
+                pricingDescriptions:
+                  (snap?.pricingDescriptions as QuoteVersionSnapshot["pricingDescriptions"]) ?? {},
+                sectionOverrides: (snap?.sectionOverrides as SectionOverrides) ?? {},
+                sectionLayouts: (snap?.sectionLayouts as SectionLayouts) ?? {},
+                sectionOrder: (snap?.sectionOrder as string[]) ?? [],
+                customSections: (snap?.customSections as CustomSection[]) ?? [],
+              };
+            })
+          );
+        })
+        .catch(() => undefined);
     }
     setIsDirty(false);
     setIsSaved(true);
@@ -462,20 +529,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     try {
       saveProposal({ manual: false });
 
-      const storage: Record<string, string> = {};
-      for (const key of Object.values(storageKeys)) {
-        const value = window.localStorage.getItem(key);
-        if (value) storage[key] = value;
-      }
-      if (quote.id) {
-        const photosValue = window.localStorage.getItem(quotePhotosKey(quote.id));
-        if (photosValue) storage[quotePhotosKey(quote.id)] = photosValue;
-      }
-
       const response = await fetch("/api/proposals/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quoteId: quote.id, storage }),
+        body: JSON.stringify({ quoteId: quote.id }),
       });
 
       if (!response.ok) {
@@ -486,12 +543,20 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${doc.proposalNumber || "proposal"}.pdf`;
+      anchor.download = `${doc?.proposalNumber || "proposal"}.pdf`;
       anchor.click();
       URL.revokeObjectURL(url);
     } finally {
       setIsDownloading(false);
     }
+  }
+
+  function handlePrint() {
+    // Print should use the same paginated layout the user sees in the live A4 preview.
+    // Opening the full preview modal ensures the preview is visible and sized correctly.
+    setShowProposalModal(true);
+    // Give React a moment to mount the modal before opening the print dialog.
+    window.setTimeout(() => window.print(), 250);
   }
 
   function handleCoverUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -504,9 +569,23 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       return;
     }
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       const result = ev.target?.result;
-      if (typeof result === "string") setCoverImageUrl(result);
+      if (typeof result !== "string") return;
+      try {
+        const name = `${quoteId ?? "quote"}/cover-${crypto.randomUUID()}.jpg`;
+        const { path } = await uploadImageViaApi({
+          bucket: "proposal-photos",
+          fileName: name,
+          contentType: file.type || "image/jpeg",
+          dataUrl: result,
+        });
+        const signed = await getSignedUrlViaApi({ bucket: "proposal-photos", path });
+        setCoverImagePath(path);
+        setCoverImageUrl(signed);
+      } catch {
+        // ignore
+      }
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -548,11 +627,23 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     }
     files.filter((f) => f.size <= MAX_BYTES).forEach((file) => {
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = async (ev) => {
         const result = ev.target?.result;
-        if (typeof result === "string") {
-          setExistingPhotos((prev) => [...prev, result]);
+        if (typeof result !== "string") return;
+        try {
+          const name = `${quoteId ?? "quote"}/existing-${crypto.randomUUID()}.jpg`;
+          const { path } = await uploadImageViaApi({
+            bucket: "proposal-photos",
+            fileName: name,
+            contentType: file.type || "image/jpeg",
+            dataUrl: result,
+          });
+          const signed = await getSignedUrlViaApi({ bucket: "proposal-photos", path });
+          setExistingPhotoPaths((prev) => [...prev, path]);
+          setExistingPhotos((prev) => [...prev, signed]);
           setExistingPhotoCaptions((prev) => [...prev, ""]);
+        } catch {
+          // ignore
         }
       };
       reader.readAsDataURL(file);
@@ -562,15 +653,8 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
 
   function handleTemplateSave(updated: ProposalTemplate) {
     setProposalTemplate(updated);
-    persistTemplate(updated);
+    upsertProposalTemplate(supabase, updated).catch(() => undefined);
     setShowTemplateEditor(false);
-  }
-
-  function persistTemplate(updated: ProposalTemplate) {
-    const all = readLocalStorage<ProposalTemplate[]>(storageKeys.proposalTemplates, []);
-    const idx = all.findIndex((t) => t.id === updated.id);
-    const next = idx >= 0 ? all.map((t, i) => (i === idx ? updated : t)) : [...all, updated];
-    writeLocalStorage(storageKeys.proposalTemplates, next);
   }
 
   function updateTemplate<K extends keyof ProposalTemplate>(
@@ -713,18 +797,20 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const visibleSectionCount = sectionOrder.filter((sectionId) =>
     isSectionVisible(sectionId)
   ).length;
-  const healthItems = getProposalHealthItems({
-    quote,
-    coverImageUrl,
-    scope,
-    warranty,
-    terms,
-    services,
-    existingPhotos,
-    existingPhotoCaptions,
-    sectionOrder,
-    isSectionVisible,
-  });
+  const healthItems = quote
+    ? getProposalHealthItems({
+        quote,
+        coverImageUrl,
+        scope,
+        warranty,
+        terms,
+        services,
+        existingPhotos,
+        existingPhotoCaptions,
+        sectionOrder,
+        isSectionVisible,
+      })
+    : [];
   const unresolvedHealthItems = healthItems.filter((item) => !item.ok);
   const proposalHealth =
     unresolvedHealthItems.length === 0
@@ -733,7 +819,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         ? "Needs review"
         : "Needs work";
   const pagedRenderKey = JSON.stringify({
-    quoteId: quote.id,
+    quoteId: quote?.id ?? "",
     scope,
     warranty,
     terms,
@@ -750,6 +836,43 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     coverLayout,
     proposalTemplate,
   });
+
+  if (blockingState === "error") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[#b42318]">Failed to load quote</p>
+          <p className="mt-2 text-sm text-gray-500">{loadError}</p>
+          <Link href="/quotes" className="mt-3 block text-sm text-[#ff5c35] underline">
+            Back to Quotes
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  if (blockingState === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+        Loading quote…
+      </div>
+    );
+  }
+  if (blockingState === "notFound") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
+        <div className="text-center">
+          <p className="text-lg font-semibold">Quote not found</p>
+          <Link href="/quotes" className="mt-3 block text-sm text-[#ff5c35] underline">
+            Back to Quotes
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!quote || !proposalQuote || !doc) {
+    return null;
+  }
 
   return (
     <div className="h-screen overflow-hidden bg-[#f5f8fa] text-[#213343]">
@@ -786,14 +909,6 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               </span>
             </button>
             <button
-              onClick={() => setShowProposalModal(true)}
-              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              title="View full proposal document"
-            >
-              <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">Preview Proposal</span>
-            </button>
-            <button
               onClick={() => setShowTemplateEditor(true)}
               className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
               title="Edit proposal template"
@@ -801,20 +916,8 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               <Edit3 className="h-4 w-4" />
               <span className="hidden sm:inline">Edit Template</span>
             </button>
-            {quote.id && (
-              <Link
-                href={`/proposal/${quote.id}/accept`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-md border border-[#ff5c35] px-4 py-2 text-sm font-medium text-[#ff5c35] transition hover:bg-[#fff1ea]"
-                title="Open client acceptance portal"
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span className="hidden sm:inline">Client Portal</span>
-              </Link>
-            )}
             <button
-              onClick={() => window.print()}
+              onClick={handlePrint}
               className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
             >
               <Printer className="h-4 w-4" />
@@ -1859,10 +1962,15 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                       </div>
 
                       <Link
-                        href={`/proposal/${quote.id}/accept`}
+                        href={
+                          quote.clientPortalToken
+                            ? `/proposal/${quote.id}/accept?t=${encodeURIComponent(quote.clientPortalToken)}`
+                            : `/proposal/${quote.id}/accept`
+                        }
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 rounded border border-[#ff5c35] px-3 py-2 text-xs font-medium text-[#ff5c35] transition hover:bg-[#fff1ea]"
+                        className={`flex items-center justify-center gap-2 rounded border border-[#ff5c35] px-3 py-2 text-xs font-medium text-[#ff5c35] transition hover:bg-[#fff1ea] ${!quote.clientPortalToken ? "pointer-events-none opacity-50" : ""}`}
+                        aria-disabled={!quote.clientPortalToken}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         Open Client Portal

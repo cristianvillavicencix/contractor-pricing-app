@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   BriefcaseBusiness,
@@ -12,7 +13,9 @@ import {
   Settings,
   Users,
 } from "lucide-react";
-import { useLocalStorageState } from "@/lib/use-local-storage";
+import { defaultSettings, mergeAppSettings, type AppSettings } from "@/lib/app-data";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { loadCompanySettings, saveCompanySettings } from "@/lib/supabase/data";
 
 const sidebarItems = [
   { name: "Dashboard", href: "/", icon: BarChart3 },
@@ -27,39 +30,84 @@ const allMobileItems = [...sidebarItems, settingsItem];
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const [isCollapsed, setIsCollapsed] = useLocalStorageState(
-    "contractor-pricing-app:sidebar-collapsed",
-    false
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await loadCompanySettings<AppSettings | null>(supabase);
+        if (cancelled) return;
+        const merged = mergeAppSettings(raw ?? defaultSettings);
+        setIsCollapsed(Boolean(merged.appPreferences.sidebarCollapsed));
+      } catch {
+        /* unauthenticated or network */
+      } finally {
+        if (!cancelled) setPrefsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  const persistCollapsed = useCallback(
+    async (next: boolean) => {
+      try {
+        const raw = await loadCompanySettings<AppSettings | null>(supabase);
+        const base = mergeAppSettings(raw ?? defaultSettings);
+        await saveCompanySettings(supabase, {
+          ...base,
+          appPreferences: { ...base.appPreferences, sidebarCollapsed: next },
+        });
+      } catch {
+        /* non-fatal */
+      }
+    },
+    [supabase]
   );
+
+  function toggleCollapsed() {
+    setIsCollapsed((c) => {
+      const next = !c;
+      void persistCollapsed(next);
+      return next;
+    });
+  }
 
   function isActive(href: string) {
     return href === "/" ? pathname === "/" : pathname.startsWith(href);
   }
+
+  // Avoid layout jump: keep default expanded until prefs load (usually instant).
+  const collapsed = prefsLoaded ? isCollapsed : false;
 
   return (
     <>
       {/* ── Desktop sidebar (lg+) ── */}
       <aside
         className={`hidden flex-none border-r border-[#d9e2ec] bg-white transition-all duration-200 lg:flex lg:h-screen lg:flex-col lg:overflow-hidden lg:sticky lg:top-0 ${
-          isCollapsed ? "lg:w-20 lg:p-4" : "lg:w-64 lg:p-6"
+          collapsed ? "lg:w-20 lg:p-4" : "lg:w-64 lg:p-6"
         }`}
       >
         <div
           className={`flex gap-3 ${
-            isCollapsed ? "flex-col items-center" : "items-center justify-between"
+            collapsed ? "flex-col items-center" : "items-center justify-between"
           }`}
         >
           <Link
             href="/"
             className={`flex min-w-0 items-center gap-3 ${
-              isCollapsed ? "flex-col justify-center gap-0" : ""
+              collapsed ? "flex-col justify-center gap-0" : ""
             }`}
             aria-label="Pricing App dashboard"
           >
             <div className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-[#ff5c35] text-sm font-semibold text-white">
               PA
             </div>
-            <div className={`min-w-0 ${isCollapsed ? "hidden" : ""}`}>
+            <div className={`min-w-0 ${collapsed ? "hidden" : ""}`}>
               <h1 className="truncate text-lg font-semibold tracking-tight text-[#213343]">
                 Pricing App
               </h1>
@@ -70,13 +118,14 @@ export function AppSidebar() {
           </Link>
 
           <button
-            onClick={() => setIsCollapsed((c) => !c)}
+            type="button"
+            onClick={toggleCollapsed}
             className={`flex flex-none items-center justify-center border border-[#d9e2ec] text-[#516f90] transition hover:bg-[#f6f8fb] hover:text-[#213343] ${
-              isCollapsed ? "mt-3 h-8 w-8 rounded-md" : "h-9 w-9 rounded-md"
+              collapsed ? "mt-3 h-8 w-8 rounded-md" : "h-9 w-9 rounded-md"
             }`}
-            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {isCollapsed ? (
+            {collapsed ? (
               <ChevronRight className="h-4 w-4" />
             ) : (
               <ChevronLeft className="h-4 w-4" />
@@ -86,7 +135,7 @@ export function AppSidebar() {
 
         <nav
           className={`mt-8 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden gap-1 ${
-            isCollapsed ? "mt-10 gap-3" : ""
+            collapsed ? "mt-10 gap-3" : ""
           }`}
         >
           <div className="space-y-1">
@@ -95,7 +144,7 @@ export function AppSidebar() {
                 key={item.name}
                 item={item}
                 active={isActive(item.href)}
-                collapsed={isCollapsed}
+                collapsed={collapsed}
               />
             ))}
           </div>
@@ -103,7 +152,7 @@ export function AppSidebar() {
             <DesktopLink
               item={settingsItem}
               active={isActive(settingsItem.href)}
-              collapsed={isCollapsed}
+              collapsed={collapsed}
             />
           </div>
         </nav>
@@ -147,9 +196,7 @@ function DesktopLink({
       href={item.href}
       title={collapsed ? item.name : undefined}
       className={`flex w-full items-center rounded-md text-sm transition ${
-        collapsed
-          ? "justify-center px-0 py-3"
-          : "gap-3 px-4 py-3"
+        collapsed ? "justify-center px-0 py-3" : "gap-3 px-4 py-3"
       } ${
         active
           ? "bg-[#fff1ea] font-medium text-[#213343]"

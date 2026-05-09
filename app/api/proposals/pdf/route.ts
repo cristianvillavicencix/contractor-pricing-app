@@ -6,7 +6,6 @@ export const dynamic = "force-dynamic";
 
 type PdfRequestBody = {
   quoteId?: string;
-  storage?: Record<string, string>;
 };
 
 export async function POST(request: NextRequest) {
@@ -27,11 +26,18 @@ export async function POST(request: NextRequest) {
     /* Use print CSS from first paint so Paged.js + @page margins match the PDF engine */
     await page.emulateMedia({ media: "print" });
 
-    await page.addInitScript((storage) => {
-      for (const [key, value] of Object.entries(storage ?? {})) {
-        window.localStorage.setItem(key, value as string);
-      }
-    }, body.storage ?? {});
+    // Forward auth cookies so the print page can load data from Supabase (RLS-protected).
+    const cookies = request.cookies.getAll();
+    if (cookies.length > 0) {
+      await page.context().addCookies(
+        cookies.map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: new URL(origin).hostname,
+          path: "/",
+        }))
+      );
+    }
 
     await page.goto(`${origin}/proposal/${quoteId}/print`, {
       waitUntil: "networkidle",

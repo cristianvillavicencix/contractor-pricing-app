@@ -5,32 +5,25 @@ import { useParams } from "next/navigation";
 import {
   defaultSettings,
   mergeAppSettings,
-  storageKeys,
   type AppSettings,
-  type Project,
   type Quote,
 } from "@/lib/app-data";
 import {
   mergeProposalTemplates,
   type ProposalTemplate,
 } from "@/lib/proposal-templates";
-import { readLocalStorage } from "@/lib/use-local-storage";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  getQuote,
+  getProposalTemplateForTrade,
+  getSignedUrlViaApi,
+  loadCompanySettings,
+} from "@/lib/supabase/data";
 import { ProposalDocument } from "@/components/proposals/proposal-document";
 import { PagedProposalPreview } from "@/components/proposals/paged-proposal-preview";
 import type { CoverLayout } from "@/lib/pdf-generator";
 
-type QuotePhotos = {
-  coverImageUrl: string | null;
-  existingPhotos: string[];
-  existingPhotoCaptions?: string[];
-  coverLayout?: CoverLayout;
-};
-
 type PrintWindow = Window & { __PAGED_READY?: boolean; __PAGED_PAGE_COUNT?: number };
-
-function quotePhotosKey(id: string) {
-  return `contractor-pricing-app:quote-photos:${id}`;
-}
 
 export default function ProposalPrintPage() {
   const { id } = useParams<{ id: string }>();
@@ -45,30 +38,73 @@ export default function ProposalPrintPage() {
   useEffect(() => {
     (window as PrintWindow).__PAGED_READY = false;
 
-    const quotes = readLocalStorage<Quote[]>(storageKeys.quotes, []);
-    const found = quotes.find((item) => item.id === id) ?? null;
-    setQuote(found);
+    const supabase = createSupabaseBrowserClient();
+    let cancelled = false;
+    async function load() {
+      setQuote(undefined);
+      try {
+        const [dbQuote, dbSettings, dbTemplate] = await Promise.all([
+          getQuote(supabase, id),
+          loadCompanySettings<AppSettings>(supabase),
+          (async () => {
+            const q = await getQuote(supabase, id);
+            return getProposalTemplateForTrade(supabase, q?.trade);
+          })(),
+        ]);
+        if (cancelled) return;
 
-    const mergedSettings = mergeAppSettings(
-      readLocalStorage<AppSettings>(storageKeys.settings, defaultSettings)
-    );
-    setSettings(mergedSettings);
+        const mergedSettings = mergeAppSettings(dbSettings ?? defaultSettings);
+        setSettings(mergedSettings);
+        setQuote(dbQuote);
 
-    const savedTemplates = readLocalStorage<ProposalTemplate[]>(
-      storageKeys.proposalTemplates,
-      []
-    );
-    const templates = mergeProposalTemplates(savedTemplates);
-    setTemplate(templates.find((item) => item.trade === found?.trade) ?? templates[0]);
+        // If no template saved yet, fall back to defaults in code.
+        const defaultTemplates = mergeProposalTemplates([]);
+        setTemplate(
+          dbTemplate ??
+            defaultTemplates.find((t) => t.trade === dbQuote?.trade) ??
+            defaultTemplates[0] ??
+            null
+        );
 
-    const photos = readLocalStorage<QuotePhotos>(quotePhotosKey(id), {
-      coverImageUrl: null,
-      existingPhotos: [],
-    });
-    setCoverPhotoUrl(photos.coverImageUrl);
-    setCoverLayout(photos.coverLayout ?? mergedSettings.branding.proposalCoverLayout);
-    setExistingPhotos(photos.existingPhotos);
-    setExistingPhotoCaptions(photos.existingPhotoCaptions ?? []);
+        const coverPath = dbQuote?.coverImagePath ?? null;
+        const paths = dbQuote?.existingPhotoPaths ?? [];
+        const caps = dbQuote?.existingPhotoCaptions ?? [];
+        setCoverLayout(dbQuote?.coverLayout ?? mergedSettings.branding.proposalCoverLayout);
+        setExistingPhotoCaptions(caps);
+
+        if (coverPath) {
+          getSignedUrlViaApi({ bucket: "proposal-photos", path: coverPath })
+            .then((url) => {
+              if (!cancelled) setCoverPhotoUrl(url);
+            })
+            .catch(() => {
+              if (!cancelled) setCoverPhotoUrl(null);
+            });
+        } else {
+          setCoverPhotoUrl(null);
+        }
+
+        if (paths.length) {
+          Promise.all(paths.map((p) => getSignedUrlViaApi({ bucket: "proposal-photos", path: p }).catch(() => "")))
+            .then((urls) => {
+              if (!cancelled) setExistingPhotos(urls.filter(Boolean));
+            })
+            .catch(() => {
+              if (!cancelled) setExistingPhotos([]);
+            });
+        } else {
+          setExistingPhotos([]);
+        }
+      } catch {
+        if (cancelled) return;
+        setQuote(null);
+        setTemplate(null);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (quote === undefined) {
@@ -85,7 +121,7 @@ export default function ProposalPrintPage() {
         <div className="text-center">
           <p className="text-lg font-semibold text-[#213343]">Proposal not found</p>
           <p className="mt-2 text-sm text-gray-500">
-            This proposal is not available in local storage.
+            This proposal is not available.
           </p>
         </div>
       </main>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, ChevronDown, ChevronUp, FolderPlus, RotateCcw, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
@@ -10,13 +10,11 @@ import {
   formatMoney,
   getTodayLabel,
   initialContacts,
-  initialProjects,
   companyLevelOptions,
   mergeAppSettings,
   projectSizeOptions,
   riskLevelOptions,
   stateOptions,
-  storageKeys,
   strategyOptions,
   tradeOptions,
   TYPICAL_COSTS,
@@ -36,11 +34,14 @@ import {
   type PricingEngineInput,
   type PricingEngineOption,
 } from "@/lib/pricing-engine";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
-  readLocalStorage,
-  useLocalStorageState,
-  writeLocalStorage,
-} from "@/lib/use-local-storage";
+  listContacts,
+  listProjects,
+  loadCompanySettings,
+  upsertContact,
+  upsertProject,
+} from "@/lib/supabase/data";
 
 const STATE_ABBR: Record<string, string> = {
   Alabama: "AL", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO",
@@ -219,33 +220,64 @@ const emptyDraft: ProjectDraft = {
   city: "",
 };
 
-export default function PricingPage() {
+function PricingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectIdFromUrl = searchParams.get("projectId");
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showModalConfirm, setShowModalConfirm] = useState(false);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyDraft);
   const [projectError, setProjectError] = useState("");
-  const [settings] = useLocalStorageState<AppSettings>(
-    storageKeys.settings,
-    defaultSettings
-  );
-  const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
-  const [contacts, setContacts] = useLocalStorageState<Contact[]>(
-    storageKeys.contacts,
-    initialContacts
-  );
-  const [sourceProject, setSourceProject] = useState<Project | null>(() => {
-    const savedProjects = readLocalStorage<Project[]>(storageKeys.projects, initialProjects);
-    const projectId = readLocalStorage<string | null>(storageKeys.projectForPricing, null);
-    return savedProjects.find((p) => p.id === projectId) ?? null;
-  });
-  const [input, setInput] = useState<PricingEngineInput>(() => {
-    const savedProjects = readLocalStorage<Project[]>(storageKeys.projects, initialProjects);
-    const projectId = readLocalStorage<string | null>(storageKeys.projectForPricing, null);
-    const project = savedProjects.find((p) => p.id === projectId);
-    return createInputFromSettings(settings, project);
-  });
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [contacts, setContacts] = useState<Contact[]>(initialContacts);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [dataReady, setDataReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sourceProject, setSourceProject] = useState<Project | null>(null);
+  const [input, setInput] = useState<PricingEngineInput>(defaultInput);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoadError(null);
+      try {
+        const [rawSettings, dbContacts, dbProjects] = await Promise.all([
+          loadCompanySettings<AppSettings | null>(supabase),
+          listContacts(supabase),
+          listProjects(supabase),
+        ]);
+        if (cancelled) return;
+        const merged = mergeAppSettings(rawSettings ?? defaultSettings);
+        setSettings(merged);
+        setContacts(dbContacts.length ? dbContacts : initialContacts);
+        setProjects(dbProjects);
+        setDataReady(true);
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(e instanceof Error ? e.message : "Failed to load pricing data");
+          setDataReady(true);
+        }
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!dataReady || loadError) return;
+    const proj = projectIdFromUrl ? projects.find((p) => p.id === projectIdFromUrl) ?? null : null;
+    /* eslint-disable react-hooks/set-state-in-effect -- derive calculator input when URL / settings load */
+    setSourceProject(proj);
+    setInput(createInputFromSettings(mergedSettings, proj));
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [dataReady, loadError, projectIdFromUrl, projects, mergedSettings]);
 
   const result = useMemo(() => calculatePricingEngine(input), [input]);
   const baseCost = result.baseCost;
@@ -283,7 +315,7 @@ export default function PricingPage() {
   function reset() {
     setInput(createInputFromSettings(mergedSettings));
     setSourceProject(null);
-    writeLocalStorage(storageKeys.projectForPricing, null);
+    router.replace("/pricing");
   }
 
   function saveProject() {
@@ -311,7 +343,6 @@ export default function PricingPage() {
         notes: "",
         customerType: "Homeowner",
       });
-    const existing = readLocalStorage<Project[]>(storageKeys.projects, initialProjects);
     const newProject: Project = {
       id: crypto.randomUUID(),
       projectName: projectDraft.projectName.trim(),
@@ -339,7 +370,9 @@ export default function PricingPage() {
       },
       createdAt: getTodayLabel(),
     };
-    writeLocalStorage(storageKeys.projects, [newProject, ...existing]);
+    setProjects((prev) => [newProject, ...prev]);
+    upsertContact(supabase, contact).catch(() => undefined);
+    upsertProject(supabase, newProject).catch(() => undefined);
     closeModal();
     router.push(`/projects?projectId=${newProject.id}`);
   }
@@ -351,6 +384,7 @@ export default function PricingPage() {
       createdAt: getTodayLabel(),
     };
     setContacts((current) => [nextContact, ...current]);
+    upsertContact(supabase, nextContact).catch(() => undefined);
     return nextContact;
   }
 
@@ -378,6 +412,22 @@ export default function PricingPage() {
   }
   function updateSetup<K extends keyof PricingEngineInput["setup"]>(key: K, value: PricingEngineInput["setup"][K]) {
     setInput((c) => ({ ...c, setup: { ...c.setup, [key]: value } }));
+  }
+
+  if (!dataReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+        Loading calculator…
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-6">
+        <p className="text-center text-[#b42318]">{loadError}</p>
+      </div>
+    );
   }
 
   return (
@@ -980,5 +1030,19 @@ function SelectInput({ label, value, options, onChange }: { label: string; value
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </label>
+  );
+}
+
+export default function PricingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+          Loading…
+        </div>
+      }
+    >
+      <PricingPageInner />
+    </Suspense>
   );
 }

@@ -66,7 +66,7 @@ export function ScopeWizard({
             {/* Questions — scrollable */}
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <p className="mb-5 text-sm text-gray-500">
-                Answer the questions below and we'll generate a professional scope of work.
+                Answer the questions below and we&apos;ll generate a professional scope of work.
               </p>
               <div className="space-y-4">
                 {wizard.questions.map((q) => (

@@ -2,35 +2,34 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FileText, RefreshCw, Search } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   formatMargin,
   formatMoney,
   initialContacts,
   initialProjects,
   quoteStatusOptions,
-  storageKeys,
   type Contact,
   type PriceOptionName,
   type Project,
   type Quote,
   type QuoteStatus,
 } from "@/lib/app-data";
-import { useLocalStorageState } from "@/lib/use-local-storage";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { listContacts, listProjects, listQuotes, upsertQuote } from "@/lib/supabase/data";
+import { t } from "@/lib/ui-strings";
 
 export default function QuotesPage() {
   const router = useRouter();
-  const [quotes, setQuotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
-  const [projects] = useLocalStorageState<Project[]>(
-    storageKeys.projects,
-    initialProjects
-  );
-  const [contacts] = useLocalStorageState<Contact[]>(
-    storageKeys.contacts,
-    initialContacts
-  );
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"All" | QuoteStatus>("All");
   const [search, setSearch] = useState("");
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(() =>
@@ -38,6 +37,30 @@ export default function QuotesPage() {
       ? null
       : new URLSearchParams(window.location.search).get("quoteId")
   );
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [dbQuotes, dbProjects, dbContacts] = await Promise.all([
+        listQuotes(supabase),
+        listProjects(supabase),
+        listContacts(supabase),
+      ]);
+      setQuotes(dbQuotes);
+      setProjects(dbProjects.length ? dbProjects : initialProjects);
+      setContacts(dbContacts.length ? dbContacts : initialContacts);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load quotes");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount fetch updates list state
+    void loadData();
+  }, [loadData]);
 
   const filteredQuotes = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -53,9 +76,12 @@ export default function QuotesPage() {
   }, [quotes, statusFilter, search]);
 
   function updateQuoteStatus(id: string, status: QuoteStatus) {
-    setQuotes((current) =>
-      current.map((quote) => (quote.id === id ? { ...quote, status } : quote))
-    );
+    setQuotes((current) => {
+      const next = current.map((quote) => (quote.id === id ? { ...quote, status } : quote));
+      const updated = next.find((q) => q.id === id);
+      if (updated) upsertQuote(supabase, updated).catch(() => undefined);
+      return next;
+    });
   }
 
   const selectedQuote = quotes.find((q) => q.id === selectedQuoteId);
@@ -66,8 +92,32 @@ export default function QuotesPage() {
     ? findQuoteContact(selectedQuote, contacts)
     : undefined;
 
+  if (isLoading && !loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+          <PageSkeleton rows={6} />
+        </main>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-md">
+            <ErrorPanel message={loadError} onRetry={() => void loadData()} />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
@@ -85,7 +135,7 @@ export default function QuotesPage() {
 
             <Link
               href="/pricing"
-              className="rounded-md bg-[#ff5c35] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#e94820]"
+              className="rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
             >
               New Pricing
             </Link>
@@ -203,11 +253,20 @@ export default function QuotesPage() {
             </section>
           ) : (
             <section className="mt-6 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
-              <p className="text-lg font-semibold tracking-tight">No quotes yet</p>
-              <p className="mt-2 text-sm text-gray-500">
-                Open a project, enter costs, and create a quote from the Costs &amp;
-                Pricing tab.
+              <p className="text-lg font-semibold tracking-tight">
+                {quotes.length === 0 ? t("emptyQuotes") : "No quotes match filters"}
               </p>
+              <p className="mt-2 text-sm text-gray-500">
+                {quotes.length === 0 ? t("emptyQuotesHint") : "Try another search or status."}
+              </p>
+              {quotes.length === 0 ? (
+                <Link
+                  href="/projects"
+                  className="mt-4 inline-block text-sm font-medium text-[var(--brand-accent)] hover:underline"
+                >
+                  Go to projects →
+                </Link>
+              ) : null}
             </section>
           )}
         </div>

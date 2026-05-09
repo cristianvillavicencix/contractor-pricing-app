@@ -164,6 +164,13 @@ export type Quote = {
   expiresAt: string;
   signedAt?: string;
   signedBy?: string;
+  /** Secret for client link: `/proposal/:id/accept?t=…` (stored in quote JSON). */
+  clientPortalToken?: string;
+  /** Supabase Storage paths (`proposal-photos`, company-prefixed). */
+  coverImagePath?: string | null;
+  existingPhotoPaths?: string[];
+  existingPhotoCaptions?: string[];
+  coverLayout?: ProposalCoverLayout;
 };
 
 export type AppSettings = {
@@ -285,7 +292,11 @@ export type AppSettings = {
     compactMode: boolean;
     showAdvancedPricingBreakdown: boolean;
     showPricingWarnings: boolean;
+    /** Desktop sidebar narrow mode; synced via Supabase `company_settings`. */
+    sidebarCollapsed?: boolean;
   };
+  /** When set (ISO date), onboarding wizard is skipped; stored in Supabase `company_settings`. */
+  onboardingCompletedAt?: string;
 };
 
 export const storageKeys = {
@@ -340,6 +351,38 @@ export const strategyOptions: Strategy[] = [
   "Balanced",
   "Premium",
 ];
+
+/** Short labels for onboarding / pickers (single source of truth). */
+export const tradeOptionDescriptions: Record<SettingsTrade, string> = {
+  Roofing: "Shingles, flat roofs, repairs",
+  Siding: "Fiber cement, vinyl, trim",
+  Painting: "Interior & exterior",
+  Drywall: "Hang, tape, finish",
+  Gutters: "Install, clean, repair",
+  Remodeling: "Kitchen, bath, basement",
+  "General Contractor": "Multi-trade projects",
+};
+
+export const onboardingTradeOptions: { value: SettingsTrade; desc: string }[] =
+  settingsTradeOptions.map((value) => ({
+    value,
+    desc: tradeOptionDescriptions[value],
+  }));
+
+export const companyLevelDescriptions: Record<CompanyLevel, string> = {
+  "Solo Owner": "Just me — I do the work",
+  "Small Crew": "2–5 people on jobs",
+  "Established Company": "5+ years, steady clients",
+  "Premium Company": "High-end brand, premium pricing",
+};
+
+export const companyLevelOptionsWithDesc: {
+  value: CompanyLevel;
+  desc: string;
+}[] = companyLevelOptions.map((value) => ({
+  value,
+  desc: companyLevelDescriptions[value],
+}));
 export const statusOptions: ProjectStatus[] = [
   "Draft",
   "Pricing",
@@ -543,6 +586,7 @@ export const defaultSettings: AppSettings = {
     compactMode: false,
     showAdvancedPricingBreakdown: true,
     showPricingWarnings: true,
+    sidebarCollapsed: false,
   },
 };
 
@@ -838,7 +882,9 @@ export function calculateProjectPricing(
       overheadPercent: merged.costRules.includeOverhead
         ? merged.costRules.defaultOverheadPercent
         : 0,
-      overheadAllocationMethod: merged.costRules.overheadAllocationMethod,
+      overheadAllocationMethod: merged.costRules.includeOverhead
+        ? merged.costRules.overheadAllocationMethod
+        : "Ignore For Now",
       monthlyOverhead: merged.costRules.monthlyOverhead,
       flatOverheadPerProject: merged.costRules.flatOverheadPerProject,
       monthlyBillableDays: merged.costRules.monthlyBillableDays,
@@ -1033,16 +1079,15 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-export function getNextProposalNumber(): string {
-  if (typeof window === "undefined") return "PRO-001";
-  try {
-    const raw = window.localStorage.getItem(storageKeys.proposalCounter);
-    const next = raw ? Number(raw) + 1 : 1;
-    window.localStorage.setItem(storageKeys.proposalCounter, String(next));
-    return `PRO-${String(next).padStart(3, "0")}`;
-  } catch {
-    return `PRO-${Date.now().toString().slice(-6)}`;
+/** Next proposal number from existing quotes (Supabase-backed). Avoids localStorage counters. */
+export function computeNextProposalNumber(quotes: Quote[]): string {
+  let max = 0;
+  for (const q of quotes) {
+    const raw = (q.proposalNumber ?? "").trim();
+    const m = raw.match(/^PRO-(\d+)$/i);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
   }
+  return `PRO-${String(max + 1).padStart(3, "0")}`;
 }
 
 export const TYPICAL_COSTS: Record<

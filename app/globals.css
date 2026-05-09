@@ -53,6 +53,12 @@
 }
 
 :root {
+  /* App shell / marketing accents (align onboarding + dashboard) */
+  --brand-accent: #ff5c35;
+  --brand-accent-hover: #e94820;
+  --brand-navy: #213343;
+  --page-bg: #f5f8fa;
+
   --background: oklch(0.973 0.006 235);
   --foreground: oklch(0.255 0.035 245);
 

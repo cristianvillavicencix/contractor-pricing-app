@@ -20,6 +20,7 @@ function useDebouncedRenderKey(key: string | number, debounceMs: number) {
 
   useEffect(() => {
     if (debounceMs <= 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDebounced(key);
       return;
     }
@@ -54,7 +55,9 @@ export function PagedProposalPreview({
   const stagingRef = useRef<HTMLDivElement>(null);
   const renderIdRef = useRef(0);
   const onRenderedRef = useRef(onRendered);
-  onRenderedRef.current = onRendered;
+  useEffect(() => {
+    onRenderedRef.current = onRendered;
+  }, [onRendered]);
 
   const debouncedRenderKey = useDebouncedRenderKey(renderKey, debounceMs);
   const [isRendering, setIsRendering] = useState(true);
@@ -62,6 +65,7 @@ export function PagedProposalPreview({
 
   useEffect(() => {
     if (!isRendering) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowSlowHint(false);
       return;
     }

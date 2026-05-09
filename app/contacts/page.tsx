@@ -1,21 +1,29 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   formatMargin,
   formatMoney,
   getTodayLabel,
   initialContacts,
   initialProjects,
-  storageKeys,
   type Contact,
   type Project,
   type Quote,
 } from "@/lib/app-data";
-import { useLocalStorageState } from "@/lib/use-local-storage";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  deleteContact as deleteContactDb,
+  listContacts,
+  listProjects,
+  listQuotes,
+  upsertContact,
+} from "@/lib/supabase/data";
+import { t } from "@/lib/ui-strings";
 
 type ContactForm = Omit<Contact, "id" | "createdAt">;
 
@@ -30,15 +38,12 @@ const emptyContact: ContactForm = {
 
 export default function ContactsPage() {
   const router = useRouter();
-  const [contacts, setContacts] = useLocalStorageState<Contact[]>(
-    storageKeys.contacts,
-    initialContacts
-  );
-  const [projects] = useLocalStorageState<Project[]>(
-    storageKeys.projects,
-    initialProjects
-  );
-  const [quotes] = useLocalStorageState<Quote[]>(storageKeys.quotes, []);
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ContactForm>(emptyContact);
   const [error, setError] = useState("");
@@ -48,6 +53,30 @@ export default function ContactsPage() {
         ? null
         : new URLSearchParams(window.location.search).get("contactId")
   );
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [dbContacts, dbProjects, dbQuotes] = await Promise.all([
+        listContacts(supabase),
+        listProjects(supabase),
+        listQuotes(supabase),
+      ]);
+      setContacts(dbContacts.length ? dbContacts : initialContacts);
+      setProjects(dbProjects.length ? dbProjects : initialProjects);
+      setQuotes(dbQuotes);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount fetch updates list state
+    void loadData();
+  }, [loadData]);
 
   const filteredContacts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -68,35 +97,58 @@ export default function ContactsPage() {
       return;
     }
 
-    setContacts((current) => [
-      {
-        id: crypto.randomUUID(),
-        ...form,
-        createdAt: getTodayLabel(),
-      },
-      ...current,
-    ]);
+    const next: Contact = {
+      id: crypto.randomUUID(),
+      ...form,
+      createdAt: getTodayLabel(),
+    };
+    setContacts((current) => [next, ...current]);
+    upsertContact(supabase, next).catch(() => undefined);
     setForm(emptyContact);
     setError("");
   }
 
   function updateContact(updated: Contact) {
-    setContacts((current) =>
-      current.map((c) => (c.id === updated.id ? updated : c))
-    );
+    setContacts((current) => current.map((c) => (c.id === updated.id ? updated : c)));
+    upsertContact(supabase, updated).catch(() => undefined);
   }
 
   function deleteContact(id: string) {
     setContacts((current) => current.filter((c) => c.id !== id));
     setSelectedContactId(null);
+    deleteContactDb(supabase, id).catch(() => undefined);
   }
 
   const selectedContact = contacts.find(
     (contact) => contact.id === selectedContactId
   );
 
+  if (isLoading && !loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+          <PageSkeleton rows={6} />
+        </main>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+        <AppSidebar />
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-md">
+            <ErrorPanel message={loadError} onRetry={() => void loadData()} />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
@@ -241,10 +293,12 @@ export default function ContactsPage() {
               {filteredContacts.length === 0 ? (
                 <div className="mt-5 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
                   <p className="font-semibold tracking-tight">
-                    No contacts found
+                    {contacts.length === 0 ? t("emptyContacts") : "No contacts match your search"}
                   </p>
                   <p className="mt-2 text-sm text-gray-500">
-                    Try a different search or create a new contact.
+                    {contacts.length === 0
+                      ? t("emptyContactsHint")
+                      : "Try a different search."}
                   </p>
                 </div>
               ) : null}
@@ -490,7 +544,7 @@ function ContactDetailPanel({
           {confirmDelete ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4">
               <p className="text-sm font-medium text-red-700">Delete this contact?</p>
-              <p className="mt-1 text-xs text-red-500">This cannot be undone. Projects and quotes will remain but won't be linked to this contact.</p>
+              <p className="mt-1 text-xs text-red-500">This cannot be undone. Projects and quotes will remain but won&apos;t be linked to this contact.</p>
               <div className="mt-3 flex gap-3">
                 <button
                   onClick={onDelete}
