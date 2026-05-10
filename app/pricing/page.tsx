@@ -248,6 +248,8 @@ function PricingPageInner() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
+  const showAdvancedBreakdown = mergedSettings.appPreferences.showAdvancedPricingBreakdown;
+  const showPricingWarnings = mergedSettings.appPreferences.showPricingWarnings;
 
   useEffect(() => {
     let cancelled = false;
@@ -357,7 +359,7 @@ function PricingPageInner() {
     });
   }
 
-  function saveProject() {
+  async function saveProject() {
     if (!projectDraft.projectName.trim() || !projectDraft.customerName.trim()) {
       setProjectError("Project name and customer name are required.");
       return;
@@ -410,8 +412,14 @@ function PricingPageInner() {
       createdAt: getTodayLabel(),
     };
     setProjects((prev) => [newProject, ...prev]);
-    upsertContact(supabase, contact).catch(() => undefined);
-    upsertProject(supabase, newProject).catch(() => undefined);
+    try {
+      await upsertContact(supabase, contact);
+      await upsertProject(supabase, newProject);
+    } catch {
+      setProjects((prev) => prev.filter((p) => p.id !== newProject.id));
+      setProjectError("Could not save project. Check your connection and try again.");
+      return;
+    }
     appendPricingSessionHistory({
       label: `Saved: ${newProject.projectName}`,
       input: cloneEngineInput(input),
@@ -419,7 +427,7 @@ function PricingPageInner() {
       sourceProjectId: newProject.id,
     });
     closeModal();
-    router.push(`/projects?projectId=${newProject.id}`);
+    router.push(`/projects?projectId=${encodeURIComponent(newProject.id)}`);
   }
 
   function createContact(contact: Omit<Contact, "id" | "createdAt">) {
@@ -461,7 +469,7 @@ function PricingPageInner() {
 
   if (!dataReady) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] text-sm text-gray-500">
         Loading calculator…
       </div>
     );
@@ -469,14 +477,14 @@ function PricingPageInner() {
 
   if (loadError) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-6">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-6">
         <p className="text-center text-[#b42318]">{loadError}</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f8fa] text-[#213343] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
@@ -484,12 +492,14 @@ function PricingPageInner() {
           {/* Header */}
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-gray-500">Calculator</p>
-              <h2 className="mt-1 text-2xl font-semibold tracking-tight">Quick Pricing</h2>
+              <p className="page-kicker text-sm font-medium">Calculator</p>
+              <h2 className="page-title mt-1 text-2xl font-semibold tracking-tight">Quick Pricing</h2>
               {sourceProject && (
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="page-description mt-1 text-sm">
                   From project:{" "}
-                  <span className="font-medium text-black">{sourceProject.projectName}</span>
+                  <span className="font-medium text-neutral-900 dark:text-slate-100">
+                    {sourceProject.projectName}
+                  </span>
                 </p>
               )}
             </div>
@@ -507,7 +517,7 @@ function PricingPageInner() {
               <button
                 type="button"
                 onClick={saveSessionToHistory}
-                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                 title="Store this scenario in Historial (next to the calculator) to restore later"
               >
                 Save session
@@ -515,7 +525,7 @@ function PricingPageInner() {
               <button
                 type="button"
                 onClick={reset}
-                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Reset</span>
@@ -523,7 +533,7 @@ function PricingPageInner() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[400px_1fr]">
+          <div className="elevated-panel mt-6 grid gap-6 xl:grid-cols-[400px_1fr]">
             {/* ── Left: inputs ── */}
             <div className="space-y-4">
               {/* Job setup + costs in one card */}
@@ -585,58 +595,62 @@ function PricingPageInner() {
                       <span className="text-base font-semibold">{formatMoney(baseCost)}</span>
                     </div>
 
-                    {/* Stacked breakdown bar */}
-                    {(matAmt > 0 || labAmt > 0) && (
-                      <div>
-                        <div className="flex h-2 overflow-hidden rounded-full bg-[#f0f4f8]">
-                          {matPct > 0 && (
-                            <div
-                              style={{ width: `${matPct}%` }}
-                              className="bg-blue-400 transition-all"
-                            />
-                          )}
-                          {labPct > 0 && (
-                            <div
-                              style={{ width: `${labPct}%` }}
-                              className="bg-orange-400 transition-all"
-                            />
-                          )}
-                          {othPct > 0 && (
-                            <div
-                              style={{ width: `${othPct}%` }}
-                              className="bg-gray-300 transition-all"
-                            />
-                          )}
-                        </div>
-                        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
-                          {matAmt > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
-                              Materials {matPct}%
-                            </span>
-                          )}
-                          {labAmt > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="inline-block h-2 w-2 rounded-full bg-orange-400" />
-                              Labor {labPct}%
-                            </span>
-                          )}
-                          {othAmt > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
-                              Other {othPct}%
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                    {showAdvancedBreakdown && (
+                      <>
+                        {/* Stacked breakdown bar */}
+                        {(matAmt > 0 || labAmt > 0) && (
+                          <div>
+                            <div className="flex h-2 overflow-hidden rounded-full bg-[#f0f4f8]">
+                              {matPct > 0 && (
+                                <div
+                                  style={{ width: `${matPct}%` }}
+                                  className="bg-blue-400 transition-all"
+                                />
+                              )}
+                              {labPct > 0 && (
+                                <div
+                                  style={{ width: `${labPct}%` }}
+                                  className="bg-orange-400 transition-all"
+                                />
+                              )}
+                              {othPct > 0 && (
+                                <div
+                                  style={{ width: `${othPct}%` }}
+                                  className="bg-gray-300 transition-all"
+                                />
+                              )}
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+                              {matAmt > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
+                                  Materials {matPct}%
+                                </span>
+                              )}
+                              {labAmt > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <span className="inline-block h-2 w-2 rounded-full bg-orange-400" />
+                                  Labor {labPct}%
+                                </span>
+                              )}
+                              {othAmt > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
+                                  Other {othPct}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
 
-                    {/* Typical cost hint */}
-                    <TypicalCostHint
-                      trade={input.setup.trade}
-                      size={input.setup.projectSize}
-                      baseCost={baseCost}
-                    />
+                        {/* Typical cost hint */}
+                        <TypicalCostHint
+                          trade={input.setup.trade}
+                          size={input.setup.projectSize}
+                          baseCost={baseCost}
+                        />
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -695,7 +709,7 @@ function PricingPageInner() {
                     <div>
                       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Commission</p>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="flex items-center justify-between rounded border border-[#d9e2ec] px-3 py-2.5 text-sm">
+                        <label className="flex items-center justify-between rounded border border-[#d9e2ec] px-3 py-2.5 text-sm text-neutral-900">
                           Include Commission
                           <input type="checkbox" checked={input.commission.includeCommission} onChange={(e) => updateCommission("includeCommission", e.target.checked)} className="accent-[#ff5c35]" />
                         </label>
@@ -724,49 +738,58 @@ function PricingPageInner() {
                   {/* Pricing cards */}
                   <div className="grid gap-4 sm:grid-cols-3">
                     {result.options.map((opt) => (
-                      <ResultCard key={opt.name} option={opt} commissionEnabled={input.commission.includeCommission} />
+                      <ResultCard
+                        key={opt.name}
+                        option={opt}
+                        commissionEnabled={input.commission.includeCommission}
+                        showAdvancedBreakdown={showAdvancedBreakdown}
+                      />
                     ))}
                   </div>
 
-                  {/* Reference row */}
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <RefBox
-                      label="Base Cost"
-                      value={formatMoney(baseCost)}
-                      sub={`Mat ${formatMoney(input.costs.material)} · Labor ${formatMoney(input.costs.labor)}`}
-                    />
-                    <RefBox
-                      label="Breakeven"
-                      value={formatMoney(result.breakevenPrice)}
-                      sub={`Overhead ${formatMoney(result.overheadCost)} · Burden ${formatMoney(result.laborBurdenCost)}`}
-                    />
-                    <RefBox
-                      label="Min Safe Price"
-                      value={formatMoney(result.minimumSafePrice)}
-                      sub={`${formatMargin(result.minimumSafeMargin)} min · Floor ${formatMoney(input.businessCosts.minimumJobPrice)}`}
-                    />
-                  </div>
+                  {showAdvancedBreakdown && (
+                    <>
+                      {/* Reference row */}
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <RefBox
+                          label="Base Cost"
+                          value={formatMoney(baseCost)}
+                          sub={`Mat ${formatMoney(input.costs.material)} · Labor ${formatMoney(input.costs.labor)}`}
+                        />
+                        <RefBox
+                          label="Breakeven"
+                          value={formatMoney(result.breakevenPrice)}
+                          sub={`Overhead ${formatMoney(result.overheadCost)} · Burden ${formatMoney(result.laborBurdenCost)}`}
+                        />
+                        <RefBox
+                          label="Min Safe Price"
+                          value={formatMoney(result.minimumSafePrice)}
+                          sub={`${formatMargin(result.minimumSafeMargin)} min · Floor ${formatMoney(input.businessCosts.minimumJobPrice)}`}
+                        />
+                      </div>
 
-                  {/* Cost Protection */}
-                  <div className="rounded-lg border border-[#d9e2ec] bg-white p-4">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Cost Protection (added to base)
-                    </p>
-                    <div className="grid gap-2 text-sm sm:grid-cols-2">
-                      <Row label="Labor burden" value={formatMoney(result.laborBurdenCost)} />
-                      <Row label="Overhead" value={formatMoney(result.overheadCost)} />
-                      <Row label="Misc buffer" value={formatMoney(result.bufferCost)} />
-                      <Row label="Permit buffer" value={formatMoney(result.permitBufferCost)} />
-                      <Row label="Tax on Better" value={formatMoney(result.taxCost)} />
-                      <Row label="Total protection" value={formatMoney(result.businessCostTotal)} strong />
-                    </div>
-                  </div>
+                      {/* Cost Protection */}
+                      <div className="rounded-lg border border-[#d9e2ec] bg-white p-4">
+                        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                          Cost Protection (added to base)
+                        </p>
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
+                          <Row label="Labor burden" value={formatMoney(result.laborBurdenCost)} />
+                          <Row label="Overhead" value={formatMoney(result.overheadCost)} />
+                          <Row label="Misc buffer" value={formatMoney(result.bufferCost)} />
+                          <Row label="Permit buffer" value={formatMoney(result.permitBufferCost)} />
+                          <Row label="Tax on Better" value={formatMoney(result.taxCost)} />
+                          <Row label="Total protection" value={formatMoney(result.businessCostTotal)} strong />
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {/* Project health */}
                   <HealthBanner status={result.projectStatus} reason={result.projectStatusReason} />
 
                   {/* Warnings */}
-                  {result.warnings.length > 0 && (
+                  {showPricingWarnings && result.warnings.length > 0 && (
                     <div className="rounded-lg border border-yellow-100 bg-yellow-50 px-4 py-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-yellow-700">Warnings</p>
                       <ul className="space-y-1">
@@ -791,11 +814,11 @@ function PricingPageInner() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-xl border border-[#d9e2ec] bg-white shadow-xl"
+            className="elevated-panel w-full max-w-md rounded-xl border border-[#d9e2ec] bg-white shadow-xl dark:border-slate-600"
           >
             <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
               <div>
-                <h3 className="text-lg font-semibold tracking-tight">Create Project</h3>
+                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">Create Project</h3>
                 <p className="mt-0.5 text-sm text-gray-500">
                   {input.setup.trade} · {input.setup.state} · {input.setup.projectSize} · Total cost {formatMoney(result.baseCost)}
                 </p>
@@ -814,7 +837,7 @@ function PricingPageInner() {
                 <select
                   value={projectDraft.contactId}
                   onChange={(event) => applyContact(event.target.value)}
-                  className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#ff5c35]"
+                  className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
                 >
                   <option value="">Create or match by customer info</option>
                   {contacts.map((contact) => (
@@ -864,12 +887,12 @@ function PricingPageInner() {
             <div className="flex justify-end gap-3 border-t border-[#d9e2ec] px-6 py-4">
               <button
                 onClick={handleAttemptCloseModal}
-                className="rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                className="rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
               >
                 Cancel
               </button>
               <button
-                onClick={saveProject}
+                onClick={() => void saveProject()}
                 className="rounded-md bg-[#ff5c35] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
               >
                 Create & Go to Projects
@@ -932,7 +955,7 @@ function ModalField({ label, value, placeholder, onChange, className = "" }: { l
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
+        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
       />
     </label>
   );
@@ -943,7 +966,15 @@ function sameText(left: string, right: string) {
 }
 
 /* ── Result card ── */
-function ResultCard({ option, commissionEnabled }: { option: PricingEngineOption; commissionEnabled: boolean }) {
+function ResultCard({
+  option,
+  commissionEnabled,
+  showAdvancedBreakdown,
+}: {
+  option: PricingEngineOption;
+  commissionEnabled: boolean;
+  showAdvancedBreakdown: boolean;
+}) {
   const healthStyle =
     option.status === "Safe"
       ? "bg-green-50 text-green-700"
@@ -962,12 +993,14 @@ function ResultCard({ option, commissionEnabled }: { option: PricingEngineOption
       <p className="mt-2 text-3xl font-bold tracking-tight text-black">
         {formatMoney(option.salePrice)}
       </p>
-      <div className="mt-4 space-y-2 border-t border-[#f0f4f8] pt-3">
-        <Row label="Profit" value={formatMoney(option.netProfit)} strong />
-        <Row label="Margin" value={formatMargin(option.margin)} />
-        <Row label="Markup" value={formatMargin(option.markup)} />
-        {commissionEnabled && <Row label="Commission" value={formatMoney(option.commissionCost)} />}
-      </div>
+      {showAdvancedBreakdown && (
+        <div className="mt-4 space-y-2 border-t border-[#f0f4f8] pt-3">
+          <Row label="Profit" value={formatMoney(option.netProfit)} strong />
+          <Row label="Margin" value={formatMargin(option.margin)} />
+          <Row label="Markup" value={formatMargin(option.markup)} />
+          {commissionEnabled && <Row label="Commission" value={formatMoney(option.commissionCost)} />}
+        </div>
+      )}
       <div className="mt-3">
         <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-semibold ${healthStyle}`}>
           {option.status}
@@ -1029,7 +1062,7 @@ function MoneyInput({ label, value, onChange, className = "" }: { label: string;
           value={value || ""}
           placeholder="0"
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full rounded-md border border-[#d9e2ec] py-2.5 pl-7 pr-3 text-sm outline-none transition focus:border-[#111111]"
+          className="w-full rounded-md border border-[#d9e2ec] bg-white py-2.5 pl-7 pr-3 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
         />
       </div>
     </label>
@@ -1045,7 +1078,7 @@ function NumberInput({ label, value, onChange }: { label: string; value: number;
         min="0"
         value={value || ""}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
+        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
       />
     </label>
   );
@@ -1067,7 +1100,7 @@ function ToggleNumberInput({ label, value, enabled, onToggle, onChange }: { labe
         value={value || ""}
         disabled={!enabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111] disabled:bg-[#f6f8fb] disabled:text-gray-400"
+        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#111111] disabled:bg-[#f6f8fb] disabled:text-gray-400"
       />
     </div>
   );
@@ -1080,7 +1113,7 @@ function SelectInput({ label, value, options, onChange }: { label: string; value
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
+        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
       >
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -1092,7 +1125,7 @@ export default function PricingPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+        <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] text-sm text-gray-500">
           Loading…
         </div>
       }

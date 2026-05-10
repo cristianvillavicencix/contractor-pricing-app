@@ -50,7 +50,7 @@ export function SignOutButton({
       onClick={() => void signOut()}
       disabled={busy}
       title={collapsed ? "Cerrar sesión" : undefined}
-      className={`flex w-full items-center rounded-md text-sm text-[#516f90] transition hover:bg-[#f6f8fb] hover:text-[#213343] disabled:opacity-60 ${
+      className={`flex w-full items-center rounded-md text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-60 ${
         collapsed ? "justify-center px-0 py-3" : "gap-3 px-4 py-3"
       }`}
     >

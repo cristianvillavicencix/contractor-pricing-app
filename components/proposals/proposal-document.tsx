@@ -3,8 +3,14 @@
 import { Fragment } from "react";
 import { CheckSquare, Shield, Clock, Star } from "lucide-react";
 import type { ProposalTemplate, CustomSection } from "@/lib/proposal-templates";
-import type { AppSettings, Quote } from "@/lib/app-data";
-import { formatMoney, getEnabledCompanyCredentials } from "@/lib/app-data";
+import type { AppSettings, PriceOptionName, Quote } from "@/lib/app-data";
+import {
+  formatMoney,
+  getEnabledCompanyCredentials,
+  getTierDisplayName,
+  getTierMaterialSummaries,
+  getTierMaterialsTableForProposal,
+} from "@/lib/app-data";
 import type { CoverLayout } from "@/lib/pdf-generator";
 import {
   CoverPageElegant,
@@ -38,6 +44,16 @@ const DEFAULT_SECTION_ORDER = [
   "cover", "executiveSummary", "existingConditions", "scopeOfWork",
   "materialsSpecs", "timeline", "pricing", "warranty", "terms", "acceptance",
 ];
+
+/** 1-based position among non-cover sections in `order` up through `indexInOrder` (matches sidebar when reordering). */
+function sectionOrdinalInOrder(
+  sectionId: string,
+  indexInOrder: number,
+  order: string[]
+): number | null {
+  if (sectionId === "cover") return null;
+  return order.slice(0, indexInOrder + 1).filter((id) => id !== "cover").length;
+}
 
 /** Paged.js uses this for explicit page breaks (break-before in CSS often never reaches its parser). */
 const PAGED_NEW_PAGE = { "data-break-before": "page" as const };
@@ -94,7 +110,11 @@ export function ProposalDocument({
 
   const orderedSections = sectionOrder ?? DEFAULT_SECTION_ORDER;
 
-  function renderSection(sectionId: string, startNewChapter: boolean): ReactNode {
+  function renderSection(
+    sectionId: string,
+    startNewChapter: boolean,
+    sectionChapter: number | null
+  ): ReactNode {
     // ── Cover ────────────────────────────────────────────────────────
     if (sectionId === "cover") {
       if (!visible("cover", template.cover.enabled)) return null;
@@ -121,7 +141,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
             Executive Summary
           </h2>
@@ -154,7 +174,7 @@ export function ProposalDocument({
             className="px-0 py-6"
             {...pagedChapterProps(startNewChapter)}
           >
-            <SectionLabel />
+            <SectionLabel chapter={sectionChapter} />
             <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Existing Conditions</h2>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
               {template.existingConditions.introText}
@@ -183,7 +203,7 @@ export function ProposalDocument({
               className="px-0 py-6"
               {...PAGED_NEW_PAGE}
             >
-              <SectionLabel />
+              <SectionLabel chapter={sectionChapter} />
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
                 Existing Conditions Photos
               </h2>
@@ -236,7 +256,7 @@ export function ProposalDocument({
             className="px-0 py-6"
             {...pagedChapterProps(startNewChapter)}
           >
-            <SectionLabel />
+            <SectionLabel chapter={sectionChapter} />
             <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Scope of Work</h2>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
               {template.scopeOfWork.introText}
@@ -268,7 +288,7 @@ export function ProposalDocument({
               className="px-0 py-6"
               {...PAGED_NEW_PAGE}
             >
-              <SectionLabel />
+              <SectionLabel chapter={sectionChapter} />
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Included Services</h2>
               <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500 text-justify [hyphens:auto]">
                 The following services are included as part of the proposed scope unless otherwise noted in the terms or exclusions.
@@ -291,7 +311,13 @@ export function ProposalDocument({
     if (sectionId === "materialsSpecs") {
       if (!visible("materialsSpecs", template.materialsSpecs.enabled)) return null;
       const matLayout = layout("materialsSpecs", "table");
-      const items = template.materialsSpecs.items;
+      const selectedTier = quote?.selectedOption ?? "Better";
+      const items = getTierMaterialsTableForProposal(
+        settings,
+        selectedTier,
+        template,
+        quote ?? null
+      );
 
       return (
         <section
@@ -299,7 +325,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
             Materials &amp; Specifications
           </h2>
@@ -388,7 +414,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Project Timeline</h2>
           <div className="mt-3 flex items-center gap-2 text-sm text-gray-400">
             <Clock className="h-4 w-4" />
@@ -404,14 +430,11 @@ export function ProposalDocument({
             <div className="mt-8 grid gap-x-8 gap-y-4 md:grid-cols-2">
               {phaseLines.map((line, i) => {
                 const [name, description] = line.split("|||");
-                const globalIndex =
-                  template.timeline.phases.findIndex(
-                    (p) => p.name === name && p.description === description
-                  ) + 1;
+                const displayPhaseIndex = i + 1;
                 return (
                   <div key={i} className="flex items-start gap-3 break-inside-avoid">
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#213343] text-xs font-bold text-white">
-                      {globalIndex}
+                      {displayPhaseIndex}
                     </div>
                     <div>
                       <p className="font-semibold text-[#213343] text-sm">{name}</p>
@@ -425,17 +448,14 @@ export function ProposalDocument({
             <div className="mt-8 space-y-2">
               {phaseLines.map((line, i) => {
                 const [name, description] = line.split("|||");
-                const globalIndex =
-                  template.timeline.phases.findIndex(
-                    (p) => p.name === name && p.description === description
-                  ) + 1;
+                const displayPhaseIndex = i + 1;
                 return (
                   <div
                     key={i}
                     className="flex items-start gap-4 border border-[#e8eef5] border-l-4 border-l-[#ff5c35] bg-white px-4 py-3 break-inside-avoid"
                   >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#213343] text-[10px] font-bold text-white">
-                      {globalIndex}
+                      {displayPhaseIndex}
                     </span>
                     <div>
                       <p className="text-sm font-semibold leading-none text-[#213343]">{name}</p>
@@ -451,15 +471,12 @@ export function ProposalDocument({
             <div className="mt-8 grid gap-3 md:grid-cols-2">
               {phaseLines.map((line, i) => {
                 const [name, description] = line.split("|||");
-                const globalIndex =
-                  template.timeline.phases.findIndex(
-                    (p) => p.name === name && p.description === description
-                  ) + 1;
+                const displayPhaseIndex = i + 1;
                 return (
                   <div key={i} className="overflow-hidden rounded-lg border border-[#d9e2ec] break-inside-avoid">
                     <div className="flex items-center gap-3 bg-[#213343] px-4 py-2.5">
                       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ff5c35] text-[9px] font-bold text-white">
-                        {globalIndex}
+                        {displayPhaseIndex}
                       </span>
                       <p className="text-sm font-semibold text-white">{name}</p>
                     </div>
@@ -474,15 +491,12 @@ export function ProposalDocument({
             <div className="mt-10 space-y-0">
               {phaseLines.map((line, i) => {
                 const [name, description] = line.split("|||");
-                const globalIndex =
-                  template.timeline.phases.findIndex(
-                    (p) => p.name === name && p.description === description
-                  ) + 1;
+                const displayPhaseIndex = i + 1;
                 return (
                   <div key={i} className="flex gap-5 break-inside-avoid">
                     <div className="flex flex-col items-center">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#213343] text-xs font-bold text-white">
-                        {globalIndex}
+                        {displayPhaseIndex}
                       </div>
                       {i < phaseLines.length - 1 ? (
                         <div className="my-1 h-full min-h-[32px] w-px bg-[#d9e2ec]" />
@@ -512,7 +526,7 @@ export function ProposalDocument({
           className="bg-white px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Your Investment</h2>
           <p className="mt-4 max-w-3xl text-base leading-relaxed text-gray-500">{template.pricing.introText}</p>
           {quote && (
@@ -526,6 +540,9 @@ export function ProposalDocument({
               {(["good", "better", "best"] as const).map((tier) => {
                 const result = quote[tier];
                 const isSelected = quote.selectedOption.toLowerCase() === tier;
+                const tierName: PriceOptionName =
+                  tier === "good" ? "Good" : tier === "better" ? "Better" : "Best";
+                const materialsLine = getTierMaterialSummaries(settings, quote)[tierName];
                 return (
                   <div
                     key={tier}
@@ -539,9 +556,20 @@ export function ProposalDocument({
                         </div>
                       </div>
                     )}
-                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">{tier}</p>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">
+                      {getTierDisplayName(settings, tierName)}
+                    </p>
                     <p className="mt-2 text-4xl font-bold text-[#213343]">{formatMoney(result.salePrice)}</p>
                     <div className="my-4 h-px bg-[#f0f4f8]" />
+                    {materialsLine ? (
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#ff5c35]">
+                        Materials / brand
+                      </p>
+                    ) : null}
+                    {materialsLine ? (
+                      <p className="mt-1 text-sm font-medium leading-snug text-[#213343]">{materialsLine}</p>
+                    ) : null}
+                    {materialsLine ? <div className="my-3 h-px bg-[#f0f4f8]" /> : null}
                     <p className="text-sm leading-relaxed text-gray-600">{result.description}</p>
                   </div>
                 );
@@ -572,7 +600,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Warranty</h2>
           <div className={wLayout === "stacked" ? "mt-8 space-y-8" : "mt-8 grid gap-6 md:grid-cols-2"}>
             <div className="border-l-2 border-[#213343] pl-6 break-inside-avoid">
@@ -615,7 +643,7 @@ export function ProposalDocument({
             className="px-0 py-6"
             {...pagedChapterProps(startNewChapter)}
           >
-            <SectionLabel />
+            <SectionLabel chapter={sectionChapter} />
             <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Terms &amp; Conditions</h2>
             <div className="mt-8 grid gap-x-10 gap-y-2 md:grid-cols-2">
               {bulletItems.map((item, i) => (
@@ -634,7 +662,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">Terms &amp; Conditions</h2>
           <div className="mt-8 border-l-2 border-[#d9e2ec] bg-white pl-6">
             <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-gray-600">{termsText}</pre>
@@ -653,7 +681,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">
             Acceptance &amp; Authorization
           </h2>
@@ -713,7 +741,7 @@ export function ProposalDocument({
           className="px-0 py-6"
           {...pagedChapterProps(startNewChapter)}
         >
-          <SectionLabel />
+          <SectionLabel chapter={sectionChapter} />
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-[#213343]">{custom.title}</h2>
           {custom.content && (
             <div className="mt-8 space-y-3">
@@ -734,9 +762,11 @@ export function ProposalDocument({
   const sectionNodes: ReactNode[] = [];
   let coverRendered = false;
   let sawNonCover = false;
-  for (const id of orderedSections) {
+  for (let i = 0; i < orderedSections.length; i++) {
+    const id = orderedSections[i];
     const startNewChapter = id !== "cover" && (coverRendered || sawNonCover);
-    const node = renderSection(id, startNewChapter);
+    const sectionChapter = sectionOrdinalInOrder(id, i, orderedSections);
+    const node = renderSection(id, startNewChapter, sectionChapter);
     sectionNodes.push(<Fragment key={id}>{node}</Fragment>);
     if (node != null) {
       if (id === "cover") coverRendered = true;
@@ -978,9 +1008,12 @@ function CoverMeta({
   );
 }
 
-function SectionLabel() {
+function SectionLabel({ chapter }: { chapter?: number | null }) {
   return (
     <div className="flex items-center gap-3">
+      {chapter != null ? (
+        <span className="shrink-0 text-xs font-bold tabular-nums text-[#ff5c35]">{chapter}.</span>
+      ) : null}
       <div className="h-px w-16 bg-[#ff5c35]" />
       <div className="h-px flex-1 bg-[#d9e2ec]" />
     </div>

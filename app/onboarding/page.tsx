@@ -199,7 +199,7 @@ function linesFromEstimate(d: WizardState): OverheadLine[] {
   return rows;
 }
 
-/** Lines to store in company settings after onboarding (guía, manual desglose, or vacío). */
+/** Lines persisted to company settings after onboarding (guided estimate, line items, or empty). */
 function buildOverheadLinesForSettings(d: WizardState): AppSettings["costRules"]["overheadLineItems"] {
   if (d.overheadMode === "estimate") return linesFromEstimate(d);
   if (d.manualOverheadStyle === "lineItems" && d.overheadLineItems.length > 0) {
@@ -302,7 +302,7 @@ export default function OnboardingPage() {
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
-          Cargando…
+          Loading…
         </div>
       }
     >
@@ -481,8 +481,8 @@ function OnboardingPageInner() {
       <div className="w-full max-w-lg">
         {previewMode ? (
           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-950">
-            Vista previa: <code className="rounded bg-white px-1">?preview=1</code> evita la redirección si ya
-            completaste el onboarding. Sigue logueado. Para probar de cero: Ajustes → Re-run onboarding.
+            Preview: <code className="rounded bg-white px-1">?preview=1</code> skips the redirect if you already
+            finished onboarding while signed in. To test from scratch: Settings → Re-run onboarding.
           </p>
         ) : null}
         <div className="mb-6 text-center">
@@ -879,8 +879,8 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
     <div>
       <StepHeader
         step={2}
-        title="Gasto fijo mensual (overhead)"
-        desc="Son los pagos recurrentes del negocio: renta, seguros, vehículos de trabajo, oficina, etc. No es el material de la obra ni el sueldo de la cuadrilla en campo — eso va en cada trabajo."
+        title="Monthly fixed overhead"
+        desc="These are recurring business expenses: rent, insurance, work vehicles, office, and similar costs. They are not job materials or field crew wages — those belong on each project."
       />
 
       <div className="mt-6 space-y-5">
@@ -892,14 +892,14 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
           }`}
         >
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
-            {guided ? "Total según la guía" : "Gasto fijo total"}
+            {guided ? "Total from guided estimate" : "Total fixed overhead"}
           </p>
           <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-[#6B7280]">
             {guided
-              ? "Este número es la suma de las respuestas de abajo. Para teclearlo tú mismo, elige «Ya tengo mi cifra»."
+              ? "This amount is the sum of the answers below. To type your own number, choose I already have my total."
               : hasLineBreakdown
-                ? "Este total es la suma de tu desglose. Edítalo en «Editar desglose» o borra líneas en el editor para volver a un solo monto."
-                : "Un mes típico en dólares (USD). Si ya lo tienes en contabilidad o Excel, escríbelo aquí."}
+                ? "This total is the sum of your line items. Edit it in Edit line items or remove lines in the editor to return to a single amount."
+                : "A typical month in US dollars. If you already have this in accounting or Excel, enter it here."}
           </p>
           <div className="mt-5 flex flex-wrap items-baseline justify-center gap-x-1 gap-y-0">
             <span className="text-3xl font-medium tabular-nums text-[#6B7280] sm:text-4xl">$</span>
@@ -915,7 +915,7 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
               }}
               className="min-w-0 max-w-[11rem] border-0 bg-transparent text-center text-3xl font-bold tabular-nums text-[#213343] outline-none placeholder:text-[#d1d5db] disabled:cursor-not-allowed sm:max-w-[14rem] sm:text-4xl"
             />
-            <span className="text-sm font-medium text-[#9CA3AF] sm:text-base">/ mes</span>
+            <span className="text-sm font-medium text-[#9CA3AF] sm:text-base">/ month</span>
           </div>
         </div>
 
@@ -925,9 +925,9 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
             onClick={enterGuidedMode}
             className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl border border-[#ff5c35]/35 bg-[#fff8f5] py-3.5 text-sm font-semibold text-[#ff5c35] transition hover:bg-[#fff1ea] sm:flex-row sm:gap-2"
           >
-            <span>No tengo la cifra a mano</span>
+            <span>I don't have the number handy</span>
             <span className="text-xs font-normal text-[#c2410c] sm:text-sm sm:font-semibold">
-              — armar un estimado con la guía
+              — build an estimate with the guide
             </span>
           </button>
         ) : (
@@ -936,9 +936,9 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
             onClick={exitGuidedMode}
             className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl border border-[#d9e2ec] bg-white py-3.5 text-sm font-medium text-[#213343] transition hover:bg-[#f6f8fb] sm:flex-row sm:gap-2"
           >
-            <span>Ya tengo mi cifra</span>
+            <span>I already have my total</span>
             <span className="text-xs font-normal text-[#6B7280] sm:text-sm">
-              — escribir solo el total mensual
+              — enter only the monthly total
             </span>
           </button>
         )}
@@ -946,18 +946,18 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
         {guided ? (
           <div className="overflow-hidden rounded-xl border border-[#d9e2ec] bg-[#fafcfd]">
             <div className="border-b border-[#e8eef3] bg-white px-4 py-3 text-left">
-              <p className="text-sm font-medium text-[#213343]">Guía rápida de gastos fijos</p>
+              <p className="text-sm font-medium text-[#213343]">Quick guide to fixed overhead</p>
               <p className="mt-1 text-xs leading-relaxed text-[#6B7280]">
-                Responde con lo que pagas <strong>cada mes</strong> aunque no haya contratos. Los montos con «~» son
-                referencias para contratistas en EE. UU.; ajusta a tu realidad.
+                Answer with what you pay <strong>every month</strong> even when you have no jobs. Amounts marked with ~ are
+                ballpark references for US contractors; adjust to your situation.
               </p>
             </div>
             <div className="max-h-[min(58vh,520px)] overflow-y-auto overscroll-contain px-3 py-3">
               <div className="space-y-3 pb-2">
-                <OverheadGuidedSectionTitle label="Local y servicios del lugar" />
+                <OverheadGuidedSectionTitle label="Facility and site services" />
                 <EstimatorRow
-                  label="Renta de local, oficina o yarda"
-                  hint="Lo que pagas cada mes por el espacio fijo del negocio (no trailers o bodegas solo de un proyecto). Si no aplica, no marques."
+                  label="Shop, office, or yard rent"
+                  hint="What you pay each month for fixed business space (not trailers or storage tied to a single job). Skip if not applicable."
                 >
                   <div className="flex min-w-[10rem] flex-col items-stretch gap-2 sm:items-end">
                     <label className="flex cursor-pointer items-center justify-end gap-2 sm:justify-start">
@@ -967,14 +967,14 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                         onChange={(e) => set("hasOffice", e.target.checked)}
                         className="h-4 w-4 accent-[#ff5c35]"
                       />
-                      <span className="text-sm text-[#6B7280]">Sí, pago renta</span>
+                      <span className="text-sm text-[#6B7280]">Yes, I pay rent</span>
                     </label>
                     {data.hasOffice && (
                       <input
                         type="number"
                         value={data.officeRent || ""}
                         min={0}
-                        placeholder="Ej. 1200"
+                        placeholder="e.g. 1200"
                         onChange={(e) => set("officeRent", Number(e.target.value) || 0)}
                         className="w-full rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
                       />
@@ -982,8 +982,8 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   </div>
                 </EstimatorRow>
                 <EstimatorRow
-                  label="Luz, agua, gas del local"
-                  hint="Solo si no van incluidos en la renta. Monto mensual típico del edificio o yarda."
+                  label="Utilities for the shop or office"
+                  hint="Only if not included in rent. Typical monthly amount for the building or yard."
                 >
                   <DollarInput
                     value={data.utilitiesMonthly}
@@ -992,16 +992,16 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Vehículos y equipo pesado" />
+                <OverheadGuidedSectionTitle label="Vehicles and heavy equipment" />
                 <EstimatorRow
-                  label="Vehículos de trabajo (camionetas, trucks)"
-                  hint="Cuántas unidades dedicas al negocio. ~$700/mes c/u es un orden de idea (pago, seguro, gas promedio)."
+                  label="Work vehicles (vans, trucks)"
+                  hint="How many units you dedicate to the business. ~$700/month each is a rough order of magnitude (payment, insurance, average fuel)."
                 >
                   <Stepper value={data.vehicles} min={0} max={15} onChange={(v) => set("vehicles", v)} />
                 </EstimatorRow>
                 <EstimatorRow
-                  label="Arrendamiento de equipo o herramientas"
-                  hint="Plataformas elevadoras, compresores, trailers de equipo, etc.: lo que pagas al mes por arrendar (no la compra puntual)."
+                  label="Equipment or tool leases"
+                  hint="Lifts, compressors, equipment trailers, and similar: what you pay per month to lease (not one-off purchases)."
                 >
                   <DollarInput
                     value={data.equipmentLeaseMonthly}
@@ -1010,16 +1010,16 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Personal y asesoría externa" />
+                <OverheadGuidedSectionTitle label="Staff and outside professionals" />
                 <EstimatorRow
-                  label="Personal que no va a la obra"
-                  hint="Oficina, administración o estimador dedicado. ~$3,500/mes por persona es referencia; pon 0 si no aplica."
+                  label="Staff not assigned to jobs"
+                  hint="Office, admin, or dedicated estimator. ~$3,500/month per person is a reference; use 0 if not applicable."
                 >
                   <Stepper value={data.nonJobStaff} min={0} max={8} onChange={(v) => set("nonJobStaff", v)} />
                 </EstimatorRow>
                 <EstimatorRow
-                  label="Contador, abogado u otros profesionales"
-                  hint="Honorarios mensuales o prorratea anual ÷ 12 (impuestos, contratos, compliance)."
+                  label="Accountant, attorney, or other professionals"
+                  hint="Monthly fees or annual ÷ 12 (taxes, contracts, compliance)."
                 >
                   <DollarInput
                     value={data.professionalFeesMonthly}
@@ -1028,26 +1028,26 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Seguros" />
+                <OverheadGuidedSectionTitle label="Insurance" />
                 <EstimatorRow
-                  label="Seguros del negocio (GL, vehículos comerciales, etc.)"
-                  hint="Prima mensual. Si pagas anual, divide entre 12. Workers comp a veces va aparte; inclúyelo aquí si es costo fijo mensual."
+                  label="Business insurance (GL, commercial vehicles, etc.)"
+                  hint="Monthly premium. If you pay annually, divide by 12. Workers comp is sometimes separate; include it here if it is a fixed monthly cost."
                 >
                   <DollarInput value={data.insurance} onChange={(v) => set("insurance", v)} placeholder="0" />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Tecnología y comunicación" />
+                <OverheadGuidedSectionTitle label="Technology and communications" />
                 <EstimatorRow
-                  label="Teléfono, internet y software"
-                  hint="Líneas del negocio, Wi‑Fi del local, QuickBooks, CRM, almacenamiento en la nube, etc."
+                  label="Phone, internet, and software"
+                  hint="Business lines, shop Wi‑Fi, QuickBooks, CRM, cloud storage, and similar."
                 >
                   <DollarInput value={data.phonesInternet} onChange={(v) => set("phonesInternet", v)} placeholder="0" />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Marketing y ventas" />
+                <OverheadGuidedSectionTitle label="Marketing and sales" />
                 <EstimatorRow
-                  label="Publicidad y marketing"
-                  hint="Google Ads, redes, flyers, vallas, agencia, fotos de trabajos: lo que gastas al mes de forma recurrente."
+                  label="Advertising and marketing"
+                  hint="Google Ads, social, flyers, yard signs, agency fees, portfolio photos: what you spend each month on a recurring basis."
                 >
                   <DollarInput
                     value={data.marketingAdvertising}
@@ -1056,10 +1056,10 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Licencias, membresías y plataformas de leads" />
+                <OverheadGuidedSectionTitle label="Licenses, memberships, and lead platforms" />
                 <EstimatorRow
-                  label="Licencias, renovaciones y suscripciones del ramo"
-                  hint="Registro de empresa, licencias estatales/locales, HomeAdvisor/Angi, Thumbtack, cámara de comercio, sindicato: total mensual o anual ÷ 12."
+                  label="Licenses, renewals, and trade subscriptions"
+                  hint="Business registration, state/local licenses, HomeAdvisor/Angi, Thumbtack, chamber of commerce, union dues: monthly total or annual ÷ 12."
                 >
                   <DollarInput
                     value={data.licensesMembershipsMonthly}
@@ -1068,10 +1068,10 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Deuda y pagos fijos del negocio" />
+                <OverheadGuidedSectionTitle label="Debt and fixed business payments" />
                 <EstimatorRow
-                  label="Pagos de préstamos o líneas de crédito del negocio"
-                  hint="Cuota mensual de financiamiento de equipo, vehículo comercial o LOC (solo la parte que pagas aunque no haya ventas)."
+                  label="Business loan or line-of-credit payments"
+                  hint="Monthly payment for equipment financing, commercial vehicle loans, or a LOC (only what you pay even when sales are slow)."
                 >
                   <DollarInput
                     value={data.businessDebtPaymentsMonthly}
@@ -1080,10 +1080,10 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Capacitación y cumplimiento" />
+                <OverheadGuidedSectionTitle label="Training and compliance" />
                 <EstimatorRow
-                  label="Capacitación, certificaciones y seguridad"
-                  hint="OSHA, EPA, renovaciones, cursos: pon un promedio mensual (anual ÷ 12) si no pagas cada mes."
+                  label="Training, certifications, and safety"
+                  hint="OSHA, EPA, renewals, courses: use a monthly average (annual ÷ 12) if you do not pay every month."
                 >
                   <DollarInput
                     value={data.trainingCertsMonthly}
@@ -1092,15 +1092,15 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                   />
                 </EstimatorRow>
 
-                <OverheadGuidedSectionTitle label="Todo lo demás (fijo cada mes)" />
+                <OverheadGuidedSectionTitle label="Everything else (fixed each month)" />
                 <EstimatorRow
-                  label="Otros gastos fijos"
-                  hint="Lo que no entró arriba pero pagas todos los meses: portero, limpieza del local, donativos fijos, etc."
+                  label="Other fixed expenses"
+                  hint="Anything not covered above that you still pay every month: security, janitorial, recurring donations, and similar."
                 >
                   <DollarInput value={data.otherCosts} onChange={(v) => set("otherCosts", v)} placeholder="0" />
                 </EstimatorRow>
                 <p className="pb-1 pt-2 text-center text-[11px] leading-relaxed text-[#9CA3AF]">
-                  El total grande arriba suma todas estas partidas; deja en 0 lo que no aplica.
+                  The large total above sums all of these categories; leave 0 where something does not apply.
                 </p>
               </div>
             </div>
@@ -1110,23 +1110,23 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
         {!guided && data.manualOverheadStyle === "lineItems" && data.overheadLineItems.length > 0 ? (
           <div className="rounded-xl border border-[#d9e2ec] bg-[#f9fafb] px-4 py-3">
             <p className="text-xs text-[#6B7280]">
-              Tienes {data.overheadLineItems.length} líneas · total{" "}
-              <strong>${effective.toLocaleString()}/mes</strong>
+              You have {data.overheadLineItems.length} lines · total{" "}
+              <strong>${effective.toLocaleString()}/month</strong>
             </p>
             <button
               type="button"
               onClick={openDetailModal}
               className="mt-2 text-sm font-medium text-[#ff5c35] hover:underline"
             >
-              Editar desglose
+              Edit line items
             </button>
           </div>
         ) : null}
 
         <div className="border-t border-[#d9e2ec] pt-5">
           <Field
-            label="Carga laboral % (labor burden)"
-            hint="Lo que pagas encima del salario base de la cuadrilla: impuestos patronales, workers comp, etc. Típico 18–25% en EE. UU. Si no sabes, deja 20% o pregunta a nómina/contador."
+            label="Labor burden %"
+            hint="Costs on top of base field wages: payroll taxes, workers comp, and similar. Typical 18–25% in the US. If unsure, use 20% or ask payroll or your accountant."
           >
             <div className="mt-1.5 flex flex-wrap items-center gap-3">
               <input
@@ -1137,13 +1137,13 @@ function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
                 onChange={(e) => set("laborBurdenPercent", Math.max(0, Number(e.target.value) || 0))}
                 className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none focus:border-[#ff5c35]"
               />
-              <span className="text-sm text-[#9CA3AF]">% — 20% es un punto de partida razonable</span>
+              <span className="text-sm text-[#9CA3AF]">% — 20% is a reasonable starting point</span>
             </div>
           </Field>
           <p className="mt-4 text-center text-[11px] leading-relaxed text-[#9CA3AF]">
-            Para llevar el overhead por partidas a tu manera (tipo Excel), podrás hacerlo después en{" "}
-            <strong className="font-medium text-[#6B7280]">Ajustes</strong>. En este paso alcanza con el total de arriba o
-            con la guía de gastos.
+            You can manage overhead line-by-line (like a spreadsheet) later in{" "}
+            <strong className="font-medium text-[#6B7280]">Settings</strong>. For this step, the total above or the
+            guided estimate is enough.
           </p>
         </div>
       </div>

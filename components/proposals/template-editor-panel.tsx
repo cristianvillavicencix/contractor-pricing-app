@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { X, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import type { ProposalTemplate, MaterialItem, TimelinePhase } from "@/lib/proposal-templates";
 import { PROPOSAL_SECTIONS } from "@/lib/proposal-templates";
+import { MaterialsTableEditor } from "@/components/proposals/materials-table-editor";
 
 type Props = {
   template: ProposalTemplate;
@@ -46,18 +47,18 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={onClose}
-              className="rounded-md border border-[#d9e2ec] px-4 py-2 text-sm text-gray-500 transition hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
+              type="button"
               onClick={handleSave}
               className="rounded-md bg-[#ff5c35] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#e94820]"
             >
               Save Template
             </button>
-            <button onClick={onClose} className="ml-1 rounded-md p-2 text-gray-400 transition hover:bg-gray-100">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-2 text-gray-400 transition hover:bg-gray-100"
+              aria-label="Close without saving (or click outside)"
+            >
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -102,7 +103,14 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
               <ScopeEditor section={draft.scopeOfWork} onChange={(v) => set("scopeOfWork", v)} />
             )}
             {activeSection === "materialsSpecs" && (
-              <MaterialsEditor section={draft.materialsSpecs} onChange={(v) => set("materialsSpecs", v)} />
+              <MaterialsEditor
+                section={draft.materialsSpecs}
+                onChange={(v) => set("materialsSpecs", v)}
+                tierMaterialsByPackage={draft.tierMaterialsByPackage}
+                onTierMaterialsByPackageChange={(v) =>
+                  setDraft((prev) => ({ ...prev, tierMaterialsByPackage: v }))
+                }
+              />
             )}
             {activeSection === "timeline" && (
               <TimelineEditor section={draft.timeline} onChange={(v) => set("timeline", v)} />
@@ -445,7 +453,17 @@ function ScopeEditor({ section, onChange }: { section: ProposalTemplate["scopeOf
 }
 
 // ── Materials & Specs ─────────────────────────────────────────────────────────
-function MaterialsEditor({ section, onChange }: { section: ProposalTemplate["materialsSpecs"]; onChange: (v: ProposalTemplate["materialsSpecs"]) => void }) {
+function MaterialsEditor({
+  section,
+  onChange,
+  tierMaterialsByPackage,
+  onTierMaterialsByPackageChange,
+}: {
+  section: ProposalTemplate["materialsSpecs"];
+  onChange: (v: ProposalTemplate["materialsSpecs"]) => void;
+  tierMaterialsByPackage?: ProposalTemplate["tierMaterialsByPackage"];
+  onTierMaterialsByPackageChange: (v: ProposalTemplate["tierMaterialsByPackage"]) => void;
+}) {
   function set<K extends keyof typeof section>(key: K, val: (typeof section)[K]) {
     onChange({ ...section, [key]: val });
   }
@@ -487,6 +505,25 @@ function MaterialsEditor({ section, onChange }: { section: ProposalTemplate["mat
         <button onClick={addItem} className="mt-3 flex items-center gap-1.5 text-sm text-[#ff5c35] hover:underline">
           <Plus className="h-4 w-4" /> Add material
         </button>
+      </FieldGroup>
+      <FieldGroup label="Materials by package (Good / Better / Best)">
+        <p className="mb-3 text-xs text-gray-500">
+          Rows shown in the PDF for each pricing tier when that tier is selected. If a tier has rows here, they override company defaults in Settings. Leave a tier empty to use Settings, then the shared table above.
+        </p>
+        {(["Good", "Better", "Best"] as const).map((pkg) => (
+          <div key={pkg} className="mb-4 rounded-lg border border-[#d9e2ec] bg-[#f9fbfc] p-3">
+            <MaterialsTableEditor
+              title={`${pkg} tier`}
+              items={tierMaterialsByPackage?.[pkg] ?? []}
+              onChange={(items) =>
+                onTierMaterialsByPackageChange({
+                  ...tierMaterialsByPackage,
+                  [pkg]: items,
+                })
+              }
+            />
+          </div>
+        ))}
       </FieldGroup>
     </div>
   );

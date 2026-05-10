@@ -1,6 +1,7 @@
 import {
   getEnabledCompanyCredentialDocuments,
   getEnabledCompanyCredentials,
+  getTierMaterialSummaries,
   mergeAppSettings,
   type AppSettings,
   type Project,
@@ -68,6 +69,8 @@ export type QuoteDocument = {
   bestPrice: number;
   selectedOption: "Good" | "Better" | "Best";
   pricingDescriptions: Record<"Good" | "Better" | "Best", string>;
+  /** Materials / brand highlight per tier (e.g. shingle manufacturer). */
+  tierMaterialSummaries: Record<"Good" | "Better" | "Best", string>;
   tradeServiceSuggestions: string[];
 };
 
@@ -173,6 +176,7 @@ export function buildQuoteDocument(
     bestPrice: quote.best.salePrice,
     selectedOption: quote.selectedOption,
     pricingDescriptions: getPricingDescriptions(settings),
+    tierMaterialSummaries: getTierMaterialSummaries(settings, quote),
     tradeServiceSuggestions: mergedSettings.contentDefaults.tradeServices[quote.trade ?? ""] ?? [],
   };
 }

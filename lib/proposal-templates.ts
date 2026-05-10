@@ -1,3 +1,9 @@
+import {
+  defaultRoofingBetterTierMaterialsTable,
+  defaultRoofingBestTierMaterialsTable,
+  defaultRoofingGoodTierMaterialsTable,
+} from "./default-roofing-tier-materials";
+
 // ─── Section types ────────────────────────────────────────────────────────────
 
 export type CoverSection = {
@@ -58,6 +64,18 @@ export type MaterialsSpecsSection = {
   items: MaterialItem[];
 };
 
+/** Good / Better / Best — matches pricing tier names in app data. */
+export type ProposalPackageName = "Good" | "Better" | "Best";
+
+/**
+ * Optional per-tier rows for the Materials & Specifications section (per trade template).
+ * When a tier has at least one filled row, it overrides company Settings for that package.
+ * Empty / omitted tiers fall back to Settings, then to `materialsSpecs.items`.
+ */
+export type TierMaterialsByPackage = Partial<
+  Record<ProposalPackageName, MaterialItem[]>
+>;
+
 export type TimelinePhase = {
   id: string;
   name: string;
@@ -116,6 +134,8 @@ export type ProposalTemplate = {
   existingConditions: ExistingConditionsSection;
   scopeOfWork: ScopeSection;
   materialsSpecs: MaterialsSpecsSection;
+  /** Per-package materials rows; overrides company Settings when non-empty for that tier. */
+  tierMaterialsByPackage?: TierMaterialsByPackage;
   timeline: TimelineSection;
   pricing: PricingSection;
   warranty: WarrantySection;
@@ -250,6 +270,12 @@ export const defaultRoofingTemplate: ProposalTemplate = {
     ],
   },
 
+  tierMaterialsByPackage: {
+    Good: defaultRoofingGoodTierMaterialsTable,
+    Better: defaultRoofingBetterTierMaterialsTable,
+    Best: defaultRoofingBestTierMaterialsTable,
+  },
+
   timeline: {
     enabled: true,
     estimatedDays: 2,
@@ -350,6 +376,22 @@ export const defaultProposalTemplates: ProposalTemplate[] = [
   blankTemplate("Remodeling"),
   blankTemplate("General Contractor"),
 ];
+
+/**
+ * Deep-clone a proposal template under a new trade / id (e.g. Duplicate in Settings).
+ * Caller should `upsertProposalTemplate` after the user saves from the editor.
+ */
+export function cloneProposalTemplateWithNewIdentity(
+  source: ProposalTemplate,
+  next: { id: string; trade: string; name: string }
+): ProposalTemplate {
+  const copy = JSON.parse(JSON.stringify(source)) as ProposalTemplate;
+  copy.id = next.id.trim();
+  copy.trade = next.trade.trim();
+  copy.name = next.name.trim();
+  copy.lastModified = new Date().toISOString().slice(0, 10);
+  return copy;
+}
 
 export function mergeProposalTemplates(saved: ProposalTemplate[]): ProposalTemplate[] {
   const merged = [...defaultProposalTemplates];

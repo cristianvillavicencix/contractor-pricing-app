@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Calculator, Clock3, DollarSign, History, Settings, Trash2, X } from "lucide-react";
+import { getMoneyFormatPrefs } from "@/lib/money-format-prefs";
 import {
   clearPricingSessionHistory,
   dispatchRestorePricingSession,
@@ -614,10 +615,12 @@ function formatCalculatorNumber(value: number, decimals = 2) {
 
 function formatCalculatorCurrency(value: number) {
   if (!Number.isFinite(value)) return "$0";
-
+  const { currency, numberFormat } = getMoneyFormatPrefs();
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
+    useGrouping: numberFormat === "1,000.00",
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
 }

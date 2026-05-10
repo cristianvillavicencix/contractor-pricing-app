@@ -13,21 +13,21 @@ function formatAuthError(e: unknown): string {
     const base = String(o.message);
     const code = o.code ?? "";
     if (code === "user_already_exists" || /already registered|already been registered/i.test(base)) {
-      return "Ese correo ya tiene cuenta. Usa «Entrar» o recupera el acceso desde Supabase / «Olvidé contraseña» si lo activaste.";
+      return "That email already has an account. Use Sign in, or reset your password from Supabase if you enabled it.";
     }
     if (code === "weak_password" || /password.*at least|Password should be/i.test(base)) {
-      return "Contraseña demasiado débil. Prueba con al menos 6 caracteres (Supabase puede exigir más según la configuración).";
+      return "Password is too weak. Try at least 6 characters (Supabase may require more depending on your project settings).";
     }
     if (o.code === "signup_disabled" || /signups not allowed/i.test(base)) {
-      return "Los registros con email están desactivados en este proyecto. Actívalos en Supabase → Authentication → Providers → Email.";
+      return "Email sign-ups are disabled for this project. Enable them in Supabase → Authentication → Providers → Email.";
     }
     if (/provider is not enabled|Unsupported provider|validation_failed/i.test(base)) {
-      return "Google no está habilitado o mal configurado. En Supabase: Authentication → Providers → Google (Client ID, Secret y guardar).";
+      return "Google sign-in is not enabled or is misconfigured. In Supabase: Authentication → Providers → Google (Client ID, Secret, save).";
     }
     if (o.status) return `${base} (HTTP ${o.status})`;
     return base;
   }
-  return e instanceof Error ? e.message : "Error de autenticación";
+  return e instanceof Error ? e.message : "Authentication error";
 }
 
 function LoginPageInner() {
@@ -93,9 +93,9 @@ function LoginPageInner() {
     setBusy(true);
     setBusyKind("signin");
     try {
-      if (!email.trim()) throw new Error("El correo es obligatorio");
+      if (!email.trim()) throw new Error("Email is required");
       if (mode === "password") {
-        if (!password) throw new Error("La contraseña es obligatoria");
+        if (!password) throw new Error("Password is required");
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
@@ -112,7 +112,7 @@ function LoginPageInner() {
         },
       });
       if (error) throw error;
-      setInfoMessage("Revisa tu correo para el enlace de acceso.");
+      setInfoMessage("Check your email for the sign-in link.");
     } catch (e) {
       setError(formatAuthError(e));
     } finally {
@@ -129,10 +129,10 @@ function LoginPageInner() {
     setBusyKind("signup");
     try {
       if (mode !== "password") {
-        throw new Error('Para registrarte, elige la pestaña «Contraseña», correo y contraseña, luego «Crear cuenta».');
+        throw new Error('To sign up, use the Password tab, enter email and password, then click Create account.');
       }
-      if (!email.trim()) throw new Error("El correo es obligatorio");
-      if (!password) throw new Error("La contraseña es obligatoria");
+      if (!email.trim()) throw new Error("Email is required");
+      if (!password) throw new Error("Password is required");
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -146,7 +146,7 @@ function LoginPageInner() {
         return;
       }
       setInfoMessage(
-        "Cuenta creada. Si pides confirmar el correo, revisa la bandeja (y la carpeta de spam). Sin SMTP en Supabase, el correo no llegará: desactiva “Confirm email” en Email provider o configura SMTP."
+        "Account created. If email confirmation is required, check your inbox (and spam). Without SMTP configured in Supabase, mail may not arrive: turn off “Confirm email” on the Email provider or configure SMTP."
       );
     } catch (e) {
       setError(formatAuthError(e));
@@ -161,7 +161,7 @@ function LoginPageInner() {
     setInfoMessage(null);
     setHashAuthError(null);
     if (!email.trim()) {
-      setError("Escribe tu correo para enviarte el enlace de recuperación.");
+      setError("Enter your email so we can send a reset link.");
       return;
     }
     setBusy(true);
@@ -173,7 +173,7 @@ function LoginPageInner() {
       });
       if (error) throw error;
       setInfoMessage(
-        "Si ese correo tiene cuenta, recibirás un enlace para elegir una contraseña nueva. Revisa spam."
+        "If that email has an account, you will receive a link to choose a new password. Check spam as well."
       );
     } catch (e) {
       setError(formatAuthError(e));
@@ -202,7 +202,7 @@ function LoginPageInner() {
         window.location.assign(data.url);
         return;
       }
-      throw new Error("No se recibió URL de Google. Revisa la configuración del proveedor en Supabase.");
+      throw new Error("No Google URL returned. Check the Google provider configuration in Supabase.");
     } catch (e) {
       setError(formatAuthError(e));
       setBusy(false);
@@ -213,12 +213,12 @@ function LoginPageInner() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-4 text-[#213343]">
       <div className="w-full max-w-md rounded-xl border border-[#d9e2ec] bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold">Iniciar sesión</h1>
-        <p className="mt-1 text-sm text-gray-500">Accede a tu espacio de trabajo.</p>
+        <h1 className="text-xl font-semibold">Sign in</h1>
+        <p className="mt-1 text-sm text-gray-500">Access your workspace.</p>
 
         <div className="mt-5 space-y-3">
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">Correo</span>
+            <span className="mb-1 block text-sm font-medium">Email</span>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -230,7 +230,7 @@ function LoginPageInner() {
           {mode === "password" ? (
             <div className="space-y-1">
               <label className="block">
-                <span className="mb-1 block text-sm font-medium">Contraseña</span>
+                <span className="mb-1 block text-sm font-medium">Password</span>
                 <input
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -245,7 +245,7 @@ function LoginPageInner() {
                 onClick={() => void sendPasswordReset()}
                 className="text-xs font-medium text-[#ff5c35] hover:underline disabled:opacity-50"
               >
-                {busy && busyKind === "reset" ? "Enviando…" : "¿Olvidaste tu contraseña?"}
+                {busy && busyKind === "reset" ? "Sending…" : "Forgot password?"}
               </button>
             </div>
           ) : null}
@@ -264,7 +264,7 @@ function LoginPageInner() {
                   : "border-[#d9e2ec] bg-white text-gray-600"
               }`}
             >
-              Contraseña
+              Password
             </button>
             <button
               type="button"
@@ -279,12 +279,12 @@ function LoginPageInner() {
                   : "border-[#d9e2ec] bg-white text-gray-600"
               }`}
             >
-              Enlace mágico
+              Magic link
             </button>
           </div>
           {mode === "magic" ? (
             <p className="text-xs text-gray-500">
-              El registro («Crear cuenta») solo está en la pestaña <strong>Contraseña</strong>.
+              Sign up (<strong>Create account</strong>) is only available on the <strong>Password</strong> tab.
             </p>
           ) : null}
 
@@ -307,11 +307,11 @@ function LoginPageInner() {
           >
             {busy && busyKind === "signin"
               ? mode === "magic"
-                ? "Enviando…"
-                : "Entrando…"
+                ? "Sending…"
+                : "Signing in…"
               : mode === "magic"
-                ? "Enviar enlace"
-                : "Entrar"}
+                ? "Send link"
+                : "Sign in"}
           </button>
 
           {mode === "password" ? (
@@ -321,7 +321,7 @@ function LoginPageInner() {
               onClick={signUp}
               className="w-full rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-[#f6f8fb] disabled:opacity-60"
             >
-              {busy && busyKind === "signup" ? "Creando cuenta…" : "Crear cuenta"}
+              {busy && busyKind === "signup" ? "Creating account…" : "Create account"}
             </button>
           ) : null}
 
@@ -332,7 +332,7 @@ function LoginPageInner() {
               onClick={signInWithGoogle}
               className="w-full rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-[#f6f8fb] disabled:opacity-60"
             >
-              {busy && busyKind === "google" ? "Abriendo Google…" : "Continuar con Google"}
+              {busy && busyKind === "google" ? "Opening Google…" : "Continue with Google"}
             </button>
           </div>
         </div>
@@ -346,7 +346,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
-          Cargando…
+          Loading…
         </div>
       }
     >

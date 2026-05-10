@@ -101,15 +101,29 @@ export function PagedProposalPreview({
 
       if (cancelled || renderId !== renderIdRef.current) return;
 
+      /*
+       * Each run must use its own buffer: clearing `staging.innerHTML` while another
+       * in-flight `preview()` still walks that DOM makes Paged.js throw
+       * (e.g. "Cannot read properties of null (reading 'nextSibling')").
+       */
+      const stagingBuffer = document.createElement("div");
+      stagingBuffer.className = "paged-proposal-staging-buffer";
+      staging.appendChild(stagingBuffer);
+
       const previewer = new paged.Previewer();
-      staging.innerHTML = "";
       /* Empty [] would skip Polisher.add(); Paged then keeps ~Letter page height and a 297mm cover splits across two sheets. */
       const a4Stylesheet = `${window.location.origin}/paged-proposal-a4.css`;
-      const flow = await previewer.preview(clonedDocument, [a4Stylesheet], staging);
+
+      let flow: PagedFlow = {};
+      try {
+        flow = await previewer.preview(clonedDocument, [a4Stylesheet], stagingBuffer);
+      } finally {
+        stagingBuffer.remove();
+      }
 
       if (cancelled || renderId !== renderIdRef.current) return;
 
-      target.replaceChildren(...Array.from(staging.childNodes));
+      target.replaceChildren(...Array.from(stagingBuffer.childNodes));
       removeTrailingBlankPages(target);
 
       const pageCount = target.querySelectorAll(".pagedjs_page").length || flow.total || 0;

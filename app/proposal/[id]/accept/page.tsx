@@ -6,6 +6,8 @@ import { Check, ExternalLink, Shield } from "lucide-react";
 import {
   defaultSettings,
   formatMoney,
+  getTierDisplayName,
+  getTierMaterialSummaries,
   mergeAppSettings,
   type AppSettings,
   type PriceOptionName,
@@ -158,6 +160,7 @@ function AcceptPageInner() {
   const effectiveOption = showTiers ? clientSelectedOption : quote.selectedOption;
   const selectedResult =
     effectiveOption === "Good" ? quote.good : effectiveOption === "Better" ? quote.better : quote.best;
+  const tierMaterialLines = getTierMaterialSummaries(mergedSettings, quote);
 
   const pagedRenderKey = JSON.stringify({
     quote: { ...quote, selectedOption: effectiveOption },
@@ -276,7 +279,9 @@ function AcceptPageInner() {
           <div className="mb-6 rounded-xl border border-[#d9e2ec] bg-white p-5 shadow-sm">
             <p className="text-sm font-semibold text-[#213343]">Choose your option</p>
             <p className="mt-1 text-xs text-gray-500">
-              Select Good, Better, or Best. Your choice is part of this agreement.
+              Select {getTierDisplayName(mergedSettings, "Good")},{" "}
+              {getTierDisplayName(mergedSettings, "Better")}, or {getTierDisplayName(mergedSettings, "Best")}. Your
+              choice is part of this agreement.
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {(["Good", "Better", "Best"] as const).map((tier) => {
@@ -296,7 +301,9 @@ function AcceptPageInner() {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-[#213343]">{tier}</span>
+                      <span className="text-sm font-semibold text-[#213343]">
+                        {getTierDisplayName(mergedSettings, tier)}
+                      </span>
                       {recommended ? (
                         <span className="rounded bg-[#213343] px-2 py-0.5 text-[10px] font-medium text-white">
                           Recommended
@@ -304,6 +311,9 @@ function AcceptPageInner() {
                       ) : null}
                     </div>
                     <p className="mt-2 text-xl font-bold text-[#213343]">{formatMoney(tierResult.salePrice)}</p>
+                    {tierMaterialLines[tier] ? (
+                      <p className="mt-1.5 text-xs font-semibold text-[#213343]">{tierMaterialLines[tier]}</p>
+                    ) : null}
                     <p className="mt-1 line-clamp-3 text-xs text-gray-500">{tierResult.description}</p>
                   </button>
                 );
@@ -392,6 +402,9 @@ function AcceptPageInner() {
                 <p className="text-2xl font-bold text-[#213343]">{formatMoney(selectedResult.salePrice)}</p>
               </div>
               <p className="mt-1 text-xs text-gray-400">{selectedResult.description}</p>
+              {tierMaterialLines[effectiveOption] ? (
+                <p className="mt-2 text-xs font-semibold text-[#213343]">{tierMaterialLines[effectiveOption]}</p>
+              ) : null}
             </div>
 
             <div className="mt-6">

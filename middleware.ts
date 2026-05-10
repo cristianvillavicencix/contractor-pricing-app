@@ -44,7 +44,8 @@ export async function middleware(request: NextRequest) {
   }
 
   if (session && path === "/login") {
-    url.pathname = "/projects";
+    url.pathname = "/auth/complete";
+    url.searchParams.set("next", "/projects");
     return NextResponse.redirect(url);
   }
 

@@ -36,9 +36,12 @@ export default function QuotesPage() {
       : new URLSearchParams(window.location.search).get("quoteId")
   );
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setIsLoading(true);
+      setLoadError(null);
+    }
     try {
       const [dbQuotes, dbProjects, dbContacts] = await Promise.all([
         listQuotes(supabase),
@@ -49,15 +52,29 @@ export default function QuotesPage() {
       setProjects(dbProjects);
       setContacts(dbContacts);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load quotes");
+      if (!silent) {
+        setLoadError(e instanceof Error ? e.message : "Failed to load quotes");
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [supabase]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- mount fetch updates list state
     void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        void loadData({ silent: true });
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [loadData]);
 
   const filteredQuotes = useMemo(() => {
@@ -77,7 +94,16 @@ export default function QuotesPage() {
     setQuotes((current) => {
       const next = current.map((quote) => (quote.id === id ? { ...quote, status } : quote));
       const updated = next.find((q) => q.id === id);
-      if (updated) upsertQuote(supabase, updated).catch(() => undefined);
+      if (updated) {
+        void (async () => {
+          try {
+            await upsertQuote(supabase, updated);
+            await loadData({ silent: true });
+          } catch {
+            await loadData({ silent: true });
+          }
+        })();
+      }
       return next;
     });
   }
@@ -115,18 +141,18 @@ export default function QuotesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
-              <p className="text-sm font-medium text-gray-500">Quotes</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+              <p className="page-kicker text-sm font-medium">Quotes</p>
+              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
                 Quotes
               </h2>
-              <p className="mt-3 max-w-2xl text-gray-500">
+              <p className="page-description mt-3 max-w-2xl text-sm">
                 Review and export client-ready proposals from your pricing results.
               </p>
             </div>
@@ -139,7 +165,7 @@ export default function QuotesPage() {
             </Link>
           </header>
 
-          <section className="mt-8 rounded-lg border border-[#d9e2ec] bg-white p-4">
+          <section className="mt-8 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4">
             <div className="flex flex-col gap-3 sm:flex-row">
               <label className="relative flex-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -153,7 +179,7 @@ export default function QuotesPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as "All" | QuoteStatus)}
-                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35] sm:w-48"
+                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35] sm:w-48"
               >
                 <option value="All">All statuses</option>
                 {quoteStatusOptions.map((status) => (
@@ -176,7 +202,7 @@ export default function QuotesPage() {
                     <button
                       key={quote.id}
                       onClick={() => setSelectedQuoteId(quote.id)}
-                      className="w-full rounded-lg border border-[#d9e2ec] bg-white p-4 text-left transition hover:bg-[#f6f8fb]"
+                      className="w-full elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4 text-left transition hover:bg-[#f6f8fb]"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -208,7 +234,7 @@ export default function QuotesPage() {
               </div>
 
               {/* Desktop table */}
-              <div className="hidden overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white sm:block">
+              <div className="hidden overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
                 <div className="grid min-w-215 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
                   <span>Quote</span>
                   <span>Status</span>
@@ -250,7 +276,7 @@ export default function QuotesPage() {
               </div>
             </section>
           ) : (
-            <section className="mt-6 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
+            <section className="mt-6 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-10 text-center">
               <p className="text-lg font-semibold tracking-tight">
                 {quotes.length === 0 ? t("emptyQuotes") : "No quotes match filters"}
               </p>
@@ -371,7 +397,7 @@ function QuoteDetailPanel({
             <select
               value={quote.status}
               onChange={(e) => onStatusChange(e.target.value as QuoteStatus)}
-              className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#ff5c35]"
+              className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
             >
               {quoteStatusOptions.map((status) => (
                 <option key={status} value={status}>

@@ -53,9 +53,12 @@ export default function ContactsPage() {
         : new URLSearchParams(window.location.search).get("contactId")
   );
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setIsLoading(true);
+      setLoadError(null);
+    }
     try {
       const [dbContacts, dbProjects, dbQuotes] = await Promise.all([
         listContacts(supabase),
@@ -66,9 +69,13 @@ export default function ContactsPage() {
       setProjects(dbProjects);
       setQuotes(dbQuotes);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load");
+      if (!silent) {
+        setLoadError(e instanceof Error ? e.message : "Failed to load");
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [supabase]);
 
@@ -102,14 +109,29 @@ export default function ContactsPage() {
       createdAt: getTodayLabel(),
     };
     setContacts((current) => [next, ...current]);
-    upsertContact(supabase, next).catch(() => undefined);
-    setForm(emptyContact);
-    setError("");
+    void (async () => {
+      try {
+        await upsertContact(supabase, next);
+        await loadData({ silent: true });
+        setForm(emptyContact);
+        setError("");
+      } catch {
+        setContacts((current) => current.filter((c) => c.id !== next.id));
+        setError("Could not save contact. Try again.");
+      }
+    })();
   }
 
   function updateContact(updated: Contact) {
     setContacts((current) => current.map((c) => (c.id === updated.id ? updated : c)));
-    upsertContact(supabase, updated).catch(() => undefined);
+    void (async () => {
+      try {
+        await upsertContact(supabase, updated);
+        await loadData({ silent: true });
+      } catch {
+        await loadData({ silent: true });
+      }
+    })();
   }
 
   async function deleteContact(id: string) {
@@ -124,6 +146,7 @@ export default function ContactsPage() {
     await deleteContactDb(supabase, id);
     setContacts((current) => current.filter((c) => c.id !== id));
     setSelectedContactId(null);
+    await loadData({ silent: true });
   }
 
   const selectedContact = contacts.find(
@@ -155,24 +178,24 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header>
-            <p className="text-sm font-medium text-gray-500">Contacts</p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+            <p className="page-kicker text-sm font-medium">Contacts</p>
+            <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
               Contacts
             </h2>
-            <p className="mt-3 max-w-2xl text-gray-500">
+            <p className="page-description mt-3 max-w-2xl text-sm">
               Store basic customer information before connecting projects and
               quotes to a full CRM later.
             </p>
           </header>
 
           <div className="mt-8 grid gap-6 xl:grid-cols-[360px_1fr]">
-            <section className="h-fit rounded-lg border border-[#d9e2ec] bg-white p-5 sm:p-6">
+            <section className="h-fit elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 sm:p-6">
               <h3 className="text-lg font-semibold tracking-tight">
                 New Contact
               </h3>
@@ -208,7 +231,7 @@ export default function ContactsPage() {
                           .value as Contact["customerType"],
                       })
                     }
-                    className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+                    className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
                   >
                     <option>Homeowner</option>
                     <option>Business</option>
@@ -251,7 +274,7 @@ export default function ContactsPage() {
                   <button
                     key={contact.id}
                     onClick={() => setSelectedContactId(contact.id)}
-                    className="w-full rounded-lg border border-[#d9e2ec] bg-white p-4 text-left transition hover:bg-[#f6f8fb]"
+                    className="w-full elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4 text-left transition hover:bg-[#f6f8fb]"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -269,7 +292,7 @@ export default function ContactsPage() {
               </div>
 
               {/* Desktop table */}
-              <div className="mt-5 hidden overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white sm:block">
+              <div className="mt-5 hidden overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
                 <div className="grid min-w-190 grid-cols-[1.4fr_1fr_1fr_1.3fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
                   <span>Name</span>
                   <span>Type</span>
@@ -298,7 +321,7 @@ export default function ContactsPage() {
               </div>
 
               {filteredContacts.length === 0 ? (
-                <div className="mt-5 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
+                <div className="mt-5 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-10 text-center">
                   <p className="font-semibold tracking-tight">
                     {contacts.length === 0 ? t("emptyContacts") : "No contacts match your search"}
                   </p>
@@ -371,7 +394,7 @@ function ContactDetailPanel({
     >
       <aside
         onClick={(event) => event.stopPropagation()}
-        className="ml-auto h-full w-full overflow-auto border-l border-[#d9e2ec] bg-white p-5 sm:p-6 lg:w-1/2"
+        className="elevated-panel ml-auto h-full w-full overflow-auto border-l border-[#d9e2ec] bg-white p-5 sm:p-6 dark:border-slate-600 lg:w-1/2"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -410,7 +433,7 @@ function ContactDetailPanel({
               <select
                 value={draft.customerType}
                 onChange={(e) => setDraft({ ...draft, customerType: e.target.value as Contact["customerType"] })}
-                className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+                className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
               >
                 <option>Homeowner</option>
                 <option>Business</option>
@@ -450,7 +473,7 @@ function ContactDetailPanel({
         )}
 
         {!isEditing && (
-          <section className="mt-4 rounded-lg border border-[#d9e2ec] bg-white p-5">
+          <section className="mt-4 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5">
             <p className="text-sm font-medium text-black">Notes</p>
             <p className="mt-3 text-sm leading-6 text-gray-600">
               {contact.notes || "No notes yet."}
@@ -458,7 +481,7 @@ function ContactDetailPanel({
           </section>
         )}
 
-        <section className="mt-4 rounded-lg border border-[#d9e2ec] bg-white p-5">
+        <section className="mt-4 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-black">
@@ -501,7 +524,7 @@ function ContactDetailPanel({
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-[#d9e2ec] bg-white p-5">
+        <section className="mt-4 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-black">
@@ -664,7 +687,7 @@ function samePhone(left: string, right: string) {
 
 function DetailBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-[#d9e2ec] bg-white p-5 text-sm">
+    <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 text-sm">
       <p className="text-gray-500">{label}</p>
       <p className="mt-2 font-medium text-black">{value}</p>
     </div>
@@ -686,7 +709,7 @@ function TextField({
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+        className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
       />
     </label>
   );

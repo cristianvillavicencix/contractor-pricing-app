@@ -23,6 +23,8 @@ export default function DashboardPage() {
 
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ["dashboard", "lists"],
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const [rawSettings, dbProjects, dbQuotes] = await Promise.all([
         loadCompanySettings<AppSettings | null>(supabase),
@@ -81,7 +83,7 @@ export default function DashboardPage() {
 
   if (isPending) {
     return (
-      <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
         <AppSidebar />
         <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
           <PageSkeleton rows={6} />
@@ -108,16 +110,16 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
-              <p className="text-sm font-medium text-gray-500">Dashboard</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Overview</h2>
-              <p className="mt-3 max-w-2xl text-gray-500">
+              <p className="page-kicker text-sm font-medium">Dashboard</p>
+              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Overview</h2>
+              <p className="page-description mt-3 max-w-2xl text-sm">
                 Your business at a glance — pipeline, quotes, and margins.
               </p>
             </div>
@@ -160,7 +162,7 @@ export default function DashboardPage() {
           </section>
 
           <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_320px]">
-            <div className="rounded-lg border border-[#d9e2ec] bg-white">
+            <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600">
               <div className="flex items-center justify-between border-b border-[#d9e2ec] p-5 sm:p-6">
                 <div>
                   <h3 className="text-base font-semibold tracking-tight">Recent Quotes</h3>
@@ -207,7 +209,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="space-y-5">
-              <div className="rounded-lg border border-[#d9e2ec] bg-white p-5">
+              <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white p-5 dark:border-slate-600">
                 <h3 className="text-sm font-semibold tracking-tight">Projects by Status</h3>
                 <div className="mt-4 space-y-2">
                   {(["Draft", "Pricing", "Quoted", "Won", "Lost", "Archived"] as const).map((status) => {
@@ -232,7 +234,7 @@ export default function DashboardPage() {
               </div>
 
               {quotes.length > 0 && (
-                <div className="rounded-lg border border-[#d9e2ec] bg-white p-5">
+                <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white p-5 dark:border-slate-600">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="h-4 w-4 text-gray-400" />
                     <h3 className="text-sm font-semibold tracking-tight">Quote Averages</h3>
@@ -292,7 +294,7 @@ function MetricCard({
 }) {
   return (
     <article
-      className={`rounded-lg border p-5 sm:p-6 ${accent ? "border-[#111111] bg-[#111111] text-white" : "border-[#d9e2ec] bg-white"}`}
+      className={`rounded-lg border p-5 sm:p-6 ${accent ? "border-[#111111] bg-[#111111] text-white" : "elevated-panel border-[#d9e2ec] bg-white dark:border-slate-600"}`}
     >
       <p className={`text-sm font-medium ${accent ? "text-white/70" : "text-gray-500"}`}>{label}</p>
       <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>

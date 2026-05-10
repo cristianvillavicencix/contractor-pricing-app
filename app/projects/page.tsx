@@ -1,14 +1,14 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import { ProjectDetailPanel } from "@/components/projects/project-detail-panel";
 import { ProjectForm } from "@/components/projects/project-form";
 import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
-import { mergeAppSettings } from "@/lib/app-data";
+import { getTierMaterialSummaries, mergeAppSettings } from "@/lib/app-data";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   deleteProject as deleteProjectDb,
@@ -50,11 +50,25 @@ type TradeFilter = "All" | Trade;
 type ProjectDetailTab = "overview" | "costs" | "quote" | "notes";
 
 export default function ProjectsPage() {
-  const router = useRouter();
-  return <ProjectsPageClient router={router} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+          <AppSidebar />
+          <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+            <PageSkeleton rows={8} />
+          </main>
+        </div>
+      }
+    >
+      <ProjectsPageClient />
+    </Suspense>
+  );
 }
 
-function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }) {
+function ProjectsPageClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -114,9 +128,12 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     (project) => project.id === selectedProjectId
   );
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setIsLoading(true);
+      setLoadError(null);
+    }
     try {
       const [dbSettings, dbProjects, dbContacts, dbQuotes] = await Promise.all([
         loadCompanySettings<AppSettings>(supabase),
@@ -129,9 +146,13 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       setContacts(dbContacts);
       setQuotes(dbQuotes);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load data");
+      if (!silent) {
+        setLoadError(e instanceof Error ? e.message : "Failed to load data");
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [supabase]);
 
@@ -140,24 +161,30 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     void loadData();
   }, [loadData]);
 
+  const projectIdFromUrl = searchParams.get("projectId");
+  const projectTabFromUrl = searchParams.get("projectTab");
+
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const projectId = params.get("projectId");
-
-    if (!projectId) return;
-
-    /* eslint-disable react-hooks/set-state-in-effect -- URL query → panel state on mount */
-    setSelectedProjectId(projectId);
-    setInitialProjectTab(getProjectTab(params.get("projectTab")));
+    if (!projectIdFromUrl) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- URL query → panel state */
+    setSelectedProjectId(projectIdFromUrl);
+    setInitialProjectTab(getProjectTab(projectTabFromUrl));
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, []);
+  }, [projectIdFromUrl, projectTabFromUrl]);
 
-  function createProject(project: Project) {
+  async function createProject(project: Project) {
     setProjects((current) => [project, ...current]);
     setInitialProjectTab("costs");
     setSelectedProjectId(project.id);
     setIsFormOpen(false);
-    upsertProject(supabase, project).catch(() => undefined);
+    try {
+      await upsertProject(supabase, project);
+      await loadData({ silent: true });
+    } catch {
+      setProjects((current) => current.filter((p) => p.id !== project.id));
+      setSelectedProjectId(null);
+      setLoadError("Could not save project. Check your connection and try again.");
+    }
   }
 
   function createContact(contact: Omit<Contact, "id" | "createdAt">) {
@@ -176,7 +203,14 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       createdAt: getTodayLabel(),
     };
     setContacts((current) => [nextContact, ...current]);
-    upsertContact(supabase, nextContact).catch(() => undefined);
+    void (async () => {
+      try {
+        await upsertContact(supabase, nextContact);
+        await loadData({ silent: true });
+      } catch {
+        setContacts((current) => current.filter((c) => c.id !== nextContact.id));
+      }
+    })();
     return nextContact;
   }
 
@@ -193,6 +227,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     setProjects((current) => current.filter((p) => p.id !== project.id));
     setSelectedProjectId(null);
     setInitialProjectTab("costs");
+    await loadData({ silent: true });
   }
 
   function duplicateProject(project: Project) {
@@ -207,7 +242,15 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
     setProjects((current) => [copy, ...current]);
     setInitialProjectTab("costs");
     setSelectedProjectId(copy.id);
-    upsertProject(supabase, copy).catch(() => undefined);
+    void (async () => {
+      try {
+        await upsertProject(supabase, copy);
+        await loadData({ silent: true });
+      } catch {
+        setProjects((current) => current.filter((p) => p.id !== copy.id));
+        setSelectedProjectId(null);
+      }
+    })();
   }
 
   function updateProject(updatedProject: Project) {
@@ -216,21 +259,36 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
         project.id === updatedProject.id ? updatedProject : project
       )
     );
-    upsertProject(supabase, updatedProject).catch(() => undefined);
+    void (async () => {
+      try {
+        await upsertProject(supabase, updatedProject);
+        await loadData({ silent: true });
+      } catch {
+        await loadData({ silent: true });
+      }
+    })();
   }
 
-  function priceProject(project: Project) {
+  async function priceProject(project: Project) {
     const pricedProject: Project = {
       ...project,
       status: project.status === "Draft" ? "Pricing" : project.status,
     };
 
-    updateProject(pricedProject);
+    setProjects((current) =>
+      current.map((p) => (p.id === pricedProject.id ? pricedProject : p))
+    );
     setPricingByProject((current) => ({
       ...current,
       [project.id]: calculateProjectPricing(pricedProject, settings),
     }));
     setSelectedProjectId(project.id);
+    try {
+      await upsertProject(supabase, pricedProject);
+      await loadData({ silent: true });
+    } catch {
+      await loadData({ silent: true });
+    }
     router.push(`/pricing?projectId=${encodeURIComponent(project.id)}`);
   }
 
@@ -258,6 +316,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
           (Boolean(item.email) && sameText(item.email, project.customerEmail)) ||
           (Boolean(item.phone) && sameText(item.phone, project.customerPhone))
       );
+    const merged = mergeAppSettings(settings);
     const quote: Quote = {
       id,
       projectId: project.id,
@@ -272,6 +331,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       proposalNumber: computeNextProposalNumber(quotes),
       warrantyText: snapshot?.warrantyText,
       termsText: snapshot?.termsText,
+      tierMaterials: getTierMaterialSummaries(merged, null),
       good: pricing[0],
       better: pricing[1],
       best: pricing[2],
@@ -281,19 +341,28 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
       expiresAt: getExpirationLabel(14),
     };
 
-    updateProject(nextProject);
+    setProjects((current) =>
+      current.map((p) => (p.id === project.id ? nextProject : p))
+    );
     setQuotes((current) => [quote, ...current]);
     setPricingByProject((current) => ({
       ...current,
       [project.id]: pricing,
     }));
-    upsertProject(supabase, nextProject).catch(() => undefined);
-    upsertQuote(supabase, quote).catch(() => undefined);
+    void (async () => {
+      try {
+        await upsertProject(supabase, nextProject);
+        await upsertQuote(supabase, quote);
+        await loadData({ silent: true });
+      } catch {
+        await loadData({ silent: true });
+      }
+    })();
   }
 
   if (isLoading && !loadError) {
     return (
-      <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+      <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
         <AppSidebar />
         <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
           <PageSkeleton rows={8} />
@@ -316,18 +385,18 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
   }
 
   return (
-    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
           <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
-              <p className="text-sm font-medium text-gray-500">Projects</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+              <p className="page-kicker text-sm font-medium">Projects</p>
+              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
                 Projects
               </h2>
-              <p className="mt-3 max-w-2xl text-gray-500">
+              <p className="page-description mt-3 max-w-2xl text-sm">
                 Manage job opportunities, costs, and pricing recommendations.
               </p>
             </div>
@@ -341,7 +410,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
             </button>
           </header>
 
-          <section className="mt-8 rounded-lg border border-[#d9e2ec] bg-white p-4 sm:p-5">
+          <section className="mt-8 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4 sm:p-5">
             <div className="grid gap-4 lg:grid-cols-[1fr_180px_180px]">
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -358,7 +427,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
                 onChange={(event) =>
                   setStatusFilter(event.target.value as StatusFilter)
                 }
-                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
               >
                 <option value="All">All statuses</option>
                 {statusOptions.map((status) => (
@@ -373,7 +442,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
                 onChange={(event) =>
                   setTradeFilter(event.target.value as TradeFilter)
                 }
-                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
               >
                 <option value="All">All trades</option>
                 {tradeOptions.map((trade) => (
@@ -386,7 +455,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
           </section>
 
           {filteredProjects.length > 0 ? (
-            <section className="mt-6 overflow-x-auto rounded-lg border border-[#d9e2ec] bg-white">
+            <section className="mt-6 overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600">
               <div className="grid min-w-230 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
                 <span>Project</span>
                 <span>Trade</span>
@@ -431,7 +500,7 @@ function ProjectsPageClient({ router }: { router: ReturnType<typeof useRouter> }
               </div>
             </section>
           ) : (
-            <section className="mt-6 rounded-lg border border-[#d9e2ec] bg-white p-10 text-center">
+            <section className="mt-6 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-10 text-center">
               <p className="text-lg font-semibold tracking-tight">
                 {projects.length === 0 ? t("emptyProjects") : "No projects match filters"}
               </p>

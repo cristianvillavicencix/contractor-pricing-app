@@ -57,6 +57,8 @@ export type PricingEngineInput = {
     riskLevel: RiskLevel;
     strategy: Strategy;
   };
+  /** When set, each Good/Better/Best option uses its own material cost; missing keys use `costs.material`. */
+  materialCostByTier?: Partial<Record<PriceOptionName, number>>;
   pricingRules?: {
     baseMargins: Record<PriceOptionName, number>;
     stateAdjustments: Partial<Record<ProjectState, number>>;
@@ -93,6 +95,8 @@ export type PricingEngineOption = {
   financingFeeCost: number;
   taxCost: number;
   finalMargin: number;
+  /** Minimum sale price at target safe margin for this tier’s cost stack. */
+  tierMinimumSafePrice: number;
   status: "Safe" | "Tight" | "Risky";
   recommended?: boolean;
 };
@@ -184,24 +188,132 @@ const strategyAdjustments: Record<Strategy, number> = {
   Premium: 0.03,
 };
 
-export function calculatePricingEngine(
-  input: PricingEngineInput
-): PricingEngineResult {
-  const baseCost = Object.values(input.costs).reduce(
-    (sum, value) => sum + value,
-    0
+function sumNonMaterialCosts(costs: PricingEngineInput["costs"]): number {
+  return (
+    costs.labor +
+    costs.dumpster +
+    costs.permits +
+    costs.equipment +
+    costs.subcontractor +
+    costs.miscellaneous
   );
+}
+
+function materialCostForTier(input: PricingEngineInput, name: PriceOptionName): number {
+  const v = input.materialCostByTier?.[name];
+  if (v !== undefined && v !== null && Number.isFinite(v)) return Math.max(0, v);
+  return Math.max(0, input.costs.material);
+}
+
+function economicsForMaterialCost(
+  input: PricingEngineInput,
+  materialCost: number,
+  minimumSafeMargin: number,
+  rules: NonNullable<PricingEngineInput["pricingRules"]>,
+  adjustments: {
+    state: number;
+    trade: number;
+    company: number;
+    size: number;
+    risk: number;
+    strategy: number;
+  },
+  t: typeof defaultThresholds,
+  name: PriceOptionName
+): {
+  baseCost: number;
+  laborBurdenCost: number;
+  bufferCost: number;
+  overheadCost: number;
+  permitBufferCost: number;
+  fixedCostBeforeSaleBasedFees: number;
+  tierMinimumSafePrice: number;
+  option: PricingEngineOption;
+} {
+  const nonMaterial = sumNonMaterialCosts(input.costs);
+  const baseCost = nonMaterial + materialCost;
   const laborBurdenCost =
     input.costs.labor * percentToDecimal(input.businessCosts.laborBurdenPercent);
-  const bufferCost =
-    input.businessCosts.includeMiscellaneousBuffer
-      ? baseCost *
-        percentToDecimal(input.businessCosts.miscellaneousBufferPercent)
-      : 0;
+  const bufferCost = input.businessCosts.includeMiscellaneousBuffer
+    ? baseCost * percentToDecimal(input.businessCosts.miscellaneousBufferPercent)
+    : 0;
   const permitBufferCost = input.businessCosts.permitBuffer;
   const overheadCost = getOverheadCost(input, baseCost);
   const fixedCostBeforeSaleBasedFees =
     baseCost + laborBurdenCost + bufferCost + overheadCost + permitBufferCost;
+
+  const tierMinimumSafePrice = Math.max(
+    solveSalePrice({
+      fixedCostBeforeSaleBasedFees,
+      targetMargin: minimumSafeMargin,
+      input,
+      enforceMinimumJobPrice: false,
+    }).salePrice,
+    input.businessCosts.minimumJobPrice
+  );
+
+  const finalMargin = clamp(
+    rules.baseMargins[name] +
+      adjustments.state +
+      adjustments.trade +
+      adjustments.company +
+      adjustments.size +
+      adjustments.risk +
+      adjustments.strategy,
+    t.marginClampMin,
+    t.marginClampMax
+  );
+  const solved = solveSalePrice({
+    fixedCostBeforeSaleBasedFees,
+    targetMargin: finalMargin,
+    input,
+    enforceMinimumJobPrice: true,
+  });
+  const netProfit =
+    solved.salePrice -
+    baseCost -
+    laborBurdenCost -
+    overheadCost -
+    bufferCost -
+    permitBufferCost -
+    solved.taxCost -
+    solved.commissionCost -
+    solved.creditCardFeeCost -
+    solved.financingFeeCost;
+  const margin = solved.salePrice > 0 ? netProfit / solved.salePrice : 0;
+  const markup = baseCost > 0 ? netProfit / baseCost : 0;
+
+  const option: PricingEngineOption = {
+    name,
+    salePrice: solved.salePrice,
+    netProfit,
+    margin,
+    markup,
+    commissionCost: solved.commissionCost,
+    creditCardFeeCost: solved.creditCardFeeCost,
+    financingFeeCost: solved.financingFeeCost,
+    taxCost: solved.taxCost,
+    finalMargin,
+    tierMinimumSafePrice,
+    status: getOptionStatus(solved.salePrice, tierMinimumSafePrice, margin, t),
+    recommended: name === "Better",
+  };
+
+  return {
+    baseCost,
+    laborBurdenCost,
+    bufferCost,
+    overheadCost,
+    permitBufferCost,
+    fixedCostBeforeSaleBasedFees,
+    tierMinimumSafePrice,
+    option,
+  };
+}
+
+export function calculatePricingEngine(
+  input: PricingEngineInput
+): PricingEngineResult {
   const rules = input.pricingRules ?? {
     baseMargins,
     stateAdjustments,
@@ -220,88 +332,68 @@ export function calculatePricingEngine(
     strategy: (rules.strategyAdjustments ?? strategyAdjustments)[input.setup.strategy] ?? 0,
   };
 
+  const tierNames = ["Good", "Better", "Best"] as const;
+  const tierRows = tierNames.map((name) => {
+    const materialCost = materialCostForTier(input, name);
+    return economicsForMaterialCost(
+      input,
+      materialCost,
+      minimumSafeMargin,
+      rules,
+      adjustments,
+      t,
+      name
+    );
+  });
+  const options = tierRows.map((row) => row.option);
+
+  const good = options[0];
+  const better = options[1];
+
+  const maxMaterialCost = Math.max(...tierNames.map((n) => materialCostForTier(input, n)));
+  const nonMaterial = sumNonMaterialCosts(input.costs);
+  const refBaseCost = nonMaterial + maxMaterialCost;
+  const refLaborBurdenCost =
+    input.costs.labor * percentToDecimal(input.businessCosts.laborBurdenPercent);
+  const refBufferCost = input.businessCosts.includeMiscellaneousBuffer
+    ? refBaseCost * percentToDecimal(input.businessCosts.miscellaneousBufferPercent)
+    : 0;
+  const refOverheadCost = getOverheadCost(input, refBaseCost);
+  const refPermitBufferCost = input.businessCosts.permitBuffer;
+  const refFixed =
+    refBaseCost +
+    refLaborBurdenCost +
+    refBufferCost +
+    refOverheadCost +
+    refPermitBufferCost;
+
   const breakevenPrice = solveSalePrice({
-    fixedCostBeforeSaleBasedFees,
+    fixedCostBeforeSaleBasedFees: refFixed,
     targetMargin: 0,
     input,
     enforceMinimumJobPrice: false,
   }).salePrice;
 
-  const minimumSafePrice = Math.max(
-    solveSalePrice({
-      fixedCostBeforeSaleBasedFees,
-      targetMargin: minimumSafeMargin,
-      input,
-      enforceMinimumJobPrice: false,
-    }).salePrice,
-    input.businessCosts.minimumJobPrice
-  );
+  const minimumSafePrice = better.tierMinimumSafePrice;
 
-  const options = (["Good", "Better", "Best"] as PriceOptionName[]).map(
-    (name) => {
-      const finalMargin = clamp(
-        rules.baseMargins[name] +
-          adjustments.state +
-          adjustments.trade +
-          adjustments.company +
-          adjustments.size +
-          adjustments.risk +
-          adjustments.strategy,
-        t.marginClampMin,
-        t.marginClampMax
-      );
-      const solved = solveSalePrice({
-        fixedCostBeforeSaleBasedFees,
-        targetMargin: finalMargin,
-        input,
-        enforceMinimumJobPrice: true,
-      });
-      const netProfit =
-        solved.salePrice -
-        baseCost -
-        laborBurdenCost -
-        overheadCost -
-        bufferCost -
-        permitBufferCost -
-        solved.taxCost -
-        solved.commissionCost -
-        solved.creditCardFeeCost -
-        solved.financingFeeCost;
-      const margin = solved.salePrice > 0 ? netProfit / solved.salePrice : 0;
-      const markup = baseCost > 0 ? netProfit / baseCost : 0;
+  const betterRow = tierRows[1];
+  const bufferCost = betterRow.bufferCost;
+  const overheadCost = betterRow.overheadCost;
+  const laborBurdenCost = betterRow.laborBurdenCost;
+  const permitBufferCost = betterRow.permitBufferCost;
 
-      return {
-        name,
-        salePrice: solved.salePrice,
-        netProfit,
-        margin,
-        markup,
-        commissionCost: solved.commissionCost,
-        creditCardFeeCost: solved.creditCardFeeCost,
-        financingFeeCost: solved.financingFeeCost,
-        taxCost: solved.taxCost,
-        finalMargin,
-        status: getOptionStatus(solved.salePrice, minimumSafePrice, margin, t),
-        recommended: name === "Better",
-      };
-    }
-  );
-
-  const good = options[0];
-  const better = options[1];
   const warnings = getWarnings({
-    baseCost,
+    baseCost: refBaseCost,
     good,
     better,
-    minimumSafePrice,
     input,
     options,
     thresholds: t,
   });
-  const projectStatus = getProjectStatus(good, better, minimumSafePrice, t);
+  const projectStatus = getProjectStatus(good, better, t);
 
   return {
-    baseCost,
+    baseCost: refBaseCost,
     bufferCost,
     overheadCost,
     laborBurdenCost,
@@ -321,12 +413,7 @@ export function calculatePricingEngine(
     minimumSafeMargin,
     options,
     projectStatus,
-    projectStatusReason: getProjectStatusReason(
-      projectStatus,
-      good,
-      better,
-      minimumSafePrice
-    ),
+    projectStatusReason: getProjectStatusReason(projectStatus, good, better),
     warnings,
     adjustments,
   };
@@ -419,22 +506,21 @@ function getTaxPercent(input: PricingEngineInput) {
 
 function getOptionStatus(
   salePrice: number,
-  minimumSafePrice: number,
+  tierMinimumSafePrice: number,
   margin: number,
   t: typeof defaultThresholds
 ): PricingEngineOption["status"] {
-  if (salePrice < minimumSafePrice || margin < t.riskyMargin) return "Risky";
-  if (margin < t.tightMargin || salePrice < minimumSafePrice * t.safePriceCushion) return "Tight";
+  if (salePrice < tierMinimumSafePrice || margin < t.riskyMargin) return "Risky";
+  if (margin < t.tightMargin || salePrice < tierMinimumSafePrice * t.safePriceCushion) return "Tight";
   return "Safe";
 }
 
 function getProjectStatus(
   good: PricingEngineOption,
   better: PricingEngineOption,
-  minimumSafePrice: number,
   t: typeof defaultThresholds
 ): PricingEngineResult["projectStatus"] {
-  if (better.margin < t.riskyMargin || good.salePrice < minimumSafePrice) return "Red";
+  if (better.margin < t.riskyMargin || good.salePrice < good.tierMinimumSafePrice) return "Red";
   if (better.margin >= t.riskyMargin && better.margin < t.tightMargin) return "Yellow";
   return "Green";
 }
@@ -442,11 +528,10 @@ function getProjectStatus(
 function getProjectStatusReason(
   status: PricingEngineResult["projectStatus"],
   good: PricingEngineOption,
-  better: PricingEngineOption,
-  minimumSafePrice: number
+  better: PricingEngineOption
 ) {
   if (status === "Red") {
-    return good.salePrice < minimumSafePrice
+    return good.salePrice < good.tierMinimumSafePrice
       ? "Good price is below the minimum safe price."
       : "Better margin is below the minimum health threshold.";
   }
@@ -462,7 +547,6 @@ function getWarnings({
   baseCost,
   good,
   better,
-  minimumSafePrice,
   input,
   options,
   thresholds: t,
@@ -470,7 +554,6 @@ function getWarnings({
   baseCost: number;
   good: PricingEngineOption;
   better: PricingEngineOption;
-  minimumSafePrice: number;
   input: PricingEngineInput;
   options: PricingEngineOption[];
   thresholds: typeof defaultThresholds;
@@ -498,7 +581,7 @@ function getWarnings({
       "Target margin plus tax/fees/commission reach or exceed 100% — sale price cannot be computed. Lower margins or fee rates."
     );
   }
-  if (good.salePrice < minimumSafePrice) {
+  if (good.salePrice < good.tierMinimumSafePrice) {
     warnings.push("Good price is below Minimum Safe Price.");
   }
   if (better.margin < t.warningMarginLow) {

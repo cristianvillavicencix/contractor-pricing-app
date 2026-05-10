@@ -1,18 +1,22 @@
 "use client";
 
-import { Check, ChevronDown, Minus, Pencil, Plus, RotateCcw, Save } from "lucide-react";
+import { Check, Copy, Info, Minus, Pencil, Plus, RotateCcw, Save } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
-import { SignOutButton } from "@/components/sign-out-button";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
   blankTemplate,
+  cloneProposalTemplateWithNewIdentity,
   mergeProposalTemplates,
+  type MaterialItem,
   type ProposalTemplate,
 } from "@/lib/proposal-templates";
 import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
+import { MaterialsTableEditor } from "@/components/proposals/materials-table-editor";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
+  deleteProposalTemplate,
   listProposalTemplates,
   loadCompanySettings,
   saveCompanySettings,
@@ -22,6 +26,7 @@ import type {
   AppSettings,
   CompanyLevel,
   OverheadLineItem,
+  PriceOptionName,
   ProjectSize,
   ProjectState,
   ProposalCredentialPlacement,
@@ -33,6 +38,7 @@ import type {
 import {
   companyLevelOptions,
   defaultSettings,
+  getTierDisplayName,
   mergeAppSettings,
   OVERHEAD_BREAKDOWN_SUGGESTIONS,
   projectSizeOptions,
@@ -43,6 +49,8 @@ import {
   sumOverheadLineItems,
   tradeOptions,
 } from "@/lib/app-data";
+import { requestAppPreferencesSync } from "@/lib/app-preferences-events";
+import { applyAppPreferencesVisuals } from "@/lib/app-preferences-live";
 import { getAppSettingsValidationError } from "@/lib/settings-validation";
 
 type Trade = SettingsTrade;
@@ -50,23 +58,15 @@ type Level = "Low" | "Medium" | "High";
 
 type SettingsSection =
   | "Company Profile"
-  | "Pricing Defaults"
-  | "Pricing Thresholds"
-  | "Market & Location"
-  | "Cost Rules"
+  | "Pricing"
   | "Proposals"
-  | "Branding"
   | "App Preferences"
   | "Data";
 
-const sectionItems: SettingsSection[] = [
+const SETTINGS_NAV_ITEMS: SettingsSection[] = [
   "Company Profile",
-  "Pricing Defaults",
-  "Pricing Thresholds",
-  "Market & Location",
-  "Cost Rules",
+  "Pricing",
   "Proposals",
-  "Branding",
   "App Preferences",
   "Data",
 ];
@@ -102,6 +102,7 @@ export default function SettingsPage() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [settingsConnectionsInfoOpen, setSettingsConnectionsInfoOpen] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setIsLoading(true);
@@ -123,6 +124,21 @@ export default function SettingsPage() {
     void loadSettings();
   }, [loadSettings]);
 
+  const appPreferencesSerialized = JSON.stringify(settings.appPreferences);
+  useEffect(() => {
+    if (isLoading || loadError) return;
+    applyAppPreferencesVisuals(settings.appPreferences);
+  }, [isLoading, loadError, appPreferencesSerialized, settings.appPreferences]);
+
+  useEffect(() => {
+    if (!settingsConnectionsInfoOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setSettingsConnectionsInfoOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settingsConnectionsInfoOpen]);
+
   const hasUnsavedChanges = useMemo(
     () => JSON.stringify(settings) !== JSON.stringify(normalizedSavedSettings),
     [settings, normalizedSavedSettings]
@@ -134,7 +150,10 @@ export default function SettingsPage() {
     setSettings(defaultSettings);
     setMessage("");
     saveCompanySettings(supabase, defaultSettings)
-      .then(() => setSavedSettings(defaultSettings))
+      .then(() => {
+        setSavedSettings(defaultSettings);
+        requestAppPreferencesSync();
+      })
       .catch((e) =>
         setMessage(e instanceof Error ? e.message : "Failed to reset settings")
       );
@@ -152,6 +171,7 @@ export default function SettingsPage() {
         setSavedSettings(settings);
         setMessage("");
         setSaveStatus("saved");
+        requestAppPreferencesSync();
         setTimeout(() => setSaveStatus("idle"), 2500);
       })
       .catch((e) =>
@@ -184,33 +204,97 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--page-bg)] text-[var(--brand-navy)] lg:flex">
+    <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-5 xl:flex-row xl:items-start">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Settings</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 lg:max-w-[min(100%,42rem)]">
+              <p className="page-kicker text-sm font-medium">Settings</p>
+              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
                 Settings
               </h2>
-              <p className="mt-3 max-w-3xl text-gray-500">
-                Configure your business profile, pricing defaults, and proposal
-                preferences.
+              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
+                Company and legal identity, calculator pricing rules, and everything clients see on quotes
+                and proposals — each category has one home in the sidebar.
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex w-full flex-wrap items-center justify-end gap-3 lg:w-auto lg:flex-shrink-0">
               {hasUnsavedChanges ? (
-                <span className="rounded-md border border-[#d9e2ec] px-3 py-2 text-xs font-medium text-gray-600">
+                <span className="rounded-md border border-[#d9e2ec] px-3 py-2 text-xs font-medium text-gray-600 dark:border-slate-600 dark:text-slate-300">
                   Unsaved changes
                 </span>
               ) : null}
-              <SignOutButton layout="toolbar" />
+              <button
+                type="button"
+                onClick={() => setSettingsConnectionsInfoOpen((o) => !o)}
+                className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-gray-500 transition hover:bg-[#f6f8fb] hover:text-[#213343] dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 ${
+                  settingsConnectionsInfoOpen
+                    ? "border-[#ff5c35] bg-[#fff1ea] text-[#ff5c35]"
+                    : "border-[#d9e2ec]"
+                }`}
+                aria-expanded={settingsConnectionsInfoOpen}
+                aria-controls="settings-connections-info"
+                title="How settings connect to quotes and proposals"
+              >
+                <Info className="h-5 w-5" aria-hidden />
+              </button>
+              {settingsConnectionsInfoOpen ? (
+                <>
+                  <button
+                    type="button"
+                    className="fixed inset-0 z-40 cursor-default bg-black/20"
+                    aria-label="Close help panel"
+                    onClick={() => setSettingsConnectionsInfoOpen(false)}
+                  />
+                  <div
+                    id="settings-connections-info"
+                    className="elevated-panel absolute right-0 top-full z-50 mt-2 w-[min(calc(100vw-2rem),26rem)] rounded-xl border border-[#d9e2ec] bg-white p-4 text-left shadow-xl dark:border-slate-600"
+                    role="dialog"
+                    aria-label="Settings and quotes"
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      How settings connect to quotes and proposals
+                    </p>
+                    <ul className="mt-3 list-disc space-y-2 pl-4 text-xs leading-relaxed text-gray-600">
+                      <li>
+                        <span className="font-medium text-[#213343]">Company</span> — Name, contact, license, and
+                        certifications feed <strong>Quote Preview</strong>, PDFs, and the client portal when proposal toggles
+                        allow it.
+                      </li>
+                      <li>
+                        <span className="font-medium text-[#213343]">Pricing</span> — Margins, thresholds, location, and
+                        costs load into the <strong>Calculator</strong>; each quote stores its own Good/Better/Best prices
+                        after you price that job.
+                      </li>
+                      <li>
+                        <span className="font-medium text-[#213343]">Quotes &amp; proposals</span> — Templates, defaults,
+                        branding, and content snippets merge in <strong>Quote Preview</strong> for that quote&apos;s trade.
+                      </li>
+                      <li>
+                        <span className="font-medium text-[#213343]">App &amp; data</span> — App Preferences only change
+                        Calculator <em>display</em> (warnings, breakdown), not stored quote prices.
+                      </li>
+                    </ul>
+                    <p className="mt-3 border-t border-[#eef2f6] pt-3 text-xs text-gray-500">
+                      Open{" "}
+                      <Link
+                        href="/quotes"
+                        className="font-medium text-[#ff5c35] underline hover:text-[#e94820]"
+                        onClick={() => setSettingsConnectionsInfoOpen(false)}
+                      >
+                        Quotes
+                      </Link>{" "}
+                      → Preview to see this live.
+                    </p>
+                  </div>
+                </>
+              ) : null}
               <button
                 onClick={resetSettings}
-                className="inline-flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                className="inline-flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
               >
                 <RotateCcw className="h-4 w-4" />
                 Reset
@@ -239,26 +323,29 @@ export default function SettingsPage() {
           </header>
 
           {message || validationMessage ? (
-            <div className="mt-6 rounded-lg border border-[#d9e2ec] bg-white px-5 py-4 text-sm text-gray-700">
+            <div className="elevated-panel mt-6 rounded-lg border border-[#d9e2ec] bg-white px-5 py-4 text-sm text-gray-700 dark:border-slate-600">
               {message || validationMessage}
             </div>
           ) : null}
 
           <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
-            <aside className="h-fit rounded-lg border border-[#d9e2ec] bg-white p-2">
-              {sectionItems.map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setActiveSection(item)}
-                  className={`w-full rounded-md px-4 py-3 text-left text-sm transition ${
-                    activeSection === item
-                      ? "bg-[#fff1ea] font-medium text-[#213343]"
-                      : "text-gray-500 hover:bg-[#f6f8fb] hover:text-black"
-                  }`}
-                >
-                  {item}
-                </button>
-              ))}
+            <aside className="elevated-panel h-fit rounded-lg border border-[#d9e2ec] bg-white p-2 dark:border-slate-600">
+              <div className="space-y-0.5">
+                {SETTINGS_NAV_ITEMS.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setActiveSection(item)}
+                    className={`w-full rounded-md px-4 py-2.5 text-left text-sm transition ${
+                      activeSection === item
+                        ? "bg-[#fff1ea] font-medium text-[#213343]"
+                        : "text-gray-500 hover:bg-[#f6f8fb] hover:text-black"
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
             </aside>
 
             <div>
@@ -268,40 +355,25 @@ export default function SettingsPage() {
                   setSettings={setSettings}
                 />
               ) : null}
-              {activeSection === "Pricing Defaults" ? (
-                <PricingDefaultsSection
+              {activeSection === "Pricing" ? (
+                <PricingHubSection
                   settings={settings}
                   setSettings={setSettings}
-                />
-              ) : null}
-              {activeSection === "Pricing Thresholds" ? (
-                <PricingThresholdsSection
-                  settings={settings}
-                  setSettings={setSettings}
-                />
-              ) : null}
-              {activeSection === "Market & Location" ? (
-                <MarketLocationSection
-                  settings={settings}
-                  setSettings={setSettings}
-                />
-              ) : null}
-              {activeSection === "Cost Rules" ? (
-                <CostRulesSection
-                  settings={settings}
-                  setSettings={setSettings}
+                  onNavigateToSection={setActiveSection}
                 />
               ) : null}
               {activeSection === "Proposals" ? (
-                <ProposalsSection settings={settings} setSettings={setSettings} />
-              ) : null}
-              {activeSection === "Branding" ? (
-                <BrandingSection settings={settings} setSettings={setSettings} />
+                <ProposalsSection
+                  settings={settings}
+                  setSettings={setSettings}
+                  onNavigateToSection={setActiveSection}
+                />
               ) : null}
               {activeSection === "App Preferences" ? (
                 <AppPreferencesSection
                   settings={settings}
                   setSettings={setSettings}
+                  onNavigateToSection={setActiveSection}
                 />
               ) : null}
               {activeSection === "Data" ? (
@@ -413,7 +485,7 @@ function CompanyProfileSection({
   return (
     <SettingsSection
       title="Company Profile"
-      description="Basic business info used on proposals, PDFs, and pricing defaults."
+      description="Legal identity, contact, and credentials. This data appears on proposals alongside text from Quotes & proposals (templates and defaults)."
     >
       {/* ── Basic fields ── */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -1194,8 +1266,8 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
 
   return (
     <SettingsSection
-      title="Proposal Settings"
-      description="Controls how client-facing proposals should look when Proposal Builder and PDFs are added."
+      title="Proposal defaults & client rules"
+      description="Company-wide options for new quotes and proposals. Trade-specific wording and tables are edited under Templates or in Quote Preview for that job."
       footer="Profit and margin should never appear on client-facing proposals by default. They are internal contractor values only."
     >
       <div className="grid gap-4 md:grid-cols-2">
@@ -1328,6 +1400,34 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
       </div>
 
       <div className="mt-8">
+        <h4 className="text-sm font-medium text-black">Customer-facing tier names</h4>
+        <p className="mt-1 text-xs text-gray-500">
+          These labels appear on proposals and the client acceptance page. Internal pricing keys stay Good / Better /
+          Best.
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <TextField
+            label="Good tier label"
+            value={proposal.goodTierLabel ?? ""}
+            tooltip="Example: Economy, Standard, or keep Good."
+            onChange={(value) => updateProposal(setSettings, "goodTierLabel", value)}
+          />
+          <TextField
+            label="Better tier label"
+            value={proposal.betterTierLabel ?? ""}
+            tooltip="Example: Recommended, Plus, or keep Better."
+            onChange={(value) => updateProposal(setSettings, "betterTierLabel", value)}
+          />
+          <TextField
+            label="Best tier label"
+            value={proposal.bestTierLabel ?? ""}
+            tooltip="Example: Premium, Signature, or keep Best."
+            onChange={(value) => updateProposal(setSettings, "bestTierLabel", value)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-8">
         <h4 className="flex items-center text-sm font-medium text-black">
           Pricing Option Descriptions
           <InfoTip text="Short taglines that appear under each price on the proposal. Keep them benefit-focused, not feature-focused. Good: 'Budget-friendly option with core coverage.' Better: 'Our most popular package — great balance of value and quality.' Best: 'Premium materials and extended warranty for lasting peace of mind.'" />
@@ -1352,6 +1452,65 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
             tooltip="Justify the premium with a tangible benefit: longer warranty, better materials, faster timeline, or white-glove service. Example: 'Premium materials and our longest warranty — built to last.'"
             onChange={(value) => updateProposal(setSettings, "bestDescription", value)}
           />
+          <TextField
+            label="Good — materials / brand (default)"
+            value={proposal.goodTierMaterialsSummary ?? ""}
+            tooltip="Short line shown on proposals for the Good tier, e.g. 'IKO Cambridge shingles' or 'Standard vinyl siding'. New quotes copy this into the quote so you can edit per job in Quote Preview."
+            onChange={(value) => updateProposal(setSettings, "goodTierMaterialsSummary", value)}
+          />
+          <TextField
+            label="Better — materials / brand (default)"
+            value={proposal.betterTierMaterialsSummary ?? ""}
+            tooltip="Example: 'GAF Timberline HDZ' or 'James Hardie fiber cement'. Appears under the Better price on customer proposals."
+            onChange={(value) => updateProposal(setSettings, "betterTierMaterialsSummary", value)}
+          />
+          <TextField
+            label="Best — materials / brand (default)"
+            value={proposal.bestTierMaterialsSummary ?? ""}
+            tooltip="Example: 'Owens Corning Duration Designer' or 'Premium paint system'. Shown under the Best tier."
+            onChange={(value) => updateProposal(setSettings, "bestTierMaterialsSummary", value)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h4 className="text-sm font-medium text-black">Materials &amp; specifications table (by package)</h4>
+        <p className="mt-1 text-xs text-gray-500">
+          Company-wide default rows for the <strong>Materials &amp; Specifications</strong> section for each Good / Better /
+          Best tier. When a tier is selected on the proposal, we use, in order: overrides saved on that quote, then
+          per-tier rows on that trade&apos;s proposal template (edit in{" "}
+          <Link href="/quotes" className="font-medium text-[#ff5c35] underline hover:text-[#e94820]">
+            Quotes → Preview → Edit template → Materials &amp; Specs
+          </Link>
+          ), then the tables here, then the template&apos;s shared materials list. Prefer the template for trade-specific
+          specs (roofing vs siding, etc.); use this block when the same defaults should apply across trades.
+        </p>
+        <div className="mt-4 space-y-6 rounded-lg border border-[#d9e2ec] bg-[#fafcfd] p-4">
+          {(["Good", "Better", "Best"] as const).map((tier) => {
+            const tableKey =
+              tier === "Good"
+                ? "goodTierMaterialsTable"
+                : tier === "Better"
+                  ? "betterTierMaterialsTable"
+                  : "bestTierMaterialsTable";
+            const items = (proposal[tableKey] as MaterialItem[] | undefined) ?? [];
+            return (
+              <div key={tier} className="border-b border-[#e8eef3] pb-5 last:border-0 last:pb-0">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {getTierDisplayName(settings, tier as PriceOptionName)} package
+                </p>
+                <MaterialsTableEditor
+                  items={items}
+                  onChange={(next) =>
+                    setSettings((c) => ({
+                      ...c,
+                      proposalSettings: { ...c.proposalSettings, [tableKey]: next },
+                    }))
+                  }
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1385,9 +1544,9 @@ function BrandingSection({ settings, setSettings }: SectionProps) {
 
   return (
     <SettingsSection
-      title="Branding"
-      description="Controls visual identity for future proposals, PDFs, and client-facing documents."
-      footer="Proposal Builder and PDF Generator will use these settings. Future emails may use the same branding."
+      title="Logo, colors & proposal layout"
+      description="Visual defaults for printed and PDF proposals (also used when you open Quote Preview). Business name and license come from Company Profile."
+      footer="These fields live under Quotes & proposals so logo, layout, and document text are easy to find in one place."
     >
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <div className="grid gap-4 md:grid-cols-2">
@@ -1489,15 +1648,32 @@ function BrandingSection({ settings, setSettings }: SectionProps) {
   );
 }
 
-function AppPreferencesSection({ settings, setSettings }: SectionProps) {
+function AppPreferencesSection({
+  settings,
+  setSettings,
+  onNavigateToSection,
+}: SectionProps & { onNavigateToSection?: (section: SettingsSection) => void }) {
   const preferences = settings.appPreferences;
 
   return (
     <SettingsSection
       title="App Preferences"
-      description="Controls UI preferences for dashboard, pricing display, and future saved workflows."
-      footer="Dashboard and Pricing use these display preferences. Pricing warnings can be turned on or off, and advanced breakdowns can be hidden for simpler users."
+      description="Controls UI preferences for dashboard and how the Calculator screen behaves. Margin numbers and cost rules live under Pricing."
+      footer="Theme, compact layout, currency, and number format apply as you change them here; Save stores them in your account. Default landing applies the next time you sign in. Calculator uses the advanced breakdown and warnings toggles."
     >
+      {onNavigateToSection ? (
+        <p className="elevated-panel mb-5 rounded-lg border border-[#e8eef3] bg-[#fafcfd] px-3 py-2 text-xs text-gray-600 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-300">
+          Defaults for Good/Better/Best margins, thresholds, and overhead are in{" "}
+          <button
+            type="button"
+            onClick={() => onNavigateToSection("Pricing")}
+            className="font-medium text-[#ff5c35] underline decoration-[#ff5c35]/30 underline-offset-2 hover:text-[#e94820]"
+          >
+            Pricing
+          </button>
+          .
+        </p>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-2">
         <SelectField
           label="Default Landing Page"
@@ -1573,23 +1749,93 @@ type SectionProps = {
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
 };
 
-function AdvancedFields({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+type PricingTab = "defaults" | "thresholds" | "market" | "costRules";
+
+function PricingHubSection({
+  settings,
+  setSettings,
+  onNavigateToSection,
+}: SectionProps & { onNavigateToSection: (section: SettingsSection) => void }) {
+  const [tab, setTab] = useState<PricingTab>("defaults");
+
+  const tabs: { id: PricingTab; label: string; description: string }[] = [
+    {
+      id: "defaults",
+      label: "Margins & tiers",
+      description:
+        "Base Good / Better / Best margins and automatic adjustments by trade, job size, risk, strategy, and company level.",
+    },
+    {
+      id: "thresholds",
+      label: "Status thresholds",
+      description:
+        "Color-coded guardrails in the Calculator — when numbers flip between red, yellow, and green.",
+    },
+    {
+      id: "market",
+      label: "Market & location",
+      description: "Default state and regional cost adjustments for new pricing sessions.",
+    },
+    {
+      id: "costRules",
+      label: "Costs & overhead",
+      description:
+        "Tax, burden rate, typical crew costs, and monthly overhead — what flows into loaded cost.",
+    },
+  ];
+
   return (
-    <div className="mt-8 border-t border-dashed border-[#d9e2ec] pt-5">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 text-xs font-medium text-gray-400 transition hover:text-gray-700"
-      >
-        <ChevronDown
-          className={`h-3.5 w-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-        />
-        {open ? "Hide advanced settings" : "Show advanced settings"}
-      </button>
-      {open && <div className="mt-6 space-y-8">{children}</div>}
+    <div>
+      <div className="elevated-panel mb-6 rounded-xl border border-[#e8eef3] bg-[#fafcfd] px-4 py-3 text-sm text-gray-600 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-200">
+        <p className="font-medium text-[#213343]">Calculator pricing engine</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
+          All tabs below feed the <strong className="text-[#213343]">Calculator</strong> and quote cost build-up. To
+          change how the Calculator <em>screen</em> behaves (warnings, advanced breakdown), use{" "}
+          <button
+            type="button"
+            onClick={() => onNavigateToSection("App Preferences")}
+            className="font-medium text-[#ff5c35] underline decoration-[#ff5c35]/30 underline-offset-2 hover:text-[#e94820]"
+          >
+            App Preferences
+          </button>
+          .
+        </p>
+      </div>
+
+      <div className="elevated-panel mb-6 flex flex-wrap gap-1 rounded-xl border border-[#d9e2ec] bg-[#f5f8fa] p-1 dark:border-slate-600 dark:bg-slate-800/50">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`min-h-[44px] flex-1 rounded-lg px-2 py-2 text-center text-sm font-medium transition sm:min-w-[7.5rem] sm:px-3 ${
+              tab === t.id
+                ? "bg-white text-[#213343] shadow-sm"
+                : "text-gray-400 hover:text-gray-700"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="mb-6 text-sm text-gray-400">{tabs.find((x) => x.id === tab)?.description}</p>
+
+      {tab === "defaults" && (
+        <PricingDefaultsSection settings={settings} setSettings={setSettings} />
+      )}
+      {tab === "thresholds" && (
+        <PricingThresholdsSection settings={settings} setSettings={setSettings} />
+      )}
+      {tab === "market" && <MarketLocationSection settings={settings} setSettings={setSettings} />}
+      {tab === "costRules" && <CostRulesSection settings={settings} setSettings={setSettings} />}
     </div>
   );
+}
+
+/** Advanced blocks stay visible — main settings sidebar already separates areas. */
+function AdvancedFields({ children }: { children: React.ReactNode }) {
+  return <div className="mt-8 space-y-8 border-t border-dashed border-[#d9e2ec] pt-6">{children}</div>;
 }
 
 function SettingsSection({
@@ -1604,16 +1850,16 @@ function SettingsSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-[#d9e2ec] bg-white p-5 sm:p-6">
+    <section className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white p-5 sm:p-6 dark:border-slate-600">
       <div>
-        <h3 className="text-xl font-semibold tracking-tight">{title}</h3>
+        <h3 className="text-xl font-semibold tracking-tight text-[#213343]">{title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
           {description}
         </p>
       </div>
       <div className="mt-6">{children}</div>
       {footer ? (
-        <p className="mt-6 rounded-lg bg-[#f6f8fb] p-4 text-sm leading-6 text-gray-600">
+        <p className="mt-6 rounded-lg bg-[#f6f8fb] p-4 text-sm leading-6 text-gray-600 dark:bg-slate-800/80 dark:text-slate-200">
           {footer}
         </p>
       ) : null}
@@ -1674,7 +1920,7 @@ function TextField({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+        className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
       />
       {helperText ? (
         <span className="mt-2 block text-xs leading-5 text-gray-500">
@@ -1726,7 +1972,7 @@ function NumberField({
           if (typeof max === "number" && nextValue > max) return;
           onChange(nextValue);
         }}
-        className={`mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35] ${disabled ? "cursor-not-allowed bg-gray-50 text-gray-700" : ""}`}
+        className={`mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35] ${disabled ? "cursor-not-allowed bg-gray-50 text-gray-700" : "bg-white text-neutral-900"}`}
       />
       {helperText ? (
         <span className="mt-2 block text-xs leading-5 text-gray-500">
@@ -1761,7 +2007,7 @@ function SelectField({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+        className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -1800,7 +2046,7 @@ function TextAreaField({
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 min-h-28 w-full resize-none rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+        className="mt-2 min-h-28 w-full resize-none rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
       />
     </label>
   );
@@ -1818,7 +2064,7 @@ function ToggleField({
   tooltip?: string;
 }) {
   return (
-    <label className="flex items-center justify-between gap-4 rounded-md border border-[#d9e2ec] bg-white p-4 text-sm font-medium">
+    <label className="elevated-panel flex items-center justify-between gap-4 rounded-md border border-[#d9e2ec] bg-white p-4 text-sm font-medium dark:border-slate-600">
       <span className="flex items-center">
         {label}
         {tooltip && <InfoTip text={tooltip} />}
@@ -2200,26 +2446,68 @@ function updatePreference<K extends keyof AppSettings["appPreferences"]>(
   }));
 }
 
-type ProposalTab = "templates" | "content" | "settings";
+type ProposalTab = "templates" | "content" | "settings" | "brand";
 
-function ProposalsSection({ settings, setSettings }: SectionProps) {
+function ProposalsSection({
+  settings,
+  setSettings,
+  onNavigateToSection,
+}: SectionProps & { onNavigateToSection: (section: SettingsSection) => void }) {
   const [tab, setTab] = useState<ProposalTab>("templates");
 
   const tabs: { id: ProposalTab; label: string; description: string }[] = [
-    { id: "templates", label: "Templates", description: "Full proposal documents sent to clients" },
-    { id: "content",   label: "Content Snippets", description: "Service lists and scope text for the quote builder" },
-    { id: "settings",  label: "Settings", description: "Proposal format, expiration, and display options" },
+    {
+      id: "templates",
+      label: "Templates",
+      description:
+        "Full multi-section proposal per trade. Edit here or from Quote Preview → Edit template; both save to the same library.",
+    },
+    {
+      id: "content",
+      label: "Quote content",
+      description:
+        "Suggested “included services” per trade and scope shortcuts for the quote builder — feeds Quote Preview, not the PDF layout.",
+    },
+    {
+      id: "settings",
+      label: "Defaults & rules",
+      description:
+        "Expiration, Good/Better/Best toggles, tier summaries, company-wide materials tables, and legal defaults for new quotes.",
+    },
+    {
+      id: "brand",
+      label: "Logo & layout",
+      description:
+        "Logo URL, colors, proposal style, and default cover layout. Per-quote photos and overrides still happen in Quote Preview.",
+    },
   ];
 
   return (
     <div>
+      <div className="elevated-panel mb-6 rounded-xl border border-[#e8eef3] bg-[#fafcfd] px-4 py-3 text-sm text-gray-600 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-200">
+        <p className="font-medium text-[#213343]">Client-facing documents — one hub</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
+          Use the tabs below for everything that shapes quotes and proposals. Your{" "}
+          <button
+            type="button"
+            onClick={() => onNavigateToSection("Company Profile")}
+            className="font-medium text-[#ff5c35] underline decoration-[#ff5c35]/30 underline-offset-2 hover:text-[#e94820]"
+          >
+            Company Profile
+          </button>{" "}
+          (legal name, license, insurance, certifications) is separate because it is shared with pricing and
+          compliance, but those fields still appear on proposals.
+        </p>
+      </div>
+
       {/* Tab bar */}
-      <div className="mb-6 flex gap-1 rounded-xl border border-[#d9e2ec] bg-[#f5f8fa] p-1">
+      <div className="elevated-panel mb-6 flex flex-wrap gap-1 rounded-xl border border-[#d9e2ec] bg-[#f5f8fa] p-1 dark:border-slate-600 dark:bg-slate-800/50">
         {tabs.map((t) => (
           <button
             key={t.id}
+            type="button"
             onClick={() => setTab(t.id)}
-            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+            className={`min-h-[44px] flex-1 rounded-lg px-3 py-2 text-center text-sm font-medium transition sm:px-4 sm:py-2.5 ${
               tab === t.id
                 ? "bg-white text-[#213343] shadow-sm"
                 : "text-gray-400 hover:text-gray-700"
@@ -2230,13 +2518,14 @@ function ProposalsSection({ settings, setSettings }: SectionProps) {
         ))}
       </div>
       {/* Tab description */}
-      <p className="mb-6 text-sm text-gray-400">
+      <p className="mb-6 text-sm text-gray-500 dark:text-slate-400">
         {tabs.find((t) => t.id === tab)?.description}
       </p>
 
       {tab === "templates" && <TemplatesSection />}
-      {tab === "content"   && <ContentDefaultsSection settings={settings} setSettings={setSettings} />}
-      {tab === "settings"  && <ProposalSettingsSection settings={settings} setSettings={setSettings} />}
+      {tab === "content" && <ContentDefaultsSection settings={settings} setSettings={setSettings} />}
+      {tab === "settings" && <ProposalSettingsSection settings={settings} setSettings={setSettings} />}
+      {tab === "brand" && <BrandingSection settings={settings} setSettings={setSettings} />}
     </div>
   );
 }
@@ -2364,6 +2653,11 @@ function TemplatesSection() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newTradeName, setNewTradeName] = useState("");
   const [newTradeError, setNewTradeError] = useState("");
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateSource, setDuplicateSource] = useState<ProposalTemplate | null>(null);
+  const [duplicateTradeName, setDuplicateTradeName] = useState("");
+  const [duplicateError, setDuplicateError] = useState("");
+  const [templateActionError, setTemplateActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2390,6 +2684,7 @@ function TemplatesSection() {
   function handleSave(updated: ProposalTemplate) {
     upsertProposalTemplate(supabase, updated)
       .then(() => {
+        setTemplateActionError(null);
         setSavedTemplates((prev) => {
           const idx = prev.findIndex((t) => t.trade === updated.trade);
           if (idx >= 0) {
@@ -2401,12 +2696,80 @@ function TemplatesSection() {
         });
         setEditingTemplate(null);
       })
-      .catch(() => undefined);
+      .catch((e) => {
+        setTemplateActionError(
+          e instanceof Error ? e.message : "Could not save template. Try again."
+        );
+      });
+  }
+
+  function openDuplicateModal(template: ProposalTemplate) {
+    setTemplateActionError(null);
+    setDuplicateSource(template);
+    setDuplicateTradeName(`${template.trade} (copy)`);
+    setDuplicateError("");
+    setShowDuplicateModal(true);
+  }
+
+  function handleDuplicateConfirm() {
+    if (!duplicateSource) return;
+    const name = duplicateTradeName.trim();
+    if (!name) {
+      setDuplicateError("Enter a trade name for the new template.");
+      return;
+    }
+    if (name.toLowerCase() === duplicateSource.trade.trim().toLowerCase()) {
+      setDuplicateError("Use a different name than the original trade so this template saves as its own row.");
+      return;
+    }
+    const taken = templates.some(
+      (t) => t.trade.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (taken) {
+      setDuplicateError("A template with this trade name already exists.");
+      return;
+    }
+    const id = `custom-${Math.random().toString(36).slice(2, 10)}`;
+    const copy = cloneProposalTemplateWithNewIdentity(duplicateSource, {
+      id,
+      trade: name,
+      name: `${name} Proposal`,
+    });
+    setShowDuplicateModal(false);
+    setDuplicateSource(null);
+    setDuplicateTradeName("");
+    setDuplicateError("");
+    setEditingTemplate(copy);
+  }
+
+  async function removeTemplateFromServer(
+    template: ProposalTemplate,
+    confirmMessage: string
+  ) {
+    if (!window.confirm(confirmMessage)) return;
+    setTemplateActionError(null);
+    try {
+      await deleteProposalTemplate(supabase, template.trade);
+      setSavedTemplates((prev) => prev.filter((t) => t.trade !== template.trade));
+    } catch (e) {
+      setTemplateActionError(
+        e instanceof Error ? e.message : "Could not update templates. Try again."
+      );
+    }
   }
 
   function handleDelete(template: ProposalTemplate) {
-    // For now just remove locally; server delete can be added once you want it.
-    setSavedTemplates((prev) => prev.filter((t) => t.trade !== template.trade));
+    void removeTemplateFromServer(
+      template,
+      `Delete the "${template.trade}" proposal template from your account? This cannot be undone.`
+    );
+  }
+
+  function handleResetToDefault(template: ProposalTemplate) {
+    void removeTemplateFromServer(
+      template,
+      `Remove your saved "${template.trade}" template and use the built-in default again for new quotes? This does not change existing quotes.`
+    );
   }
 
   function handleCreateNew() {
@@ -2429,8 +2792,13 @@ function TemplatesSection() {
     <>
       <SettingsSection
         title="Proposal Templates"
-        description="Customize the 10-section proposal document for each trade. Click any card to open the editor, or create a new template for any service you offer."
+        description="Customize the 10-section proposal document for each trade. Click a card to edit, use the copy icon to duplicate any template under a new trade name, or add a blank template for a new service."
       >
+        {templateActionError ? (
+          <div className="mb-4 rounded-lg border border-[#ffe0d5] bg-[#fff1ea] p-4 text-sm text-[#b42318]">
+            {templateActionError}
+          </div>
+        ) : null}
         {loadError ? (
           <div className="mb-4 rounded-lg border border-[#ffe0d5] bg-[#fff1ea] p-4 text-sm text-[#b42318]">
             {loadError}
@@ -2480,9 +2848,37 @@ function TemplatesSection() {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDuplicateModal(template);
+                        }}
+                        title="Duplicate as a new trade template"
+                        className="rounded p-1 text-gray-300 transition hover:bg-[#fff1ea] hover:text-[#ff5c35]"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                      {isModified && !isCustom && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleResetToDefault(template);
+                          }}
+                          title="Remove saved version — use built-in default again"
+                          className="rounded p-1 text-gray-300 transition hover:bg-amber-50 hover:text-amber-600"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       {isCustom && (
                         <button
-                          onClick={() => handleDelete(template)}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(template);
+                          }}
                           title="Delete custom template"
                           className="rounded p-1 text-gray-300 transition hover:bg-red-50 hover:text-red-400"
                         >
@@ -2539,6 +2935,55 @@ function TemplatesSection() {
         </div>
       </SettingsSection>
 
+      {/* Duplicate template modal */}
+      {showDuplicateModal && duplicateSource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-2xl">
+            <h3 className="text-lg font-bold text-[#213343]">Duplicate template</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Copying from <span className="font-medium text-[#213343]">{duplicateSource.trade}</span>. Choose a new
+              trade name — it must be unique and is used to match quotes to this template.
+            </p>
+            <div className="mt-5">
+              <label className="mb-1.5 block text-sm font-medium text-[#213343]">New trade / service name</label>
+              <input
+                autoFocus
+                value={duplicateTradeName}
+                onChange={(e) => {
+                  setDuplicateTradeName(e.target.value);
+                  setDuplicateError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleDuplicateConfirm()}
+                placeholder="e.g. Commercial Roofing"
+                className="w-full rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm outline-none focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
+              />
+              {duplicateError ? <p className="mt-1.5 text-xs text-red-500">{duplicateError}</p> : null}
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDuplicateModal(false);
+                  setDuplicateSource(null);
+                  setDuplicateTradeName("");
+                  setDuplicateError("");
+                }}
+                className="flex-1 rounded-lg border border-[#d9e2ec] py-2.5 text-sm text-gray-500 transition hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateConfirm}
+                className="flex-1 rounded-lg bg-[#ff5c35] py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
+              >
+                Open copy in editor
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* New template modal */}
       {showNewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -2583,6 +3028,7 @@ function TemplatesSection() {
 
       {editingTemplate && (
         <TemplateEditorPanel
+          key={`${editingTemplate.id}-${editingTemplate.lastModified}`}
           template={editingTemplate}
           open={true}
           onClose={() => setEditingTemplate(null)}
@@ -2605,17 +3051,15 @@ function DataSection({
   return (
     <SettingsSection
       title="Data"
-      description="Projects, quotes, and contacts live in your Supabase database. Use this section for settings backup and re-running setup."
+      description="Download a copy of your company settings from this page, or run the setup wizard again. Your projects and quotes stay in your account in the cloud—they are not stored only in this browser."
     >
       <div className="space-y-6">
         <div className="rounded-lg border border-[#d9e2ec] p-5">
-          <p className="text-sm font-medium text-black">Where your data lives</p>
+          <p className="text-sm font-medium text-black">Your company data</p>
           <p className="mt-1 text-sm text-gray-500">
-            Production data is not tied to this browser. Set{" "}
-            <code className="rounded bg-gray-100 px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
-            <code className="rounded bg-gray-100 px-1">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, and{" "}
-            <code className="rounded bg-gray-100 px-1">SUPABASE_SERVICE_ROLE_KEY</code> on Vercel so every deploy uses
-            the same backend.
+            Projects, quotes, contacts, and settings are saved to your organization&apos;s account in the cloud. If you
+            need a full database export or backups beyond this page, ask whoever manages your IT or the person who set
+            up this app for you.
           </p>
         </div>
 
@@ -2623,7 +3067,7 @@ function DataSection({
           <p className="text-sm font-medium text-black">Export company settings</p>
           <p className="mt-1 text-sm text-gray-500">
             Downloads the current settings JSON from this page (not projects or quotes). For full database backups, use
-            the Supabase dashboard.
+            your database or hosting admin console.
           </p>
           <button
             type="button"
@@ -2637,8 +3081,8 @@ function DataSection({
         <div className="rounded-lg border border-[#d9e2ec] p-5">
           <p className="text-sm font-medium text-black">Re-run setup wizard</p>
           <p className="mt-1 text-sm text-gray-500">
-            Clears the onboarding flag and sends you through the wizard again. Changes are saved to Supabase when you
-            finish.
+            Clears the onboarding flag and sends you through the wizard again. Changes are saved to your account when
+            you finish.
           </p>
           <button
             type="button"

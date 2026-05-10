@@ -1,4 +1,11 @@
+import { getMoneyFormatPrefs } from "./money-format-prefs";
 import { calculatePricingEngine } from "./pricing-engine";
+import type { MaterialItem, ProposalTemplate } from "./proposal-templates";
+import {
+  defaultRoofingBestTierMaterialsTable,
+  defaultRoofingBetterTierMaterialsTable,
+  defaultRoofingGoodTierMaterialsTable,
+} from "./default-roofing-tier-materials";
 
 export type ProjectStatus = "Draft" | "Pricing" | "Quoted" | "Won" | "Lost" | "Archived";
 
@@ -51,6 +58,10 @@ export type CompanyCredential = {
 
 export type CostBreakdown = {
   materials: number;
+  /** Optional: material $ for Good tier; when unset, `materials` is used for all tiers without overrides. */
+  materialsGood?: number;
+  materialsBetter?: number;
+  materialsBest?: number;
   labor: number;
   dumpster: number;
   permits: number;
@@ -158,6 +169,10 @@ export type Quote = {
   good: PricingResult;
   better: PricingResult;
   best: PricingResult;
+  /** Per-job materials / brand line per tier (e.g. Good: IKO, Better: GAF). Overrides company defaults when set. */
+  tierMaterials?: Partial<Record<PriceOptionName, string>>;
+  /** Optional per-tier materials table rows for the proposal (overrides company defaults when set for that tier). */
+  tierMaterialsTable?: Partial<Record<PriceOptionName, MaterialItem[]>>;
   selectedOption: PriceOptionName;
   status: QuoteStatus;
   createdAt: string;
@@ -238,7 +253,7 @@ export type AppSettings = {
   };
   costRules: {
     monthlyOverhead: number;
-    /** Optional saved breakdown (onboarding guía, manual lines, or edited here). Sum should match monthlyOverhead when used. */
+    /** Optional saved breakdown (onboarding guide, manual lines, or edited here). Sum should match monthlyOverhead when used. */
     overheadLineItems: OverheadLineItem[];
     overheadAllocationMethod:
       | "Percentage"
@@ -281,6 +296,21 @@ export type AppSettings = {
     goodDescription: string;
     betterDescription: string;
     bestDescription: string;
+    /** Customer-facing label for the Good tier (internal key stays Good). */
+    goodTierLabel: string;
+    betterTierLabel: string;
+    bestTierLabel: string;
+    /** Default “materials / brand” line for Good tier (shown on proposals; editable per quote). */
+    goodTierMaterialsSummary: string;
+    betterTierMaterialsSummary: string;
+    bestTierMaterialsSummary: string;
+    /**
+     * Rows for the “Materials & Specifications” table when this tier is selected on the proposal.
+     * If empty for a tier, the proposal falls back to the template’s materials table for that trade.
+     */
+    goodTierMaterialsTable: MaterialItem[];
+    betterTierMaterialsTable: MaterialItem[];
+    bestTierMaterialsTable: MaterialItem[];
     defaultIncludedServices: string[];
   };
   pricingThresholds: {
@@ -538,6 +568,18 @@ export const defaultSettings: AppSettings = {
     goodDescription: "Competitive option for budget-conscious customers.",
     betterDescription: "Recommended option with balanced value and quality.",
     bestDescription: "Premium option for enhanced service and long-term value.",
+    goodTierLabel: "Good",
+    betterTierLabel: "Better",
+    bestTierLabel: "Best",
+    goodTierMaterialsSummary:
+      "IKO Cambridge architectural system — RoofGard synthetic, GoldShield ice & water, matching ridge and accessories.",
+    betterTierMaterialsSummary:
+      "GAF Timberline HDZ with Pro-Start, Seal-A-Ridge, FeltBuster, WeatherWatch, and System Plus warranty upgrade path.",
+    bestTierMaterialsSummary:
+      "Owens Corning Duration FLEX impact-resistant system — Deck Defense, WeatherLock Flex, VentSure, Platinum-level warranty upgrades.",
+    goodTierMaterialsTable: defaultRoofingGoodTierMaterialsTable,
+    betterTierMaterialsTable: defaultRoofingBetterTierMaterialsTable,
+    bestTierMaterialsTable: defaultRoofingBestTierMaterialsTable,
     defaultIncludedServices: ["Materials", "Labor", "Cleanup", "Disposal", "Warranty", "Licensed & Insured"],
   },
   pricingThresholds: {
@@ -669,6 +711,83 @@ export function mergeAppSettings(settings: AppSettings): AppSettings {
       ...settings.appPreferences,
     },
   };
+}
+
+/** Customer-facing tier title from Settings (falls back to Good / Better / Best). */
+export function getTierDisplayName(settings: AppSettings, tier: PriceOptionName): string {
+  const p = mergeAppSettings(settings).proposalSettings;
+  const raw =
+    tier === "Good"
+      ? p.goodTierLabel
+      : tier === "Better"
+        ? p.betterTierLabel
+        : p.bestTierLabel;
+  const s = String(raw ?? "").trim();
+  return s || tier;
+}
+
+/** Materials / brand line per tier for proposals: quote overrides, then company defaults. */
+export function getTierMaterialSummaries(
+  settings: AppSettings,
+  quote?: Pick<Quote, "tierMaterials"> | null
+): Record<PriceOptionName, string> {
+  const p = mergeAppSettings(settings).proposalSettings;
+  const q = quote?.tierMaterials;
+  const one = (name: PriceOptionName, settingsFallback: string) => {
+    const fromQuote = q?.[name];
+    if (fromQuote !== undefined && fromQuote !== null) return String(fromQuote).trim();
+    return (settingsFallback || "").trim();
+  };
+  return {
+    Good: one("Good", p.goodTierMaterialsSummary),
+    Better: one("Better", p.betterTierMaterialsSummary),
+    Best: one("Best", p.bestTierMaterialsSummary),
+  };
+}
+
+function materialRowHasContent(row: MaterialItem): boolean {
+  return [row.category, row.product, row.brand, row.warranty, row.notes].some((x) =>
+    String(x ?? "").trim()
+  );
+}
+
+function normalizeMaterialRows(rows: MaterialItem[] | undefined): MaterialItem[] {
+  if (!rows?.length) return [];
+  return rows.filter(materialRowHasContent).map((row, i) => ({
+    ...row,
+    id: row.id?.trim() ? row.id : `mat-${i}-${Math.random().toString(36).slice(2, 9)}`,
+  }));
+}
+
+/**
+ * Rows for the proposal “Materials & Specifications” section for the selected tier:
+ * quote override → template per-tier rows → company defaults for that tier → `materialsSpecs.items`.
+ */
+export function getTierMaterialsTableForProposal(
+  settings: AppSettings,
+  selectedTier: PriceOptionName,
+  template: Pick<ProposalTemplate, "materialsSpecs" | "tierMaterialsByPackage">,
+  quote?: Pick<Quote, "tierMaterialsTable"> | null
+): MaterialItem[] {
+  const p = mergeAppSettings(settings).proposalSettings;
+  const fromQuote = normalizeMaterialRows(quote?.tierMaterialsTable?.[selectedTier]);
+  if (fromQuote.length > 0) return fromQuote;
+
+  const fromTemplateTier = normalizeMaterialRows(
+    template.tierMaterialsByPackage?.[selectedTier]
+  );
+  if (fromTemplateTier.length > 0) return fromTemplateTier;
+
+  const settingsRows = normalizeMaterialRows(
+    selectedTier === "Good"
+      ? p.goodTierMaterialsTable
+      : selectedTier === "Better"
+        ? p.betterTierMaterialsTable
+        : p.bestTierMaterialsTable
+  );
+  if (settingsRows.length > 0) return settingsRows;
+
+  return template.materialsSpecs.items;
 }
 
 export function getEnabledCompanyCredentials(settings: AppSettings) {
@@ -803,13 +922,23 @@ export const initialContacts: Contact[] = initialProjects.map((project) => ({
 }));
 
 export function getTotalCost(costs: CostBreakdown) {
-  return Object.values(costs).reduce((sum, value) => sum + value, 0);
+  return (
+    (Number(costs.materials) || 0) +
+    (Number(costs.labor) || 0) +
+    (Number(costs.dumpster) || 0) +
+    (Number(costs.permits) || 0) +
+    (Number(costs.equipment) || 0) +
+    (Number(costs.subcontractor) || 0) +
+    (Number(costs.miscellaneous) || 0)
+  );
 }
 
 export function formatMoney(value: number) {
+  const { currency, numberFormat } = getMoneyFormatPrefs();
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
+    useGrouping: numberFormat === "1,000.00",
     maximumFractionDigits: 0,
   }).format(value);
 }
@@ -943,6 +1072,20 @@ export function calculateProjectPricing(
       riskLevel: project.riskLevel,
       strategy: merged.pricingDefaults.defaultStrategy,
     },
+    ...(() => {
+      const tier: Partial<Record<PriceOptionName, number>> = {};
+      const c = project.costs;
+      if (typeof c.materialsGood === "number" && !Number.isNaN(c.materialsGood)) {
+        tier.Good = c.materialsGood;
+      }
+      if (typeof c.materialsBetter === "number" && !Number.isNaN(c.materialsBetter)) {
+        tier.Better = c.materialsBetter;
+      }
+      if (typeof c.materialsBest === "number" && !Number.isNaN(c.materialsBest)) {
+        tier.Best = c.materialsBest;
+      }
+      return Object.keys(tier).length ? { materialCostByTier: tier } : {};
+    })(),
     pricingRules: {
       baseMargins: {
         Good: merged.pricingDefaults.goodMargin / 100,

@@ -26,7 +26,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`
           ${geistSans.variable}
@@ -34,7 +34,7 @@ export default function RootLayout({
           font-sans
           antialiased
           bg-[var(--page-bg)]
-          text-[var(--brand-navy)]
+          text-foreground
         `}
       >
         <AppProviders>

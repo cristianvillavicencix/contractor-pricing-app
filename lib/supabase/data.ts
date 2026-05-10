@@ -261,6 +261,18 @@ export async function upsertProposalTemplate(supabase: SupabaseClient, template:
   if (error) throw error;
 }
 
+export async function deleteProposalTemplate(supabase: SupabaseClient, trade: string) {
+  const companyId = await requireCompanyId(supabase);
+  const t = trade.trim();
+  if (!t) throw new Error("Trade is required to delete a template");
+  const { error } = await supabase
+    .from("proposal_templates")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("trade", t);
+  if (error) throw error;
+}
+
 export async function listQuoteVersions(
   supabase: SupabaseClient,
   quoteId: string

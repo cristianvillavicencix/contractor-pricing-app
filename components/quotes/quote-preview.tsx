@@ -177,6 +177,16 @@ export function QuotePreview({
                   <p className="text-2xl font-bold tracking-tight">
                     {formatMoney(price)}
                   </p>
+                  {doc.tierMaterialSummaries[name] ? (
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-[#ff5c35]">
+                      Materials / brand
+                    </p>
+                  ) : null}
+                  {doc.tierMaterialSummaries[name] ? (
+                    <p className="mt-0.5 text-xs font-medium leading-snug text-[#213343]">
+                      {doc.tierMaterialSummaries[name]}
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-xs leading-relaxed text-[#9CA3AF]">
                     {doc.pricingDescriptions[name]}
                   </p>

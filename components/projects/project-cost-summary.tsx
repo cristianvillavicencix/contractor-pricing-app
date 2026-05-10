@@ -1,6 +1,11 @@
 import { formatMoney, getTotalCost, type CostBreakdown } from "@/lib/projects";
 
-const costRows: { key: keyof CostBreakdown; label: string }[] = [
+type CoreCostRowKey = keyof Pick<
+  CostBreakdown,
+  "materials" | "labor" | "dumpster" | "permits" | "equipment" | "subcontractor" | "miscellaneous"
+>;
+
+const costRows: { key: CoreCostRowKey; label: string }[] = [
   { key: "materials", label: "Materials" },
   { key: "labor", label: "Labor" },
   { key: "dumpster", label: "Dumpster / disposal" },
@@ -26,7 +31,7 @@ export function ProjectCostSummary({ costs }: { costs: CostBreakdown }) {
           >
             <span className="text-gray-500">{row.label}</span>
             <span className="font-medium text-black">
-              {formatMoney(costs[row.key])}
+              {formatMoney(costs[row.key] ?? 0)}
             </span>
           </div>
         ))}

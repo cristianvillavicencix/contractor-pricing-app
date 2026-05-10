@@ -35,6 +35,7 @@ const c = {
   border: "#E5E7EB",
   bg: "#F9FAFB",
   white: "#FFFFFF",
+  accent: "#ff5c35",
 };
 
 const s = StyleSheet.create({
@@ -133,6 +134,21 @@ const s = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
     color: c.black,
     marginBottom: 6,
+  },
+  pricingCardMaterialsLabel: {
+    fontSize: 6.5,
+    fontFamily: "Helvetica-Bold",
+    color: c.accent,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  pricingCardMaterials: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
+    color: c.black,
+    lineHeight: 1.35,
+    marginBottom: 5,
   },
   pricingCardDesc: { fontSize: 7.5, color: c.mid, lineHeight: 1.5 },
   // Services / Certifications grid
@@ -665,6 +681,12 @@ function QuotePDFDocument({
                     <Text style={s.pricingCardName}>{name}</Text>
                   )}
                   <Text style={s.pricingCardPrice}>{formatMoney(price)}</Text>
+                  {doc.tierMaterialSummaries[name] ? (
+                    <Text style={s.pricingCardMaterialsLabel}>Materials / brand</Text>
+                  ) : null}
+                  {doc.tierMaterialSummaries[name] ? (
+                    <Text style={s.pricingCardMaterials}>{doc.tierMaterialSummaries[name]}</Text>
+                  ) : null}
                   <Text style={s.pricingCardDesc}>{doc.pricingDescriptions[name]}</Text>
                 </View>
               );

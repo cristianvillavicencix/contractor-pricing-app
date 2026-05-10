@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  Copy,
   Download,
   Edit3,
   ExternalLink,
@@ -32,8 +33,10 @@ import {
   formatMoney,
   getEnabledCompanyCredentialDocuments,
   getEnabledCompanyCredentials,
+  getTierMaterialSummaries,
   mergeAppSettings,
   type AppSettings,
+  type PriceOptionName,
   type Project,
   type Quote,
 } from "@/lib/app-data";
@@ -41,6 +44,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   getQuote,
   getProposalTemplateForTrade,
+  listProposalTemplates,
   listQuoteVersions,
   loadCompanySettings,
   saveQuoteVersion,
@@ -50,6 +54,7 @@ import {
   getSignedUrlViaApi,
 } from "@/lib/supabase/data";
 import {
+  cloneProposalTemplateWithNewIdentity,
   mergeProposalTemplates,
   PROPOSAL_SECTIONS,
   type CustomSection,
@@ -57,6 +62,7 @@ import {
   type TimelinePhase,
   type ProposalTemplate,
 } from "@/lib/proposal-templates";
+import { MaterialsTableEditor } from "@/components/proposals/materials-table-editor";
 import { ProposalDocument } from "@/components/proposals/proposal-document";
 import { PagedProposalPreview } from "@/components/proposals/paged-proposal-preview";
 import type {
@@ -81,6 +87,7 @@ type QuoteVersionSnapshot = {
   sectionLayouts: SectionLayouts;
   sectionOrder: string[];
   customSections: CustomSection[];
+  tierMaterialSummaries: Record<"Good" | "Better" | "Best", string>;
 };
 type QuotePhotosFields = {
   coverImagePath?: string | null;
@@ -137,6 +144,13 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       quote?.better.description ?? settings.proposalSettings.betterDescription,
     Best: quote?.best.description ?? settings.proposalSettings.bestDescription,
   }));
+  const [tierMaterialSummaries, setTierMaterialSummaries] = useState<
+    Record<PriceOptionName, string>
+  >(() => ({
+    Good: "",
+    Better: "",
+    Best: "",
+  }));
   const [services, setServices] = useState<ServiceItem[]>(() =>
     (quote?.includedServices ?? settings.proposalSettings.defaultIncludedServices ?? defaultIncludedServices).map((name) => ({
       name,
@@ -188,6 +202,12 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   // Proposal modal + photos + template editor
   const [showProposalModal, setShowProposalModal] = useState(false);
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  /** When duplicating to a new trade, the panel edits this clone instead of the quote’s template. */
+  const [templateEditorDraft, setTemplateEditorDraft] = useState<ProposalTemplate | null>(null);
+  const [showDuplicateTemplateModal, setShowDuplicateTemplateModal] = useState(false);
+  const [duplicateTemplateTradeName, setDuplicateTemplateTradeName] = useState("");
+  const [duplicateTemplateError, setDuplicateTemplateError] = useState("");
+  const [duplicateTemplateBusy, setDuplicateTemplateBusy] = useState(false);
   const [existingPhotos, setExistingPhotos] = useState<string[]>([]);
   const [existingPhotoCaptions, setExistingPhotoCaptions] = useState<string[]>([]);
 
@@ -229,6 +249,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         }
         setQuote(quoteForSession);
         setProject(undefined);
+
+        if (quoteForSession) {
+          setTierMaterialSummaries(getTierMaterialSummaries(mergedSettings, quoteForSession));
+        }
 
         const qWithPhotos = quoteForSession as (Quote & QuotePhotosFields) | null;
         setCoverLayout(qWithPhotos?.coverLayout ?? mergedSettings.branding.proposalCoverLayout);
@@ -286,6 +310,12 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                 sectionLayouts: (snap?.sectionLayouts as SectionLayouts) ?? {},
                 sectionOrder: (snap?.sectionOrder as string[]) ?? [],
                 customSections: (snap?.customSections as CustomSection[]) ?? [],
+                tierMaterialSummaries:
+                  (snap?.tierMaterialSummaries as QuoteVersionSnapshot["tierMaterialSummaries"]) ?? {
+                    Good: "",
+                    Better: "",
+                    Best: "",
+                  },
               };
             })
           );
@@ -337,6 +367,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     termsText: terms,
     includedServices: services.filter((s) => s.visible).map((s) => s.name),
     pricingDescriptions,
+    tierMaterialSummaries,
     certifications: settings.proposalSettings.showCertifications
       ? certs.filter((c) => c.visible).map((c) => c.name)
       : [],
@@ -370,6 +401,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
           good: { ...quote.good, description: pricingDescriptions.Good },
           better: { ...quote.better, description: pricingDescriptions.Better },
           best: { ...quote.best, description: pricingDescriptions.Best },
+          tierMaterials: tierMaterialSummaries,
           scopeSummary: scope,
           warrantyText: warranty,
           termsText: terms,
@@ -414,7 +446,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, warranty, terms, services, certs, sectionOverrides, sectionLayouts,
       sectionOrder, customSections, existingPhotos, coverImageUrl, coverLayout,
-      proposalTemplate, pricingDescriptions, selectedOption]);
+      proposalTemplate, pricingDescriptions, tierMaterialSummaries, selectedOption]);
 
   // Warn before closing/refreshing with unsaved changes
   useEffect(() => {
@@ -443,6 +475,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       good: { ...quote.good, description: pricingDescriptions.Good },
       better: { ...quote.better, description: pricingDescriptions.Better },
       best: { ...quote.best, description: pricingDescriptions.Best },
+      tierMaterials: tierMaterialSummaries,
       scopeSummary: scope,
       warrantyText: warranty,
       termsText: terms,
@@ -470,6 +503,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         includedServices: services.filter((s) => s.visible).map((s) => s.name),
         certifications: certs.filter((c) => c.visible).map((c) => c.name),
         pricingDescriptions,
+        tierMaterialSummaries,
         sectionOverrides,
         sectionLayouts,
         sectionOrder,
@@ -495,6 +529,12 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                 sectionLayouts: (snap?.sectionLayouts as SectionLayouts) ?? {},
                 sectionOrder: (snap?.sectionOrder as string[]) ?? [],
                 customSections: (snap?.customSections as CustomSection[]) ?? [],
+                tierMaterialSummaries:
+                  (snap?.tierMaterialSummaries as QuoteVersionSnapshot["tierMaterialSummaries"]) ?? {
+                    Good: "",
+                    Better: "",
+                    Best: "",
+                  },
               };
             })
           );
@@ -521,7 +561,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDirty, isSaved, scope, warranty, terms, services, certs, sectionOverrides,
       sectionLayouts, sectionOrder, customSections, existingPhotos, coverImageUrl,
-      coverLayout, proposalTemplate, pricingDescriptions, selectedOption]);
+      coverLayout, proposalTemplate, pricingDescriptions, tierMaterialSummaries, selectedOption]);
 
   async function handleDownload() {
     if (!quote) return;
@@ -652,9 +692,51 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   }
 
   function handleTemplateSave(updated: ProposalTemplate) {
-    setProposalTemplate(updated);
+    if (proposalTemplate && updated.trade.trim() === proposalTemplate.trade.trim()) {
+      setProposalTemplate(updated);
+    }
     upsertProposalTemplate(supabase, updated).catch(() => undefined);
     setShowTemplateEditor(false);
+    setTemplateEditorDraft(null);
+  }
+
+  async function handleDuplicateTemplateSubmit() {
+    if (!proposalTemplate) return;
+    const name = duplicateTemplateTradeName.trim();
+    if (!name) {
+      setDuplicateTemplateError("Enter a trade name for the new template.");
+      return;
+    }
+    if (name.toLowerCase() === proposalTemplate.trade.trim().toLowerCase()) {
+      setDuplicateTemplateError("Use a different name than this quote’s trade.");
+      return;
+    }
+    setDuplicateTemplateBusy(true);
+    setDuplicateTemplateError("");
+    try {
+      const saved = await listProposalTemplates(supabase);
+      const merged = mergeProposalTemplates(saved);
+      if (merged.some((t) => t.trade.trim().toLowerCase() === name.toLowerCase())) {
+        setDuplicateTemplateError("A template with this trade name already exists.");
+        return;
+      }
+      const id = `custom-${Math.random().toString(36).slice(2, 10)}`;
+      const copy = cloneProposalTemplateWithNewIdentity(proposalTemplate, {
+        id,
+        trade: name,
+        name: `${name} Proposal`,
+      });
+      setShowDuplicateTemplateModal(false);
+      setDuplicateTemplateTradeName("");
+      setTemplateEditorDraft(copy);
+      setShowTemplateEditor(true);
+    } catch (e) {
+      setDuplicateTemplateError(
+        e instanceof Error ? e.message : "Could not verify template names. Try again."
+      );
+    } finally {
+      setDuplicateTemplateBusy(false);
+    }
   }
 
   function updateTemplate<K extends keyof ProposalTemplate>(
@@ -782,6 +864,9 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     setPricingDescriptions(
       version.pricingDescriptions ?? pricingDescriptions
     );
+    setTierMaterialSummaries(
+      version.tierMaterialSummaries ?? { Good: "", Better: "", Best: "" }
+    );
     setSectionOverrides(version.sectionOverrides);
     setSectionLayouts(version.sectionLayouts);
     setSectionOrder(version.sectionOrder);
@@ -818,14 +903,17 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       : unresolvedHealthItems.length <= 2
         ? "Needs review"
         : "Needs work";
+  const proposalPs = settings.proposalSettings;
   const pagedRenderKey = JSON.stringify({
     quoteId: quote?.id ?? "",
+    selectedOption,
     scope,
     warranty,
     terms,
     services,
     certs,
     pricingDescriptions,
+    tierMaterialSummaries,
     sectionOverrides,
     sectionLayouts,
     sectionOrder,
@@ -835,6 +923,11 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     coverImageUrl,
     coverLayout,
     proposalTemplate,
+    companyTierMaterialsTables: {
+      Good: proposalPs.goodTierMaterialsTable,
+      Better: proposalPs.betterTierMaterialsTable,
+      Best: proposalPs.bestTierMaterialsTable,
+    },
   });
 
   if (blockingState === "error") {
@@ -909,12 +1002,30 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               </span>
             </button>
             <button
-              onClick={() => setShowTemplateEditor(true)}
+              type="button"
+              onClick={() => {
+                setTemplateEditorDraft(null);
+                setShowTemplateEditor(true);
+              }}
               className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              title="Edit proposal template"
+              title="Edit proposal template for this quote’s trade"
             >
               <Edit3 className="h-4 w-4" />
               <span className="hidden sm:inline">Edit Template</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!proposalTemplate) return;
+                setDuplicateTemplateTradeName(`${proposalTemplate.trade} (copy)`);
+                setDuplicateTemplateError("");
+                setShowDuplicateTemplateModal(true);
+              }}
+              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+              title="Save a copy of this template under another trade (e.g. Commercial Roofing)"
+            >
+              <Copy className="h-4 w-4" />
+              <span className="hidden sm:inline">Duplicate</span>
             </button>
             <button
               onClick={handlePrint}
@@ -1009,6 +1120,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               if (!builtIn && !custom) return null;
 
               const panelLabel = builtIn?.label ?? custom?.title ?? "Custom Section";
+              const panelOrdinal =
+                sectionId === "cover"
+                  ? null
+                  : sectionOrder.slice(0, index + 1).filter((id) => id !== "cover").length;
               const panelDescription = builtIn?.description ?? "Custom content for your proposal";
               const sectionVisible = isSectionVisible(sectionId);
               const open = activeProposalSection === sectionId;
@@ -1036,7 +1151,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                   className={`transition-opacity ${isDragging ? "opacity-40" : "opacity-100"} ${isDragOver && dragSectionIndex !== index ? "ring-2 ring-[#ff5c35] ring-offset-1 rounded" : ""}`}
                 >
                 <ProposalSectionPanel
-                  label={panelLabel}
+                  label={panelOrdinal != null ? `${panelOrdinal}. ${panelLabel}` : panelLabel}
                   description={panelDescription}
                   open={open}
                   visible={sectionVisible}
@@ -1559,53 +1674,49 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                       <SidebarSubsection
                         title="Included services"
                         description="Services shown after the detailed scope items."
+                        collapsible
+                        open={showServices}
+                        onOpenChange={setShowServices}
                       >
-                        <CollapseHeader
-                          label="Included Services"
-                          open={showServices}
-                          onToggle={() => setShowServices((v) => !v)}
-                        />
-                        {showServices && (
-                          <div className="space-y-1">
-                            {displayedServices.map((item) => (
-                              <VisibilityRow
-                                key={item.name}
-                                label={item.name}
-                                visible={item.visible}
-                                onToggle={() => toggleService(item.name)}
-                              />
-                            ))}
+                        <div className="space-y-1">
+                          {displayedServices.map((item) => (
+                            <VisibilityRow
+                              key={item.name}
+                              label={item.name}
+                              visible={item.visible}
+                              onToggle={() => toggleService(item.name)}
+                            />
+                          ))}
 
-                            {services.length > SERVICES_COLLAPSE_AT && (
-                              <button
-                                onClick={() => setShowAllServices((v) => !v)}
-                                className="w-full pt-0.5 text-left text-xs text-gray-400 transition hover:text-[#213343]"
-                              >
-                                {showAllServices
-                                  ? "Show less"
-                                  : `Show ${hiddenCount} more`}
-                              </button>
-                            )}
+                          {services.length > SERVICES_COLLAPSE_AT && (
+                            <button
+                              onClick={() => setShowAllServices((v) => !v)}
+                              className="w-full pt-0.5 text-left text-xs text-gray-400 transition hover:text-[#213343]"
+                            >
+                              {showAllServices
+                                ? "Show less"
+                                : `Show ${hiddenCount} more`}
+                            </button>
+                          )}
 
-                            <div className="flex gap-1.5 pt-0.5">
-                              <input
-                                value={newService}
-                                onChange={(e) => setNewService(e.target.value)}
-                                onKeyDown={(e) =>
-                                  e.key === "Enter" && addService()
-                                }
-                                placeholder="Add service..."
-                                className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
-                              />
-                              <button
-                                onClick={addService}
-                                className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                              >
-                                Add
-                              </button>
-                            </div>
+                          <div className="flex gap-1.5 pt-0.5">
+                            <input
+                              value={newService}
+                              onChange={(e) => setNewService(e.target.value)}
+                              onKeyDown={(e) =>
+                                e.key === "Enter" && addService()
+                              }
+                              placeholder="Add service..."
+                              className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
+                            />
+                            <button
+                              onClick={addService}
+                              className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                            >
+                              Add
+                            </button>
                           </div>
-                        )}
+                        </div>
 
                         {tradeSuggestions.length > 0 && (
                           <div className="pt-1">
@@ -1655,6 +1766,27 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                         items={proposalTemplate.materialsSpecs.items}
                         onChange={(items) => updateTemplate("materialsSpecs", { ...proposalTemplate.materialsSpecs, items })}
                       />
+                      <SidebarSubsection
+                        title="Materials by package"
+                        description="Good / Better / Best rows in the proposal when that tier is selected. Non-empty tiers override company Proposal Settings; leave empty to use Settings."
+                      >
+                        <div className="space-y-3">
+                          {(["Good", "Better", "Best"] as const).map((pkg) => (
+                            <div key={pkg}>
+                              <MaterialsTableEditor
+                                title={`${pkg} tier`}
+                                items={proposalTemplate.tierMaterialsByPackage?.[pkg] ?? []}
+                                onChange={(items) =>
+                                  updateTemplate("tierMaterialsByPackage", {
+                                    ...proposalTemplate.tierMaterialsByPackage,
+                                    [pkg]: items,
+                                  })
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </SidebarSubsection>
                     </div>
                   )}
 
@@ -1795,6 +1927,33 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                             }
                             rows={2}
                           />
+                          <p className="text-xs text-gray-400">
+                            Materials / brand (optional): shown under each price, e.g. IKO, GAF, Owens Corning.
+                          </p>
+                          <EditTextarea
+                            label="Good — materials / brand"
+                            value={tierMaterialSummaries.Good}
+                            onChange={(value) =>
+                              setTierMaterialSummaries((current) => ({ ...current, Good: value }))
+                            }
+                            rows={1}
+                          />
+                          <EditTextarea
+                            label="Better — materials / brand"
+                            value={tierMaterialSummaries.Better}
+                            onChange={(value) =>
+                              setTierMaterialSummaries((current) => ({ ...current, Better: value }))
+                            }
+                            rows={1}
+                          />
+                          <EditTextarea
+                            label="Best — materials / brand"
+                            value={tierMaterialSummaries.Best}
+                            onChange={(value) =>
+                              setTierMaterialSummaries((current) => ({ ...current, Best: value }))
+                            }
+                            rows={1}
+                          />
                         </div>
                       </SidebarSubsection>
 
@@ -1924,42 +2083,41 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                           })
                         }
                       />
-                      <div className="space-y-1.5">
-                        <CollapseHeader
-                          label="Certifications"
-                          open={showCerts}
-                          onToggle={() => setShowCerts((v) => !v)}
-                        />
-                        {showCerts && (
-                          <div className="space-y-1">
-                            {certs.map((cert) => (
-                              <VisibilityRow
-                                key={cert.name}
-                                label={cert.name}
-                                visible={cert.visible}
-                                onToggle={() => toggleCert(cert.name)}
-                              />
-                            ))}
-                            <div className="flex gap-1.5 pt-0.5">
-                              <input
-                                value={newCert}
-                                onChange={(e) => setNewCert(e.target.value)}
-                                onKeyDown={(e) =>
-                                  e.key === "Enter" && addCert()
-                                }
-                                placeholder="Add certification..."
-                                className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
-                              />
-                              <button
-                                onClick={addCert}
-                                className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                              >
-                                Add
-                              </button>
-                            </div>
+                      <SidebarSubsection
+                        title="Certifications"
+                        description="Which items appear on this proposal."
+                        collapsible
+                        open={showCerts}
+                        onOpenChange={setShowCerts}
+                      >
+                        <div className="space-y-1">
+                          {certs.map((cert) => (
+                            <VisibilityRow
+                              key={cert.name}
+                              label={cert.name}
+                              visible={cert.visible}
+                              onToggle={() => toggleCert(cert.name)}
+                            />
+                          ))}
+                          <div className="flex gap-1.5 pt-0.5">
+                            <input
+                              value={newCert}
+                              onChange={(e) => setNewCert(e.target.value)}
+                              onKeyDown={(e) =>
+                                e.key === "Enter" && addCert()
+                              }
+                              placeholder="Add certification..."
+                              className="min-w-0 flex-1 rounded border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#111111]"
+                            />
+                            <button
+                              onClick={addCert}
+                              className="rounded border border-[#d9e2ec] px-3 py-1.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                            >
+                              Add
+                            </button>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      </SidebarSubsection>
 
                       <Link
                         href={
@@ -2218,33 +2376,71 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
 
       {/* ── Template Editor Panel ── */}
       {proposalTemplate && (
-        <TemplateEditorPanel
-          template={proposalTemplate}
-          open={showTemplateEditor}
-          onClose={() => setShowTemplateEditor(false)}
-          onSave={handleTemplateSave}
-        />
+        <>
+          {showDuplicateTemplateModal ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-2xl">
+                <h3 className="text-lg font-bold text-[#213343]">Duplicate template</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Copying from <span className="font-medium text-[#213343]">{proposalTemplate.trade}</span>. The new
+                  name must be unique — quotes use it to pick which template to load.
+                </p>
+                <div className="mt-5">
+                  <label className="mb-1.5 block text-sm font-medium text-[#213343]">New trade / service name</label>
+                  <input
+                    autoFocus
+                    value={duplicateTemplateTradeName}
+                    onChange={(e) => {
+                      setDuplicateTemplateTradeName(e.target.value);
+                      setDuplicateTemplateError("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && void handleDuplicateTemplateSubmit()}
+                    placeholder="e.g. Commercial Roofing"
+                    className="w-full rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm outline-none focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
+                  />
+                  {duplicateTemplateError ? (
+                    <p className="mt-1.5 text-xs text-red-500">{duplicateTemplateError}</p>
+                  ) : null}
+                </div>
+                <div className="mt-5 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDuplicateTemplateModal(false);
+                      setDuplicateTemplateTradeName("");
+                      setDuplicateTemplateError("");
+                    }}
+                    className="flex-1 rounded-lg border border-[#d9e2ec] py-2.5 text-sm text-gray-500 transition hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={duplicateTemplateBusy}
+                    onClick={() => void handleDuplicateTemplateSubmit()}
+                    className="flex-1 rounded-lg bg-[#ff5c35] py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820] disabled:opacity-60"
+                  >
+                    {duplicateTemplateBusy ? "Checking…" : "Open copy in editor"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <TemplateEditorPanel
+            key={`${(templateEditorDraft ?? proposalTemplate).id}-${
+              (templateEditorDraft ?? proposalTemplate).lastModified
+            }-${showTemplateEditor ? "open" : "closed"}`}
+            template={templateEditorDraft ?? proposalTemplate}
+            open={showTemplateEditor}
+            onClose={() => {
+              setShowTemplateEditor(false);
+              setTemplateEditorDraft(null);
+            }}
+            onSave={handleTemplateSave}
+          />
+        </>
       )}
     </div>
-  );
-}
-
-function CollapseHeader({
-  label,
-  open,
-  onToggle,
-}: {
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button onClick={onToggle} className="flex w-full items-center justify-between">
-      <p className="text-sm font-medium">{label}</p>
-      <ChevronDown
-        className={`h-4 w-4 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
-      />
-    </button>
   );
 }
 
@@ -2279,10 +2475,16 @@ function ProposalSectionPanel({
     >
       <div className="flex items-center gap-1.5 px-2 py-2">
         <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-300 active:cursor-grabbing" />
-        <button onClick={onOpen} className="min-w-0 flex-1 text-left" type="button">
+        <button
+          onClick={onOpen}
+          className="min-w-0 flex-1 text-left"
+          type="button"
+          title={open ? "Collapse section editor" : "Expand section editor"}
+        >
           <div className="flex items-center gap-1.5">
             <ChevronDown
               className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
             />
             <span className={`truncate text-sm font-medium ${visible ? "text-[#213343]" : "text-gray-400"}`}>
               {label}
@@ -2301,7 +2503,11 @@ function ProposalSectionPanel({
         </span>
         <button
           onClick={onToggleVisible}
-          title={visible ? "Hide section" : "Show section"}
+          title={
+            visible
+              ? "Eye: hide this block from the client (PDF, preview, portal). Chevron on the title collapses the editor only."
+              : "Eye: show this block to the client again"
+          }
           className="shrink-0 rounded p-1 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]"
           type="button"
         >
@@ -2312,8 +2518,9 @@ function ProposalSectionPanel({
         <div className="border-t border-[#eef2f6] px-3 py-3">
           {!visible ? (
             <div className="mb-3 rounded border border-gray-200 bg-white px-3 py-2 text-xs leading-relaxed text-gray-500">
-              This section is hidden from the client preview, printed proposal,
-              and client portal until you turn the eye back on.
+              Hidden from the client: preview, PDF, and portal. Use the <strong>chevron on the section title</strong> to
+              collapse this editor; use the <strong>eye</strong> only to include or exclude the section from what the
+              client sees.
             </div>
           ) : null}
           {children}
@@ -2343,7 +2550,7 @@ function VisibilityRow({
       </span>
       <button
         onClick={onToggle}
-        title={visible ? "Hide" : "Show"}
+        title={visible ? "Hide this line from the client proposal" : "Show on client proposal"}
         className="shrink-0 text-gray-400 transition hover:text-[#213343]"
         type="button"
       >
@@ -2361,13 +2568,39 @@ function SidebarSubsection({
   title,
   description,
   muted = false,
+  collapsible = false,
+  open: openControlled,
+  onOpenChange,
   children,
 }: {
   title: string;
   description?: string;
   muted?: boolean;
+  /** One header row: title + chevron toggles children (avoids a second “close” row under the title). */
+  collapsible?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: ReactNode;
 }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(true);
+  const controlled = collapsible && typeof openControlled === "boolean" && onOpenChange;
+  const expanded = collapsible ? (controlled ? openControlled : uncontrolledOpen) : true;
+
+  function toggle() {
+    if (!collapsible) return;
+    if (controlled) onOpenChange(!openControlled);
+    else setUncontrolledOpen((o) => !o);
+  }
+
+  const headerBody = (
+    <>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</p>
+      {description ? (
+        <p className="mt-1 text-xs leading-relaxed text-gray-400">{description}</p>
+      ) : null}
+    </>
+  );
+
   return (
     <div
       className={`rounded border p-3 ${
@@ -2376,17 +2609,22 @@ function SidebarSubsection({
           : "border-[#e8eef5] bg-white"
       }`}
     >
-      <div className="mb-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-          {title}
-        </p>
-        {description ? (
-          <p className="mt-1 text-xs leading-relaxed text-gray-400">
-            {description}
-          </p>
-        ) : null}
-      </div>
-      {children}
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={toggle}
+          className="mb-3 flex w-full items-start justify-between gap-2 rounded-md text-left outline-none ring-[#ff5c35] focus-visible:ring-2"
+        >
+          <div className="min-w-0">{headerBody}</div>
+          <ChevronDown
+            className={`mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition-transform ${expanded ? "" : "-rotate-90"}`}
+            aria-hidden
+          />
+        </button>
+      ) : (
+        <div className="mb-3">{headerBody}</div>
+      )}
+      {expanded ? children : null}
     </div>
   );
 }
@@ -2560,118 +2798,6 @@ function CompactInput({
         className="w-full rounded border border-[#d9e2ec] px-3 py-2 text-sm outline-none transition focus:border-[#111111]"
       />
     </label>
-  );
-}
-
-function MaterialsTableEditor({
-  items,
-  onChange,
-}: {
-  items: MaterialItem[];
-  onChange: (items: MaterialItem[]) => void;
-}) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<MaterialItem | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [newDraft, setNewDraft] = useState<Omit<MaterialItem, "id">>({ category: "", product: "", brand: "", warranty: "", notes: "" });
-
-  function startEdit(item: MaterialItem) {
-    setEditingId(item.id);
-    setDraft({ ...item });
-  }
-
-  function commitEdit() {
-    if (!editingId || !draft) return;
-    onChange(items.map((item) => (item.id === editingId ? draft : item)));
-    setEditingId(null);
-    setDraft(null);
-  }
-
-  function removeItem(id: string) {
-    onChange(items.filter((item) => item.id !== id));
-    if (editingId === id) { setEditingId(null); setDraft(null); }
-  }
-
-  function addItem() {
-    if (!newDraft.product.trim()) return;
-    const id = Math.random().toString(36).slice(2, 8);
-    onChange([...items, { id, ...newDraft }]);
-    setNewDraft({ category: "", product: "", brand: "", warranty: "", notes: "" });
-    setAdding(false);
-  }
-
-  const FIELDS: Array<{ key: keyof Omit<MaterialItem, "id">; placeholder: string }> = [
-    { key: "category", placeholder: "Category" },
-    { key: "product", placeholder: "Product" },
-    { key: "brand", placeholder: "Brand" },
-    { key: "warranty", placeholder: "Warranty" },
-    { key: "notes", placeholder: "Notes" },
-  ];
-
-  return (
-    <div>
-      <p className="mb-1.5 text-sm font-medium">Materials</p>
-      <div className="space-y-1.5">
-        {items.map((item) => (
-          <div key={item.id} className="overflow-hidden rounded border border-[#d9e2ec]">
-            {editingId === item.id && draft ? (
-              <div className="space-y-1.5 p-2">
-                {FIELDS.map(({ key, placeholder }) => (
-                  <input
-                    key={key}
-                    value={draft[key]}
-                    onChange={(e) => setDraft((d) => d ? { ...d, [key]: e.target.value } : d)}
-                    placeholder={placeholder}
-                    className="w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none focus:border-[#111111]"
-                  />
-                ))}
-                <div className="flex justify-end gap-1.5 pt-0.5">
-                  <button onClick={() => { setEditingId(null); setDraft(null); }} className="rounded border border-[#d9e2ec] px-3 py-1 text-xs transition hover:bg-gray-50">Cancel</button>
-                  <button onClick={commitEdit} className="rounded bg-[#111111] px-3 py-1 text-xs text-white transition hover:bg-[#333]">Save</button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 px-2 py-2">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-[#213343]">{item.category}{item.product ? ` — ${item.product}` : ""}</p>
-                  <p className="truncate text-[10px] text-gray-400">{[item.brand, item.warranty].filter(Boolean).join(" · ")}</p>
-                </div>
-                <div className="flex shrink-0 gap-0.5">
-                  <button onClick={() => startEdit(item)} className="rounded p-1 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]">
-                    <Edit3 className="h-3 w-3" />
-                  </button>
-                  <button onClick={() => removeItem(item.id)} className="rounded p-1 text-gray-400 transition hover:bg-red-50 hover:text-red-500">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      {adding ? (
-        <div className="mt-2 space-y-1.5 rounded border border-[#d9e2ec] p-2">
-          {FIELDS.map(({ key, placeholder }) => (
-            <input
-              key={key}
-              value={newDraft[key]}
-              onChange={(e) => setNewDraft((d) => ({ ...d, [key]: e.target.value }))}
-              placeholder={placeholder}
-              className="w-full rounded border border-[#d9e2ec] px-2 py-1.5 text-xs outline-none focus:border-[#111111]"
-            />
-          ))}
-          <div className="flex justify-end gap-1.5 pt-0.5">
-            <button onClick={() => setAdding(false)} className="rounded border border-[#d9e2ec] px-3 py-1 text-xs transition hover:bg-gray-50">Cancel</button>
-            <button onClick={addItem} disabled={!newDraft.product.trim()} className="rounded bg-[#111111] px-3 py-1 text-xs text-white transition hover:bg-[#333] disabled:opacity-50">Add</button>
-          </div>
-        </div>
-      ) : (
-        <button onClick={() => setAdding(true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-[#d9e2ec] py-1.5 text-xs text-gray-400 transition hover:border-[#111111] hover:text-[#111111]">
-          <Plus className="h-3 w-3" />
-          Add Material
-        </button>
-      )}
-    </div>
   );
 }
 

@@ -89,7 +89,9 @@ export function AppSidebar() {
     <>
       {/* ── Desktop sidebar (lg+) ── */}
       <aside
-        className={`hidden flex-none border-r border-[#d9e2ec] bg-white transition-all duration-200 lg:flex lg:h-screen lg:flex-col lg:overflow-hidden lg:sticky lg:top-0 ${
+        data-app-sidebar
+        data-collapsed={collapsed ? "true" : "false"}
+        className={`hidden flex-none border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 lg:flex lg:h-screen lg:flex-col lg:overflow-hidden lg:sticky lg:top-0 ${
           collapsed ? "lg:w-20 lg:p-4" : "lg:w-64 lg:p-6"
         }`}
       >
@@ -109,10 +111,10 @@ export function AppSidebar() {
               PA
             </div>
             <div className={`min-w-0 ${collapsed ? "hidden" : ""}`}>
-              <h1 className="truncate text-lg font-semibold tracking-tight text-[#213343]">
+              <h1 className="truncate text-lg font-semibold tracking-tight text-sidebar-foreground">
                 Pricing App
               </h1>
-              <p className="mt-1 truncate text-xs text-[#516f90]">
+              <p className="mt-1 truncate text-xs text-muted-foreground">
                 Retail pricing intelligence
               </p>
             </div>
@@ -121,7 +123,7 @@ export function AppSidebar() {
           <button
             type="button"
             onClick={toggleCollapsed}
-            className={`flex flex-none items-center justify-center border border-[#d9e2ec] text-[#516f90] transition hover:bg-[#f6f8fb] hover:text-[#213343] ${
+            className={`flex flex-none items-center justify-center border border-sidebar-border text-muted-foreground transition hover:bg-muted hover:text-foreground ${
               collapsed ? "mt-3 h-8 w-8 rounded-md" : "h-9 w-9 rounded-md"
             }`}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -149,7 +151,7 @@ export function AppSidebar() {
               />
             ))}
           </div>
-          <div className="mt-auto space-y-1 border-t border-[#f0f4f8] pt-3">
+          <div className="mt-auto space-y-1 border-t border-sidebar-border pt-3">
             <DesktopLink
               item={settingsItem}
               active={isActive(settingsItem.href)}
@@ -161,7 +163,7 @@ export function AppSidebar() {
       </aside>
 
       {/* ── Mobile bottom nav (<lg) ── */}
-      <nav className="fixed bottom-0 inset-x-0 z-50 flex border-t border-[#d9e2ec] bg-white lg:hidden">
+      <nav className="fixed bottom-0 inset-x-0 z-50 flex border-t border-sidebar-border bg-sidebar text-sidebar-foreground lg:hidden">
         {allMobileItems.map((item) => {
           const Icon = item.icon;
           const active = isActive(item.href);
@@ -170,7 +172,7 @@ export function AppSidebar() {
               key={item.href}
               href={item.href}
               className={`flex flex-1 flex-col items-center justify-center py-2 gap-0.5 transition-colors ${
-                active ? "text-[#ff5c35]" : "text-[#516f90]"
+                active ? "text-[#ff5c35]" : "text-muted-foreground"
               }`}
             >
               <Icon className="h-5 w-5" />
@@ -201,8 +203,8 @@ function DesktopLink({
         collapsed ? "justify-center px-0 py-3" : "gap-3 px-4 py-3"
       } ${
         active
-          ? "bg-[#fff1ea] font-medium text-[#213343]"
-          : "text-[#516f90] hover:bg-[#f6f8fb] hover:text-[#213343]"
+          ? "bg-accent font-medium text-[#ff5c35]"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground"
       }`}
     >
       <Icon className="h-4 w-4 flex-none" />

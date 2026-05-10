@@ -10,6 +10,7 @@ import {
 import {
   formatMargin,
   formatMoney,
+  getTierDisplayName,
   getTotalCost,
   mergeAppSettings,
   projectSizeOptions,
@@ -35,7 +36,12 @@ import { ProjectStatusBadge } from "./project-status-badge";
 
 type Tab = "overview" | "costs" | "quote" | "notes";
 
-const costFields: { key: keyof CostBreakdown; label: string }[] = [
+type CoreCostFieldKey = keyof Pick<
+  CostBreakdown,
+  "materials" | "labor" | "dumpster" | "permits" | "equipment" | "subcontractor" | "miscellaneous"
+>;
+
+const costFields: { key: CoreCostFieldKey; label: string }[] = [
   { key: "materials", label: "Materials" },
   { key: "labor", label: "Labor" },
   { key: "subcontractor", label: "Subcontractor" },
@@ -197,6 +203,20 @@ export function ProjectDetailPanel({
         riskLevel,
         strategy,
       },
+      ...(() => {
+        const c = draftProject.costs;
+        const tier: Partial<Record<PriceOptionName, number>> = {};
+        if (typeof c.materialsGood === "number" && !Number.isNaN(c.materialsGood)) {
+          tier.Good = c.materialsGood;
+        }
+        if (typeof c.materialsBetter === "number" && !Number.isNaN(c.materialsBetter)) {
+          tier.Better = c.materialsBetter;
+        }
+        if (typeof c.materialsBest === "number" && !Number.isNaN(c.materialsBest)) {
+          tier.Best = c.materialsBest;
+        }
+        return Object.keys(tier).length ? { materialCostByTier: tier } : {};
+      })(),
       pricingRules: {
         baseMargins: {
           Good: mergedSettings.pricingDefaults.goodMargin / 100,
@@ -237,6 +257,9 @@ export function ProjectDetailPanel({
       projectSize,
       strategy,
       mergedSettings,
+      draftProject.costs.materialsGood,
+      draftProject.costs.materialsBetter,
+      draftProject.costs.materialsBest,
     ]
   );
 
@@ -247,11 +270,26 @@ export function ProjectDetailPanel({
     setDraftProject((prev) => ({ ...prev, [key]: value }));
   }
 
-  function updateCost(key: keyof CostBreakdown, value: number) {
+  function updateCost(key: CoreCostFieldKey, value: number) {
     setDraftProject((prev) => ({
       ...prev,
       costs: { ...prev.costs, [key]: Number.isFinite(value) ? value : 0 },
     }));
+  }
+
+  function updateTierMaterial(
+    key: "materialsGood" | "materialsBetter" | "materialsBest",
+    value: number | undefined
+  ) {
+    setDraftProject((prev) => {
+      const nextCosts = { ...prev.costs };
+      if (value === undefined || Number.isNaN(value)) {
+        delete nextCosts[key];
+      } else {
+        nextCosts[key] = value;
+      }
+      return { ...prev, costs: nextCosts };
+    });
   }
 
   function saveCosts() {
@@ -299,7 +337,7 @@ export function ProjectDetailPanel({
       termsText: mergedSettings.proposalSettings.defaultTerms,
       proposalTitle: mergedSettings.proposalSettings.defaultProposalTitle,
     });
-    setMessage(`${selectedOption} quote created.`);
+    setMessage(`${getTierDisplayName(mergedSettings, selectedOption)} quote created.`);
   }
 
   function updateStatus(status: ProjectStatus) {
@@ -543,6 +581,32 @@ export function ProjectDetailPanel({
                   />
                 ))}
               </div>
+              <div className="mt-4 rounded border border-[#d9e2ec]/80 bg-[#fafcfd] px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Per-tier material cost (optional)
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Leave blank to use the Materials amount for that tier. When set, Good / Better / Best each use their
+                  own material dollars so sale prices reflect different specs.
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <OptionalMoneyField
+                    label={`${getTierDisplayName(mergedSettings, "Good")} materials`}
+                    value={draftProject.costs.materialsGood}
+                    onChange={(v) => updateTierMaterial("materialsGood", v)}
+                  />
+                  <OptionalMoneyField
+                    label={`${getTierDisplayName(mergedSettings, "Better")} materials`}
+                    value={draftProject.costs.materialsBetter}
+                    onChange={(v) => updateTierMaterial("materialsBetter", v)}
+                  />
+                  <OptionalMoneyField
+                    label={`${getTierDisplayName(mergedSettings, "Best")} materials`}
+                    value={draftProject.costs.materialsBest}
+                    onChange={(v) => updateTierMaterial("materialsBest", v)}
+                  />
+                </div>
+              </div>
               <div className="mt-3 flex items-center justify-between border-t border-[#d9e2ec] pt-3">
                 <span className="text-sm text-gray-500">Base Cost</span>
                 <span className="text-base font-semibold">{formatMoney(baseCost)}</span>
@@ -742,6 +806,7 @@ export function ProjectDetailPanel({
                     <PricingCard
                       key={opt.name}
                       option={opt}
+                      tierLabel={getTierDisplayName(mergedSettings, opt.name)}
                       selected={selectedOption === opt.name}
                       onSelect={() => setSelectedOption(opt.name)}
                     />
@@ -806,7 +871,8 @@ export function ProjectDetailPanel({
                             {q.proposalNumber ?? q.id.slice(-6).toUpperCase()}
                           </p>
                           <p className="mt-0.5 text-xs text-gray-500">
-                            {q.selectedOption} · {formatMoney(selected.salePrice)} · {q.status}
+                            {getTierDisplayName(mergedSettings, q.selectedOption)} ·{" "}
+                            {formatMoney(selected.salePrice)} · {q.status}
                           </p>
                         </div>
                         {onPreviewQuote && (
@@ -841,6 +907,7 @@ export function ProjectDetailPanel({
                       <PricingCard
                         key={opt.name}
                         option={opt}
+                        tierLabel={getTierDisplayName(mergedSettings, opt.name)}
                         selected={selectedOption === opt.name}
                         onSelect={() => setSelectedOption(opt.name)}
                       />
@@ -850,7 +917,7 @@ export function ProjectDetailPanel({
                     onClick={createQuote}
                     className="mt-4 rounded-md bg-[#ff5c35] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
                   >
-                    Create {selectedOption} Quote
+                    Create {getTierDisplayName(mergedSettings, selectedOption)} Quote
                   </button>
                 </>
               )}
@@ -1008,10 +1075,12 @@ function buildInsight(
 
 function PricingCard({
   option,
+  tierLabel,
   selected,
   onSelect,
 }: {
   option: PricingEngineOption;
+  tierLabel: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -1035,11 +1104,11 @@ function PricingCard({
     >
       <div className="flex items-start justify-between gap-1">
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {option.name}
+          {tierLabel}
         </span>
         {option.recommended && (
           <span className="shrink-0 rounded bg-[#ff5c35] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-            Best
+            Recommended
           </span>
         )}
       </div>
@@ -1240,6 +1309,39 @@ function MoneyField({
           value={value || ""}
           placeholder="0"
           onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full rounded-md border border-[#d9e2ec] py-2.5 pl-7 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
+        />
+      </div>
+    </label>
+  );
+}
+
+function OptionalMoneyField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <label className="block text-sm font-medium">
+      {label}
+      <div className="relative mt-1.5">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+          $
+        </span>
+        <input
+          type="number"
+          min="0"
+          value={value === undefined ? "" : value}
+          placeholder="Same as Materials"
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === "") onChange(undefined);
+            else onChange(Math.max(0, Number(raw) || 0));
+          }}
           className="w-full rounded-md border border-[#d9e2ec] py-2.5 pl-7 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
         />
       </div>

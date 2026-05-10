@@ -102,6 +102,10 @@
 }
 
 .dark {
+  /* App shell (pages use these alongside shadcn tokens) */
+  --page-bg: oklch(0.17 0.02 245);
+  /* Keep --brand-navy as dark ink for charts / accents; body copy uses `text-foreground` */
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
 
@@ -167,11 +171,62 @@
     color: #213343;
   }
 
+  /* Tighter main column padding when compact mode is on (see `app-compact` on <html>) */
+  html.app-compact main.min-w-0.flex-1 {
+    padding: 1rem !important;
+  }
+
+  @media (min-width: 640px) {
+    html.app-compact main.min-w-0.flex-1 {
+      padding: 1.25rem !important;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    html.app-compact main.min-w-0.flex-1 {
+      padding: 1.5rem !important;
+    }
+  }
+
+  html.app-compact [data-app-sidebar]:not([data-collapsed="true"]) {
+    width: 14rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+
+  html.app-compact [data-app-sidebar][data-collapsed="true"] {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
   button,
   input,
   textarea,
   select {
     font: inherit;
+  }
+}
+
+@layer components {
+  /** Titles that sit on `--page-bg` (dark in .dark) */
+  .page-title {
+    @apply text-[#213343] dark:text-slate-50;
+  }
+
+  .page-kicker {
+    @apply text-gray-500 dark:text-slate-400;
+  }
+
+  .page-description {
+    @apply text-gray-500 dark:text-slate-300;
+  }
+
+  /**
+   * White / light panels on a dark shell: body uses light `text-foreground`, so children
+   * of these panels need ink-colored text again.
+   */
+  .elevated-panel {
+    @apply text-neutral-900;
   }
 }
 
