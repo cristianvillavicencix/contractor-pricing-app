@@ -746,7 +746,7 @@ export function getTierMaterialSummaries(
 }
 
 function materialRowHasContent(row: MaterialItem): boolean {
-  return [row.category, row.product, row.brand, row.warranty, row.notes].some((x) =>
+  return [row.category, row.product, row.brand, row.warranty, row.notes, row.imageUrl, row.imagePath].some((x) =>
     String(x ?? "").trim()
   );
 }

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { mergeAppSettings, defaultSettings, type AppSettings, type Quote } from "@/lib/app-data";
-import { mergeProposalTemplates, type ProposalTemplate } from "@/lib/proposal-templates";
+import { mergeProposalTemplates, type MaterialItem, type ProposalTemplate } from "@/lib/proposal-templates";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -13,6 +13,26 @@ async function signProposalPhotoPath(admin: ReturnType<typeof createSupabaseAdmi
     .createSignedUrl(path, SIGNED_URL_TTL);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
+}
+
+async function withSignedMaterialImages(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  companyId: string,
+  rows: MaterialItem[] | undefined
+): Promise<MaterialItem[] | undefined> {
+  if (!rows?.length) return rows;
+  const prefix = `${companyId}/`;
+  const next: MaterialItem[] = [];
+  for (const row of rows) {
+    const imagePath = row.imagePath?.trim();
+    if (imagePath && imagePath.startsWith(prefix)) {
+      const signed = await signProposalPhotoPath(admin, imagePath);
+      next.push({ ...row, imageUrl: signed ?? row.imageUrl });
+    } else {
+      next.push(row);
+    }
+  }
+  return next;
 }
 
 function isProposalExpired(quote: Quote) {
@@ -111,10 +131,63 @@ export async function GET(
   const safeQuote = { ...quote };
   delete safeQuote.clientPortalToken;
 
+  const signedQuoteTierRows = {
+    Good: await withSignedMaterialImages(admin, companyId, safeQuote.tierMaterialsTable?.Good),
+    Better: await withSignedMaterialImages(admin, companyId, safeQuote.tierMaterialsTable?.Better),
+    Best: await withSignedMaterialImages(admin, companyId, safeQuote.tierMaterialsTable?.Best),
+  };
+  const safeQuoteWithSignedRows: Quote = {
+    ...safeQuote,
+    tierMaterialsTable: {
+      ...safeQuote.tierMaterialsTable,
+      ...Object.fromEntries(
+        Object.entries(signedQuoteTierRows).filter(([, rows]) => Array.isArray(rows))
+      ),
+    },
+  };
+
+  const settingsWithSignedRows: AppSettings = {
+    ...settings,
+    proposalSettings: {
+      ...settings.proposalSettings,
+      goodTierMaterialsTable: (await withSignedMaterialImages(
+        admin,
+        companyId,
+        settings.proposalSettings.goodTierMaterialsTable
+      )) ?? settings.proposalSettings.goodTierMaterialsTable,
+      betterTierMaterialsTable: (await withSignedMaterialImages(
+        admin,
+        companyId,
+        settings.proposalSettings.betterTierMaterialsTable
+      )) ?? settings.proposalSettings.betterTierMaterialsTable,
+      bestTierMaterialsTable: (await withSignedMaterialImages(
+        admin,
+        companyId,
+        settings.proposalSettings.bestTierMaterialsTable
+      )) ?? settings.proposalSettings.bestTierMaterialsTable,
+    },
+  };
+
+  const templateWithSignedRows: ProposalTemplate = {
+    ...template,
+    materialsSpecs: {
+      ...template.materialsSpecs,
+      items:
+        (await withSignedMaterialImages(admin, companyId, template.materialsSpecs.items)) ??
+        template.materialsSpecs.items,
+    },
+    tierMaterialsByPackage: {
+      ...template.tierMaterialsByPackage,
+      Good: await withSignedMaterialImages(admin, companyId, template.tierMaterialsByPackage?.Good),
+      Better: await withSignedMaterialImages(admin, companyId, template.tierMaterialsByPackage?.Better),
+      Best: await withSignedMaterialImages(admin, companyId, template.tierMaterialsByPackage?.Best),
+    },
+  };
+
   return NextResponse.json({
-    quote: safeQuote,
-    settings,
-    template,
+    quote: safeQuoteWithSignedRows,
+    settings: settingsWithSignedRows,
+    template: templateWithSignedRows,
     coverPhotoUrl,
     coverLayout: quote.coverLayout ?? settings.branding.proposalCoverLayout,
     existingPhotos,

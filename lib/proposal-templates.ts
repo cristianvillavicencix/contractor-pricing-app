@@ -56,6 +56,10 @@ export type MaterialItem = {
   brand: string;
   warranty: string;
   notes: string;
+  /** Optional public image URL for this material row. */
+  imageUrl?: string;
+  /** Optional Supabase Storage path for this material image. */
+  imagePath?: string;
 };
 
 export type MaterialsSpecsSection = {

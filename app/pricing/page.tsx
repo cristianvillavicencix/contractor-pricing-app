@@ -1,13 +1,17 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ChevronDown, ChevronUp, FolderPlus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, FolderPlus, History, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   defaultSettings,
+  computeNextProposalNumber,
+  getExpirationLabel,
   formatMargin,
   formatMoney,
+  getTierMaterialSummaries,
   getTodayLabel,
   companyLevelOptions,
   mergeAppSettings,
@@ -20,9 +24,11 @@ import {
   type AppSettings,
   type CompanyLevel,
   type Contact,
+  type PriceOptionName,
   type Project,
   type ProjectSize,
   type ProjectState,
+  type Quote,
   type RiskLevel,
   type Strategy,
   type Trade,
@@ -33,18 +39,23 @@ import {
   type PricingEngineInput,
   type PricingEngineOption,
 } from "@/lib/pricing-engine";
+import type { MaterialItem } from "@/lib/proposal-templates";
 import {
   appendPricingSessionHistory,
+  loadPricingSessionHistory,
   PRICING_SESSION_RESTORE_EVENT,
+  removePricingSessionHistory,
   type PricingSessionHistoryEntry,
 } from "@/lib/pricing-session-history";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   listContacts,
   listProjects,
+  listQuotes,
   loadCompanySettings,
   upsertContact,
   upsertProject,
+  upsertQuote,
 } from "@/lib/supabase/data";
 
 const STATE_ABBR: Record<string, string> = {
@@ -241,11 +252,16 @@ function PricingPageInner() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   const [dataReady, setDataReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sourceProject, setSourceProject] = useState<Project | null>(null);
   const [input, setInput] = useState<PricingEngineInput>(defaultInput);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [showBusinessRulesDrawer, setShowBusinessRulesDrawer] = useState(false);
+  const [pendingProposalOption, setPendingProposalOption] = useState<PriceOptionName | null>(null);
+  const [expandedCard, setExpandedCard] = useState<PriceOptionName | null>(null);
+  const [sessionHistory, setSessionHistory] = useState<PricingSessionHistoryEntry[]>([]);
+  const [showSessionHistoryModal, setShowSessionHistoryModal] = useState(false);
 
   const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
   const showAdvancedBreakdown = mergedSettings.appPreferences.showAdvancedPricingBreakdown;
@@ -256,16 +272,18 @@ function PricingPageInner() {
     async function load() {
       setLoadError(null);
       try {
-        const [rawSettings, dbContacts, dbProjects] = await Promise.all([
+        const [rawSettings, dbContacts, dbProjects, dbQuotes] = await Promise.all([
           loadCompanySettings<AppSettings | null>(supabase),
           listContacts(supabase),
           listProjects(supabase),
+          listQuotes(supabase),
         ]);
         if (cancelled) return;
         const merged = mergeAppSettings(rawSettings ?? defaultSettings);
         setSettings(merged);
         setContacts(dbContacts);
         setProjects(dbProjects);
+        setQuotes(dbQuotes);
         setDataReady(true);
       } catch (e) {
         if (!cancelled) {
@@ -311,9 +329,42 @@ function PricingPageInner() {
     return () => window.removeEventListener(PRICING_SESSION_RESTORE_EVENT, onRestore);
   }, [router]);
 
+  useEffect(() => {
+    setSessionHistory(loadPricingSessionHistory());
+  }, []);
+
   const result = useMemo(() => calculatePricingEngine(input), [input]);
   const baseCost = result.baseCost;
   const hasResults = baseCost > 0;
+  const tierMaterials = useMemo(
+    () => getTierMaterialSummaries(mergedSettings, null),
+    [mergedSettings]
+  );
+  const expandedOption = useMemo(
+    () => (expandedCard ? result.options.find((opt) => opt.name === expandedCard) ?? null : null),
+    [expandedCard, result.options]
+  );
+  const expandedTierItems =
+    expandedCard === "Good"
+      ? mergedSettings.proposalSettings.goodTierMaterialsTable ?? []
+      : expandedCard === "Better"
+        ? mergedSettings.proposalSettings.betterTierMaterialsTable ?? []
+        : expandedCard === "Best"
+          ? mergedSettings.proposalSettings.bestTierMaterialsTable ?? []
+          : [];
+  const sessionHistoryRows = useMemo(
+    () =>
+      sessionHistory.map((entry) => {
+        const computed = calculatePricingEngine(entry.input);
+        const suggestedOption = computed.options.find((opt) => opt.recommended)?.name ?? "Better";
+        return {
+          entry,
+          baseCost: computed.baseCost,
+          suggestedOption,
+        };
+      }),
+    [sessionHistory]
+  );
 
   // Cost breakdown percentages
   const matAmt = input.costs.material;
@@ -342,12 +393,7 @@ function PricingPageInner() {
     setShowModalConfirm(false);
     setProjectDraft(emptyDraft);
     setProjectError("");
-  }
-
-  function reset() {
-    setInput(createInputFromSettings(mergedSettings));
-    setSourceProject(null);
-    router.replace("/pricing");
+    setPendingProposalOption(null);
   }
 
   function saveSessionToHistory() {
@@ -357,6 +403,7 @@ function PricingPageInner() {
       projectDraft: { ...projectDraft },
       sourceProjectId: sourceProject?.id ?? null,
     });
+    setSessionHistory(loadPricingSessionHistory());
   }
 
   async function saveProject() {
@@ -411,6 +458,8 @@ function PricingPageInner() {
       },
       createdAt: getTodayLabel(),
     };
+    const proposalSelection =
+      pendingProposalOption ?? result.options.find((opt) => opt.recommended)?.name ?? "Better";
     setProjects((prev) => [newProject, ...prev]);
     try {
       await upsertContact(supabase, contact);
@@ -426,8 +475,91 @@ function PricingPageInner() {
       projectDraft: { ...projectDraft },
       sourceProjectId: newProject.id,
     });
-    closeModal();
-    router.push(`/projects?projectId=${encodeURIComponent(newProject.id)}`);
+    setSessionHistory(loadPricingSessionHistory());
+    const pricingForQuote = result.options.map((opt) => ({
+      name: opt.name,
+      salePrice: opt.salePrice,
+      profit: opt.netProfit,
+      margin: opt.margin,
+      markup: opt.markup,
+      description: "",
+      useCase: "",
+      recommended: opt.recommended,
+    }));
+    const quote: Quote = {
+      id: crypto.randomUUID(),
+      projectId: newProject.id,
+      contactId: contact.id,
+      projectName: newProject.projectName,
+      customerName: newProject.customerName,
+      customerPhone: newProject.customerPhone,
+      customerEmail: newProject.customerEmail,
+      customerAddress: [newProject.address, newProject.city, newProject.state]
+        .filter((part) => part.trim())
+        .join(", "),
+      trade: newProject.trade,
+      proposalTitle: mergedSettings.proposalSettings.defaultProposalTitle,
+      proposalNumber: computeNextProposalNumber(quotes),
+      warrantyText: mergedSettings.proposalSettings.defaultWarrantyText,
+      termsText: mergedSettings.proposalSettings.defaultTerms,
+      tierMaterials: getTierMaterialSummaries(mergedSettings, null),
+      good: pricingForQuote[0],
+      better: pricingForQuote[1],
+      best: pricingForQuote[2],
+      selectedOption: proposalSelection,
+      status: "Draft",
+      createdAt: getTodayLabel(),
+      expiresAt: getExpirationLabel(14),
+    };
+    try {
+      await upsertQuote(supabase, quote);
+      setQuotes((prev) => [quote, ...prev]);
+      closeModal();
+      router.push(`/quotes/preview?id=${encodeURIComponent(quote.id)}`);
+      return;
+    } catch {
+      setProjectError(
+        "Project saved, but proposal could not be created. Please try again from Projects."
+      );
+      return;
+    }
+  }
+
+  function toggleCardBreakdown(optionName: PriceOptionName) {
+    setExpandedCard((current) => (current === optionName ? null : optionName));
+  }
+
+  function restoreSession(entry: PricingSessionHistoryEntry) {
+    setInput(cloneEngineInput(entry.input));
+    setProjectDraft({
+      contactId: entry.projectDraft.contactId ?? "",
+      projectName: entry.projectDraft.projectName ?? "",
+      customerName: entry.projectDraft.customerName ?? "",
+      customerPhone: entry.projectDraft.customerPhone ?? "",
+      customerEmail: entry.projectDraft.customerEmail ?? "",
+      address: entry.projectDraft.address ?? "",
+      city: entry.projectDraft.city ?? "",
+    });
+    setSourceProject(null);
+    router.replace("/pricing");
+  }
+
+  function continueFromSession(entry: PricingSessionHistoryEntry) {
+    setShowSessionHistoryModal(false);
+    restoreSession(entry);
+  }
+
+  function createProposalFromSession(entry: PricingSessionHistoryEntry, suggestedOption: PriceOptionName) {
+    setShowSessionHistoryModal(false);
+    restoreSession(entry);
+    setPendingProposalOption(suggestedOption);
+    setProjectError("");
+    setShowProjectModal(true);
+  }
+
+  function removeSessionRow(id: string) {
+    removePricingSessionHistory(id);
+    setSessionHistory(loadPricingSessionHistory());
   }
 
   function createContact(contact: Omit<Contact, "id" | "createdAt">) {
@@ -507,13 +639,24 @@ function PricingPageInner() {
               {hasResults && (
                 <button
                   type="button"
-                  onClick={() => setShowProjectModal(true)}
+                  onClick={() => {
+                    const recommended = result.options.find((opt) => opt.recommended)?.name ?? "Better";
+                    setPendingProposalOption(recommended);
+                    setShowProjectModal(true);
+                  }}
                   className="flex items-center gap-2 rounded-md bg-[#ff5c35] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#e94820]"
                 >
                   <FolderPlus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Create Project</span>
+                  <span className="hidden sm:inline">Create Proposal</span>
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setShowBusinessRulesDrawer(true)}
+                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Business Rules
+              </button>
               <button
                 type="button"
                 onClick={saveSessionToHistory}
@@ -524,11 +667,12 @@ function PricingPageInner() {
               </button>
               <button
                 type="button"
-                onClick={reset}
-                className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
+                onClick={() => setShowSessionHistoryModal(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[#d9e2ec] bg-white text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                title="Saved sessions"
+                aria-label="Saved sessions"
               >
-                <RotateCcw className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Reset</span>
+                <History className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -655,75 +799,6 @@ function PricingPageInner() {
                 )}
               </div>
 
-              {/* Business Rules (Advanced) */}
-              <div className="rounded-lg border border-[#d9e2ec] bg-white">
-                <button
-                  onClick={() => setAdvancedOpen((v) => !v)}
-                  className="flex w-full items-center justify-between px-5 py-3.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                >
-                  <span>Business Rules</span>
-                  {advancedOpen
-                    ? <ChevronUp className="h-4 w-4 text-gray-400" />
-                    : <ChevronDown className="h-4 w-4 text-gray-400" />}
-                </button>
-                {advancedOpen && (
-                  <div className="space-y-5 border-t border-[#d9e2ec] px-5 pb-5 pt-4">
-                    {/* Strategy + Company Level */}
-                    <div>
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Pricing Strategy</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <SelectInput label="Strategy" value={input.setup.strategy} options={strategyOptions} onChange={(v) => updateSetup("strategy", v as PricingEngineInput["setup"]["strategy"])} />
-                        <SelectInput label="Company Level" value={input.setup.companyLevel} options={companyLevelOptions} onChange={(v) => updateSetup("companyLevel", v as PricingEngineInput["setup"]["companyLevel"])} />
-                      </div>
-                    </div>
-
-                    {/* Business costs */}
-                    <div>
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Overhead & Fees</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <SelectInput label="Overhead Method" value={input.businessCosts.overheadAllocationMethod} options={["Percentage", "Flat Per Project", "Project Duration", "Ignore For Now"]} onChange={(v) => updateBiz("overheadAllocationMethod", v as PricingEngineInput["businessCosts"]["overheadAllocationMethod"])} />
-                        <NumberInput label="Minimum Job $" value={input.businessCosts.minimumJobPrice} onChange={(v) => updateBiz("minimumJobPrice", v)} />
-                        {input.businessCosts.overheadAllocationMethod === "Percentage" && (
-                          <NumberInput label="Overhead %" value={input.businessCosts.overheadPercent} onChange={(v) => updateBiz("overheadPercent", v)} />
-                        )}
-                        {input.businessCosts.overheadAllocationMethod === "Flat Per Project" && (
-                          <NumberInput label="Flat Overhead $" value={input.businessCosts.flatOverheadPerProject} onChange={(v) => updateBiz("flatOverheadPerProject", v)} />
-                        )}
-                        {input.businessCosts.overheadAllocationMethod === "Project Duration" && (
-                          <>
-                            <NumberInput label="Monthly Overhead $" value={input.businessCosts.monthlyOverhead} onChange={(v) => updateBiz("monthlyOverhead", v)} />
-                            <NumberInput label="Billable Days / Month" value={input.businessCosts.monthlyBillableDays} onChange={(v) => updateBiz("monthlyBillableDays", v)} />
-                            <NumberInput label="Project Duration Days" value={input.businessCosts.projectDurationDays} onChange={(v) => updateBiz("projectDurationDays", v)} />
-                          </>
-                        )}
-                        <NumberInput label="Labor Burden %" value={input.businessCosts.laborBurdenPercent} onChange={(v) => updateBiz("laborBurdenPercent", v)} />
-                        <ToggleNumberInput label="Misc Buffer %" value={input.businessCosts.miscellaneousBufferPercent} enabled={input.businessCosts.includeMiscellaneousBuffer} onToggle={(v) => updateBiz("includeMiscellaneousBuffer", v)} onChange={(v) => updateBiz("miscellaneousBufferPercent", v)} />
-                        <NumberInput label="Permit Buffer $" value={input.businessCosts.permitBuffer} onChange={(v) => updateBiz("permitBuffer", v)} />
-                        <ToggleNumberInput label="CC Fee %" value={input.businessCosts.creditCardFeePercent} enabled={input.businessCosts.includeCreditCardFee} onToggle={(v) => updateBiz("includeCreditCardFee", v)} onChange={(v) => updateBiz("creditCardFeePercent", v)} />
-                        <ToggleNumberInput label="Financing Fee %" value={input.businessCosts.financingFeePercent} enabled={input.businessCosts.includeFinancingFee} onToggle={(v) => updateBiz("includeFinancingFee", v)} onChange={(v) => updateBiz("financingFeePercent", v)} />
-                        <ToggleNumberInput label="Tax %" value={input.businessCosts.taxPercent} enabled={input.businessCosts.includeTax} onToggle={(v) => updateBiz("includeTax", v)} onChange={(v) => updateBiz("taxPercent", v)} />
-                      </div>
-                    </div>
-
-                    {/* Commission */}
-                    <div>
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Commission</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="flex items-center justify-between rounded border border-[#d9e2ec] px-3 py-2.5 text-sm text-neutral-900">
-                          Include Commission
-                          <input type="checkbox" checked={input.commission.includeCommission} onChange={(e) => updateCommission("includeCommission", e.target.checked)} className="accent-[#ff5c35]" />
-                        </label>
-                        <SelectInput label="Type" value={input.commission.commissionType} options={["Percentage", "Flat Amount"]} onChange={(v) => updateCommission("commissionType", v as CommissionType)} />
-                        {input.commission.commissionType === "Percentage" ? (
-                          <NumberInput label="Commission %" value={input.commission.commissionPercentage} onChange={(v) => updateCommission("commissionPercentage", v)} />
-                        ) : (
-                          <MoneyInput label="Flat Amount" value={input.commission.commissionFlatAmount} onChange={(v) => updateCommission("commissionFlatAmount", v)} />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* ── Right: results ── */}
@@ -743,6 +818,7 @@ function PricingPageInner() {
                         option={opt}
                         commissionEnabled={input.commission.includeCommission}
                         showAdvancedBreakdown={showAdvancedBreakdown}
+                        onToggleBreakdown={() => toggleCardBreakdown(opt.name)}
                       />
                     ))}
                   </div>
@@ -799,6 +875,7 @@ function PricingPageInner() {
                       </ul>
                     </div>
                   )}
+
                 </>
               )}
             </div>
@@ -810,17 +887,19 @@ function PricingPageInner() {
       {showProjectModal && (
         <div
           onClick={handleAttemptCloseModal}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#213343]/30 px-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 bg-[#213343]/30 backdrop-blur-sm"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="elevated-panel w-full max-w-md rounded-xl border border-[#d9e2ec] bg-white shadow-xl dark:border-slate-600"
+            className="ml-auto flex h-full w-full max-w-xl flex-col border-l border-[#d9e2ec] bg-white shadow-2xl dark:border-slate-600"
           >
             <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
               <div>
                 <h3 className="text-lg font-semibold tracking-tight text-[#213343]">Create Project</h3>
                 <p className="mt-0.5 text-sm text-gray-500">
-                  {input.setup.trade} · {input.setup.state} · {input.setup.projectSize} · Total cost {formatMoney(result.baseCost)}
+                  {pendingProposalOption
+                    ? `Create ${pendingProposalOption} proposal · ${input.setup.trade} · ${input.setup.state} · ${input.setup.projectSize}`
+                    : `${input.setup.trade} · ${input.setup.state} · ${input.setup.projectSize} · Total cost ${formatMoney(result.baseCost)}`}
                 </p>
               </div>
               <button
@@ -831,7 +910,7 @@ function PricingPageInner() {
               </button>
             </div>
 
-            <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+            <div className="grid flex-1 gap-4 overflow-auto px-6 py-5 sm:grid-cols-2">
               <label className="block text-xs font-medium text-gray-600 sm:col-span-2">
                 Existing contact
                 <select
@@ -884,7 +963,7 @@ function PricingPageInner() {
               </div>
             )}
 
-            <div className="flex justify-end gap-3 border-t border-[#d9e2ec] px-6 py-4">
+            <div className="sticky bottom-0 flex justify-end gap-3 border-t border-[#d9e2ec] bg-white px-6 py-4">
               <button
                 onClick={handleAttemptCloseModal}
                 className="rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -895,8 +974,267 @@ function PricingPageInner() {
                 onClick={() => void saveProject()}
                 className="rounded-md bg-[#ff5c35] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
               >
-                Create & Go to Projects
+                {pendingProposalOption
+                  ? `Create ${pendingProposalOption} Proposal`
+                  : "Create & Go to Projects"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {expandedCard && expandedOption && (
+        <div
+          className="fixed inset-0 z-50 bg-[#213343]/35 backdrop-blur-sm"
+          onClick={() => setExpandedCard(null)}
+        >
+          <aside
+            className="ml-auto flex h-full w-full max-w-xl flex-col border-l border-[#d9e2ec] bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">
+                  {expandedCard} materials breakdown
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {formatMoney(expandedOption.salePrice)} · Margin {formatMargin(expandedOption.margin)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedCard(null)}
+                className="rounded-md p-1.5 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-black"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-auto px-6 py-5">
+              <div className="rounded-md bg-[#f6f8fb] px-3 py-2 text-sm text-gray-600">
+                <span className="font-semibold text-gray-700">Summary:</span>{" "}
+                {tierMaterials[expandedCard]?.trim() || "No summary set yet."}
+              </div>
+
+              {expandedTierItems.length > 0 ? (
+                expandedTierItems.map((item, index) => {
+                  const brand = item.brand?.trim();
+                  const materialType = item.product?.trim() || item.category?.trim();
+                  const label = [brand || "No brand", materialType || "Material type pending"].join(" · ");
+                  const details = [item.warranty, item.notes]
+                    .filter((value) => value && value.trim())
+                    .join(" · ");
+                  return (
+                    <div key={item.id ?? `${expandedCard}-${index}`} className="rounded-lg border border-[#e8eef3] bg-white p-3">
+                      <div className="flex items-start gap-3">
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt={`${materialType || "Material"} image`}
+                            className="h-16 w-16 shrink-0 rounded object-cover"
+                          />
+                        ) : (
+                          <div className="h-16 w-16 shrink-0 rounded border border-dashed border-[#d9e2ec] bg-[#f8fafc]" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-[#213343]">{label}</p>
+                          {details ? (
+                            <p className="mt-1 text-xs text-gray-500">{details}</p>
+                          ) : (
+                            <p className="mt-1 text-xs text-gray-400">No extra characteristics set.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="rounded-md border border-dashed border-[#d9e2ec] px-3 py-2 text-sm text-gray-500">
+                  No material table rows configured for this package yet.
+                </p>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 flex justify-end border-t border-[#d9e2ec] bg-white px-6 py-4">
+              <Link
+                href={`/settings?section=Proposals&proposalTab=settings&tier=${expandedCard}`}
+                className="inline-flex rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-semibold text-[#213343] transition hover:bg-[#f6f8fb]"
+              >
+                Edit {expandedCard} materials in Settings
+              </Link>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {showBusinessRulesDrawer && (
+        <div
+          className="fixed inset-0 z-50 bg-[#213343]/35 backdrop-blur-sm"
+          onClick={() => setShowBusinessRulesDrawer(false)}
+        >
+          <aside
+            className="ml-auto flex h-full w-full max-w-[min(50vw,760px)] min-w-[360px] flex-col border-l border-[#d9e2ec] bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">Business Rules</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Advanced pricing controls for overhead, strategy, fees, and commission.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBusinessRulesDrawer(false)}
+                className="rounded-md p-1.5 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-black"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-5 overflow-auto px-6 py-5">
+              <div>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Pricing Strategy</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SelectInput label="Strategy" value={input.setup.strategy} options={strategyOptions} onChange={(v) => updateSetup("strategy", v as PricingEngineInput["setup"]["strategy"])} />
+                  <SelectInput label="Company Level" value={input.setup.companyLevel} options={companyLevelOptions} onChange={(v) => updateSetup("companyLevel", v as PricingEngineInput["setup"]["companyLevel"])} />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Overhead & Fees</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SelectInput label="Overhead Method" value={input.businessCosts.overheadAllocationMethod} options={["Percentage", "Flat Per Project", "Project Duration", "Ignore For Now"]} onChange={(v) => updateBiz("overheadAllocationMethod", v as PricingEngineInput["businessCosts"]["overheadAllocationMethod"])} />
+                  <NumberInput label="Minimum Job $" value={input.businessCosts.minimumJobPrice} onChange={(v) => updateBiz("minimumJobPrice", v)} />
+                  {input.businessCosts.overheadAllocationMethod === "Percentage" && (
+                    <NumberInput label="Overhead %" value={input.businessCosts.overheadPercent} onChange={(v) => updateBiz("overheadPercent", v)} />
+                  )}
+                  {input.businessCosts.overheadAllocationMethod === "Flat Per Project" && (
+                    <NumberInput label="Flat Overhead $" value={input.businessCosts.flatOverheadPerProject} onChange={(v) => updateBiz("flatOverheadPerProject", v)} />
+                  )}
+                  {input.businessCosts.overheadAllocationMethod === "Project Duration" && (
+                    <>
+                      <NumberInput label="Monthly Overhead $" value={input.businessCosts.monthlyOverhead} onChange={(v) => updateBiz("monthlyOverhead", v)} />
+                      <NumberInput label="Billable Days / Month" value={input.businessCosts.monthlyBillableDays} onChange={(v) => updateBiz("monthlyBillableDays", v)} />
+                      <NumberInput label="Project Duration Days" value={input.businessCosts.projectDurationDays} onChange={(v) => updateBiz("projectDurationDays", v)} />
+                    </>
+                  )}
+                  <NumberInput label="Labor Burden %" value={input.businessCosts.laborBurdenPercent} onChange={(v) => updateBiz("laborBurdenPercent", v)} />
+                  <ToggleNumberInput label="Misc Buffer %" value={input.businessCosts.miscellaneousBufferPercent} enabled={input.businessCosts.includeMiscellaneousBuffer} onToggle={(v) => updateBiz("includeMiscellaneousBuffer", v)} onChange={(v) => updateBiz("miscellaneousBufferPercent", v)} />
+                  <NumberInput label="Permit Buffer $" value={input.businessCosts.permitBuffer} onChange={(v) => updateBiz("permitBuffer", v)} />
+                  <ToggleNumberInput label="CC Fee %" value={input.businessCosts.creditCardFeePercent} enabled={input.businessCosts.includeCreditCardFee} onToggle={(v) => updateBiz("includeCreditCardFee", v)} onChange={(v) => updateBiz("creditCardFeePercent", v)} />
+                  <ToggleNumberInput label="Financing Fee %" value={input.businessCosts.financingFeePercent} enabled={input.businessCosts.includeFinancingFee} onToggle={(v) => updateBiz("includeFinancingFee", v)} onChange={(v) => updateBiz("financingFeePercent", v)} />
+                  <ToggleNumberInput label="Tax %" value={input.businessCosts.taxPercent} enabled={input.businessCosts.includeTax} onToggle={(v) => updateBiz("includeTax", v)} onChange={(v) => updateBiz("taxPercent", v)} />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Commission</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex items-center justify-between rounded border border-[#d9e2ec] px-3 py-2.5 text-sm text-neutral-900">
+                    Include Commission
+                    <input type="checkbox" checked={input.commission.includeCommission} onChange={(e) => updateCommission("includeCommission", e.target.checked)} className="accent-[#ff5c35]" />
+                  </label>
+                  <SelectInput label="Type" value={input.commission.commissionType} options={["Percentage", "Flat Amount"]} onChange={(v) => updateCommission("commissionType", v as CommissionType)} />
+                  {input.commission.commissionType === "Percentage" ? (
+                    <NumberInput label="Commission %" value={input.commission.commissionPercentage} onChange={(v) => updateCommission("commissionPercentage", v)} />
+                  ) : (
+                    <MoneyInput label="Flat Amount" value={input.commission.commissionFlatAmount} onChange={(v) => updateCommission("commissionFlatAmount", v)} />
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {showSessionHistoryModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#213343]/40 px-4 backdrop-blur-sm"
+          onClick={() => setShowSessionHistoryModal(false)}
+        >
+          <div
+            className="flex h-[min(82vh,760px)] w-full max-w-6xl flex-col rounded-xl border border-[#d9e2ec] bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">Saved Sessions</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Continue where you left off or create a proposal directly from a saved scenario.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSessionHistoryModal(false)}
+                className="rounded-md p-1.5 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-black"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto px-6 py-5">
+              {sessionHistoryRows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[#e8eef3] text-[11px] uppercase tracking-wide text-gray-400">
+                        <th className="px-2 py-2">Saved</th>
+                        <th className="px-2 py-2">Scenario</th>
+                        <th className="px-2 py-2">Direct Cost</th>
+                        <th className="px-2 py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sessionHistoryRows.map(({ entry, baseCost, suggestedOption }) => (
+                        <tr key={entry.id} className="border-b border-[#f0f4f8] last:border-0">
+                          <td className="px-2 py-2 text-gray-500">
+                            {new Date(entry.savedAt).toLocaleString()}
+                          </td>
+                          <td className="px-2 py-2">
+                            <p className="font-medium text-[#213343]">{entry.label}</p>
+                            <p className="mt-0.5 text-[11px] text-gray-500">
+                              {entry.input.setup.trade} · {entry.input.setup.state} · {entry.input.setup.projectSize}
+                            </p>
+                          </td>
+                          <td className="px-2 py-2 font-semibold text-[#213343]">
+                            {formatMoney(baseCost)}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => continueFromSession(entry)}
+                                className="rounded border border-[#d9e2ec] px-2.5 py-1 text-[11px] font-medium text-[#213343] transition hover:bg-[#f6f8fb]"
+                              >
+                                Continue
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => createProposalFromSession(entry, suggestedOption)}
+                                className="rounded bg-[#111111] px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-black"
+                              >
+                                Create Proposal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeSessionRow(entry.id)}
+                                className="rounded border border-[#f0d5d2] px-2.5 py-1 text-[11px] font-medium text-[#b42318] transition hover:bg-[#fff5f4]"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <p className="text-sm text-gray-500">No saved sessions yet. Use “Save session” to create one.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -970,10 +1308,12 @@ function ResultCard({
   option,
   commissionEnabled,
   showAdvancedBreakdown,
+  onToggleBreakdown,
 }: {
   option: PricingEngineOption;
   commissionEnabled: boolean;
   showAdvancedBreakdown: boolean;
+  onToggleBreakdown: () => void;
 }) {
   const healthStyle =
     option.status === "Safe"
@@ -983,7 +1323,7 @@ function ResultCard({
         : "bg-red-50 text-red-700";
 
   return (
-    <div className={`relative rounded-lg border bg-white p-5 ${option.recommended ? "border-[#111111]" : "border-[#d9e2ec]"}`}>
+    <div className={`group relative rounded-lg border bg-white p-5 ${option.recommended ? "border-[#111111]" : "border-[#d9e2ec]"}`}>
       {option.recommended && (
         <span className="absolute right-3 top-3 rounded bg-[#111111] px-2 py-0.5 text-[10px] font-semibold text-white">
           RECOMMENDED
@@ -1005,6 +1345,26 @@ function ResultCard({
         <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-semibold ${healthStyle}`}>
           {option.status}
         </span>
+      </div>
+      <div className="mt-3 flex sm:hidden">
+        <button
+          type="button"
+          onClick={onToggleBreakdown}
+          className="w-full rounded-md border border-[#d9e2ec] px-3 py-2 text-xs font-semibold text-[#213343] transition hover:bg-[#f6f8fb]"
+        >
+          View breakdown
+        </button>
+      </div>
+      <div className="pointer-events-none absolute inset-0 hidden items-center justify-center rounded-lg bg-[#213343]/55 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100 sm:flex">
+        <div className="flex w-full max-w-[220px] flex-col gap-2 px-4">
+          <button
+            type="button"
+            onClick={onToggleBreakdown}
+            className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-[#213343] transition hover:bg-[#f6f8fb]"
+          >
+            View breakdown
+          </button>
+        </div>
       </div>
     </div>
   );

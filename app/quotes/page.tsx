@@ -3,21 +3,27 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileText, RefreshCw, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
+  type Contact,
   formatMargin,
   formatMoney,
-  quoteStatusOptions,
-  type Contact,
-  type PriceOptionName,
   type Project,
+  quoteStatusOptions,
+  type PriceOptionName,
   type Quote,
   type QuoteStatus,
 } from "@/lib/app-data";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { listContacts, listProjects, listQuotes, upsertQuote } from "@/lib/supabase/data";
+import {
+  deleteQuote,
+  listContacts,
+  listProjects,
+  listQuotes,
+  upsertQuote,
+} from "@/lib/supabase/data";
 import { t } from "@/lib/ui-strings";
 
 export default function QuotesPage() {
@@ -30,11 +36,6 @@ export default function QuotesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"All" | QuoteStatus>("All");
   const [search, setSearch] = useState("");
-  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(() =>
-    typeof window === "undefined"
-      ? null
-      : new URLSearchParams(window.location.search).get("quoteId")
-  );
 
   const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent);
@@ -108,13 +109,26 @@ export default function QuotesPage() {
     });
   }
 
-  const selectedQuote = quotes.find((q) => q.id === selectedQuoteId);
-  const selectedProject = selectedQuote?.projectId
-    ? projects.find((project) => project.id === selectedQuote.projectId)
-    : undefined;
-  const selectedContact = selectedQuote
-    ? findQuoteContact(selectedQuote, contacts)
-    : undefined;
+  function openQuoteEditor(quoteId: string) {
+    router.push(`/quotes/preview?id=${quoteId}`);
+  }
+
+  function printQuote(quoteId: string) {
+    window.open(`/proposal/${quoteId}/print`, "_blank", "noopener,noreferrer");
+  }
+
+  async function removeQuote(quoteId: string) {
+    const ok = window.confirm("Delete this proposal? This cannot be undone.");
+    if (!ok) return;
+    const previous = quotes;
+    setQuotes((current) => current.filter((quote) => quote.id !== quoteId));
+    try {
+      await deleteQuote(supabase, quoteId);
+    } catch {
+      setQuotes(previous);
+      window.alert("Could not delete proposal. Please try again.");
+    }
+  }
 
   if (isLoading && !loadError) {
     return (
@@ -199,9 +213,17 @@ export default function QuotesPage() {
                   const selected = getSelectedResult(quote);
                   const expired = isExpired(quote);
                   return (
-                    <button
+                    <div
                       key={quote.id}
-                      onClick={() => setSelectedQuoteId(quote.id)}
+                      onClick={() => openQuoteEditor(quote.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openQuoteEditor(quote.id);
+                        }
+                      }}
                       className="w-full elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4 text-left transition hover:bg-[#f6f8fb]"
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -228,35 +250,79 @@ export default function QuotesPage() {
                         <span className="text-gray-400">·</span>
                         <span className="text-gray-500">{quote.selectedOption}</span>
                       </div>
-                    </button>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Contact: {findQuoteContactName(quote, contacts)} · Project: {findQuoteProjectName(quote, projects)}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            printQuote(quote.id);
+                          }}
+                          className="rounded border border-[#d9e2ec] px-3 py-1.5 text-xs font-medium text-[#213343] transition hover:bg-[#f6f8fb]"
+                        >
+                          Print
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void removeQuote(quote.id);
+                          }}
+                          className="rounded border border-[#f0d5d2] px-3 py-1.5 text-xs font-medium text-[#b42318] transition hover:bg-[#fff5f4]"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
 
               {/* Desktop table */}
               <div className="hidden overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
-                <div className="grid min-w-215 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
-                  <span>Quote</span>
+                <div className="grid min-w-290 grid-cols-[1fr_1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.9fr_1.2fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+                  <span>Contact</span>
+                  <span>Project</span>
                   <span>Status</span>
                   <span>Selected</span>
                   <span>Sale Price</span>
                   <span>Profit</span>
                   <span>Margin</span>
+                  <span>Quote</span>
+                  <span className="text-right">Actions</span>
                 </div>
-                <div className="min-w-215 divide-y divide-gray-100">
+                <div className="min-w-290 divide-y divide-gray-100">
                   {filteredQuotes.map((quote) => {
                     const selected = getSelectedResult(quote);
                     const expired = isExpired(quote);
                     return (
-                      <button
+                      <div
                         key={quote.id}
-                        onClick={() => setSelectedQuoteId(quote.id)}
-                        className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                        onClick={() => openQuoteEditor(quote.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openQuoteEditor(quote.id);
+                          }
+                        }}
+                        className="grid w-full grid-cols-[1fr_1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.9fr_1.2fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                       >
+                        <span className="truncate text-gray-700">{findQuoteContactName(quote, contacts)}</span>
+                        <span className="truncate text-gray-700">{findQuoteProjectName(quote, projects)}</span>
+                        <span className="text-gray-600">{quote.status}</span>
+                        <span>{quote.selectedOption}</span>
+                        <span className="font-medium">{formatMoney(selected.salePrice)}</span>
+                        <span>{formatMoney(selected.profit)}</span>
+                        <span>{formatMargin(selected.margin)}</span>
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-black">{quote.projectName}</p>
+                          <p className="truncate font-medium text-black">
+                            {quote.proposalNumber ?? quote.id.slice(-6).toUpperCase()}
+                          </p>
                           <p className="mt-1 truncate text-gray-500">
-                            {quote.customerName} ·{" "}
                             {expired && (quote.status === "Draft" || quote.status === "Sent") ? (
                               <span className="font-medium text-red-500">Expired {quote.expiresAt}</span>
                             ) : (
@@ -264,12 +330,29 @@ export default function QuotesPage() {
                             )}
                           </p>
                         </div>
-                        <span className="text-gray-600">{quote.status}</span>
-                        <span>{quote.selectedOption}</span>
-                        <span className="font-medium">{formatMoney(selected.salePrice)}</span>
-                        <span>{formatMoney(selected.profit)}</span>
-                        <span>{formatMargin(selected.margin)}</span>
-                      </button>
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              printQuote(quote.id);
+                            }}
+                            className="rounded border border-[#d9e2ec] px-2.5 py-1 text-[11px] font-medium text-[#213343] transition hover:bg-[#f6f8fb]"
+                          >
+                            Print
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void removeQuote(quote.id);
+                            }}
+                            className="rounded border border-[#f0d5d2] px-2.5 py-1 text-[11px] font-medium text-[#b42318] transition hover:bg-[#fff5f4]"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -296,179 +379,6 @@ export default function QuotesPage() {
         </div>
       </main>
 
-      {selectedQuote ? (
-        <QuoteDetailPanel
-          quote={selectedQuote}
-          project={selectedProject}
-          contact={selectedContact}
-          onClose={() => setSelectedQuoteId(null)}
-          onStatusChange={(status) => updateQuoteStatus(selectedQuote.id, status)}
-          onOpenProject={(projectId) => router.push(`/projects?projectId=${projectId}`)}
-          onOpenContact={(contactId) => router.push(`/contacts?contactId=${contactId}`)}
-          onPreview={() => router.push(`/quotes/preview?id=${selectedQuote.id}`)}
-          onReprice={selectedQuote.projectId
-            ? () => router.push(`/projects?projectId=${selectedQuote.projectId}&projectTab=costs`)
-            : undefined}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function QuoteDetailPanel({
-  quote,
-  project,
-  contact,
-  onClose,
-  onStatusChange,
-  onOpenProject,
-  onOpenContact,
-  onPreview,
-  onReprice,
-}: {
-  quote: Quote;
-  project?: Project;
-  contact?: Contact;
-  onClose: () => void;
-  onStatusChange: (status: QuoteStatus) => void;
-  onOpenProject: (projectId: string) => void;
-  onOpenContact: (contactId: string) => void;
-  onPreview: () => void;
-  onReprice?: () => void;
-}) {
-  const selected = getSelectedResult(quote);
-
-  return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-[#213343]/20 backdrop-blur-sm"
-    >
-      <aside
-        onClick={(e) => e.stopPropagation()}
-        className="ml-auto h-full w-full overflow-auto border-l border-[#d9e2ec] bg-white p-5 sm:p-6 lg:w-1/2"
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-semibold tracking-tight">
-              {quote.projectName}
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              {quote.customerName}
-              {quote.proposalNumber ? ` · ${quote.proposalNumber}` : ""}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="shrink-0 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-          >
-            Close
-          </button>
-        </div>
-
-        {/* Preview CTA */}
-        <div className="mt-5 flex gap-2">
-          <button
-            onClick={onPreview}
-            className="flex flex-1 items-center justify-between gap-3 rounded-md border border-[#111111] bg-[#111111] px-5 py-3.5 text-sm font-medium text-white transition hover:bg-[#333333]"
-          >
-            <div className="flex items-center gap-2.5">
-              <FileText className="h-4 w-4" />
-              Preview &amp; Download PDF
-            </div>
-            <span className="text-xs text-white/60">→</span>
-          </button>
-          {onReprice && (
-            <button
-              onClick={onReprice}
-              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              title="Go to project costs to reprice"
-            >
-              <RefreshCw className="h-4 w-4 text-gray-500" />
-              Reprice
-            </button>
-          )}
-        </div>
-
-        {/* Status */}
-        <div className="mt-6">
-          <label className="block text-sm font-medium">
-            Status
-            <select
-              value={quote.status}
-              onChange={(e) => onStatusChange(e.target.value as QuoteStatus)}
-              className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
-            >
-              {quoteStatusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <button
-            disabled={!contact}
-            onClick={() => contact && onOpenContact(contact.id)}
-            className="rounded-md border border-[#d9e2ec] px-4 py-3 text-left text-sm transition hover:bg-[#f6f8fb] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <span className="block text-xs text-gray-500">Contact</span>
-            <span className="mt-1 block font-medium">
-              {contact?.name ?? quote.customerName}
-            </span>
-          </button>
-          <button
-            disabled={!project}
-            onClick={() => project && onOpenProject(project.id)}
-            className="rounded-md border border-[#d9e2ec] px-4 py-3 text-left text-sm transition hover:bg-[#f6f8fb] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <span className="block text-xs text-gray-500">Project</span>
-            <span className="mt-1 block font-medium">{quote.projectName}</span>
-          </button>
-        </div>
-
-        {/* Metrics */}
-        <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
-          <Metric label="Selected" value={quote.selectedOption} />
-          <Metric label="Sale Price" value={formatMoney(selected.salePrice)} />
-          <Metric label="Profit" value={formatMoney(selected.profit)} />
-          <Metric label="Margin" value={formatMargin(selected.margin)} />
-          <Metric label="Created" value={quote.createdAt} />
-          <Metric
-            label="Expires"
-            value={quote.expiresAt}
-            alert={isExpired(quote) && (quote.status === "Draft" || quote.status === "Sent")}
-          />
-          {quote.signedAt && (
-            <Metric
-              label="Signed"
-              value={`${new Date(quote.signedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${quote.signedBy ? ` by ${quote.signedBy}` : ""}`}
-            />
-          )}
-        </div>
-
-        {/* Pricing options */}
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          {(["Good", "Better", "Best"] as PriceOptionName[]).map((name) => {
-            const result = getQuoteResult(quote, name);
-            return (
-              <div
-                key={name}
-                className={`rounded border p-3 text-sm ${
-                  quote.selectedOption === name
-                    ? "border-black bg-[#f6f8fb]"
-                    : "border-[#d9e2ec]"
-                }`}
-              >
-                <p className="font-medium">{name}</p>
-                <p className="mt-2 text-gray-600">{formatMoney(result.salePrice)}</p>
-              </div>
-            );
-          })}
-        </div>
-      </aside>
     </div>
   );
 }
@@ -483,28 +393,22 @@ function getQuoteResult(quote: Quote, option: PriceOptionName) {
   return quote.best;
 }
 
-function findQuoteContact(quote: Quote, contacts: Contact[]) {
-  return contacts.find(
+function findQuoteContactName(quote: Quote, contacts: Contact[]) {
+  const match = contacts.find(
     (contact) =>
       contact.id === quote.contactId ||
       contact.name.trim().toLowerCase() === quote.customerName.trim().toLowerCase() ||
       (Boolean(contact.email) &&
-        contact.email.trim().toLowerCase() ===
-          (quote.customerEmail ?? "").trim().toLowerCase()) ||
-      (Boolean(contact.phone) &&
-        samePhone(contact.phone, quote.customerPhone ?? ""))
+        contact.email.trim().toLowerCase() === (quote.customerEmail ?? "").trim().toLowerCase()) ||
+      (Boolean(contact.phone) && samePhone(contact.phone, quote.customerPhone ?? ""))
   );
+  return match?.name ?? quote.customerName;
 }
 
-function Metric({ label, value, alert = false }: { label: string; value: string; alert?: boolean }) {
-  return (
-    <div>
-      <p className="text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
-        {label}
-      </p>
-      <p className={`mt-1 font-medium ${alert ? "text-red-500" : "text-black"}`}>{value}</p>
-    </div>
-  );
+function findQuoteProjectName(quote: Quote, projects: Project[]) {
+  if (!quote.projectId) return quote.projectName;
+  const match = projects.find((project) => project.id === quote.projectId);
+  return match?.projectName ?? quote.projectName;
 }
 
 function isExpired(quote: Quote) {

@@ -8,6 +8,7 @@ import {
   formatMoney,
   getTierDisplayName,
   getTierMaterialSummaries,
+  getTierMaterialsTableForProposal,
   mergeAppSettings,
   type AppSettings,
   type PriceOptionName,
@@ -46,6 +47,7 @@ function AcceptPageInner() {
 
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [clientSelectedOption, setClientSelectedOption] = useState<PriceOptionName>("Better");
+  const [expandedTier, setExpandedTier] = useState<PriceOptionName | null>(null);
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [state, setState] = useState<AcceptanceState>("viewing");
   const [signatureName, setSignatureName] = useState("");
@@ -286,36 +288,95 @@ function AcceptPageInner() {
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {(["Good", "Better", "Best"] as const).map((tier) => {
                 const tierResult = tier === "Good" ? quote.good : tier === "Better" ? quote.better : quote.best;
+                const tierMaterials = getTierMaterialsTableForProposal(
+                  mergedSettings,
+                  tier,
+                  template,
+                  quote
+                );
                 const recommended =
                   tier === "Better" && mergedSettings.proposalSettings.highlightBetterRecommended !== false;
                 const active = clientSelectedOption === tier;
                 return (
-                  <button
+                  <div
                     key={tier}
-                    type="button"
-                    onClick={() => setClientSelectedOption(tier)}
                     className={`rounded-lg border p-4 text-left transition ${
                       active
                         ? "border-[#ff5c35] bg-[#fff8f5] ring-2 ring-[#ff5c35]/30"
-                        : "border-[#d9e2ec] hover:border-gray-300"
+                        : "border-[#d9e2ec]"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-[#213343]">
-                        {getTierDisplayName(mergedSettings, tier)}
-                      </span>
-                      {recommended ? (
-                        <span className="rounded bg-[#213343] px-2 py-0.5 text-[10px] font-medium text-white">
-                          Recommended
+                    <button
+                      type="button"
+                      onClick={() => setClientSelectedOption(tier)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-[#213343]">
+                          {getTierDisplayName(mergedSettings, tier)}
                         </span>
+                        {recommended ? (
+                          <span className="rounded bg-[#213343] px-2 py-0.5 text-[10px] font-medium text-white">
+                            Recommended
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-xl font-bold text-[#213343]">{formatMoney(tierResult.salePrice)}</p>
+                      {tierMaterialLines[tier] ? (
+                        <p className="mt-1.5 text-xs font-semibold text-[#213343]">{tierMaterialLines[tier]}</p>
                       ) : null}
-                    </div>
-                    <p className="mt-2 text-xl font-bold text-[#213343]">{formatMoney(tierResult.salePrice)}</p>
-                    {tierMaterialLines[tier] ? (
-                      <p className="mt-1.5 text-xs font-semibold text-[#213343]">{tierMaterialLines[tier]}</p>
+                      <p className="mt-1 line-clamp-3 text-xs text-gray-500">{tierResult.description}</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedTier((current) => (current === tier ? null : tier))
+                      }
+                      className="mt-3 rounded border border-[#d9e2ec] px-2.5 py-1.5 text-[11px] font-semibold text-[#213343] transition hover:bg-white"
+                    >
+                      {expandedTier === tier ? "Hide materials" : "View materials & details"}
+                    </button>
+                    {expandedTier === tier ? (
+                      <div className="mt-3 space-y-2 border-t border-[#f0e5df] pt-3">
+                        {tierMaterials.length > 0 ? (
+                          tierMaterials.map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-md border border-[#f0e5df] bg-white p-2.5"
+                            >
+                              <div className="flex items-start gap-2.5">
+                                {item.imageUrl ? (
+                                  <img
+                                    src={item.imageUrl}
+                                    alt={`${item.product || item.category} material`}
+                                    className="h-14 w-14 shrink-0 rounded object-cover"
+                                  />
+                                ) : null}
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-[#213343]">
+                                    {[item.brand, item.product || item.category]
+                                      .filter((value) => value && value.trim())
+                                      .join(" · ")}
+                                  </p>
+                                  {(item.warranty || item.notes) ? (
+                                    <p className="mt-1 text-[11px] text-gray-500">
+                                      {[item.warranty, item.notes]
+                                        .filter((value) => value && value.trim())
+                                        .join(" · ")}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="rounded border border-dashed border-[#d9e2ec] bg-white px-2.5 py-2 text-[11px] text-gray-500">
+                            Material details will be added by your contractor.
+                          </p>
+                        )}
+                      </div>
                     ) : null}
-                    <p className="mt-1 line-clamp-3 text-xs text-gray-500">{tierResult.description}</p>
-                  </button>
+                  </div>
                 );
               })}
             </div>

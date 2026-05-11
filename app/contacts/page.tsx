@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
@@ -46,6 +46,7 @@ export default function ContactsPage() {
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ContactForm>(emptyContact);
   const [error, setError] = useState("");
+  const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
     () =>
       typeof window === "undefined"
@@ -115,6 +116,7 @@ export default function ContactsPage() {
         await loadData({ silent: true });
         setForm(emptyContact);
         setError("");
+        setShowCreateDrawer(false);
       } catch {
         setContacts((current) => current.filter((c) => c.id !== next.id));
         setError("Could not save contact. Try again.");
@@ -183,83 +185,32 @@ export default function ContactsPage() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header>
-            <p className="page-kicker text-sm font-medium">Contacts</p>
-            <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Contacts
-            </h2>
-            <p className="page-description mt-3 max-w-2xl text-sm">
-              Store basic customer information before connecting projects and
-              quotes to a full CRM later.
-            </p>
+          <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+            <div>
+              <p className="page-kicker text-sm font-medium">Contacts</p>
+              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+                Contacts
+              </h2>
+              <p className="page-description mt-3 max-w-2xl text-sm">
+                Store basic customer information before connecting projects and
+                quotes to a full CRM later.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setForm(emptyContact);
+                setError("");
+                setShowCreateDrawer(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
+            >
+              <Plus className="h-4 w-4" />
+              Create Contact
+            </button>
           </header>
 
-          <div className="mt-8 grid gap-6 xl:grid-cols-[360px_1fr]">
-            <section className="h-fit elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 sm:p-6">
-              <h3 className="text-lg font-semibold tracking-tight">
-                New Contact
-              </h3>
-              <div className="mt-5 grid gap-4">
-                <TextField
-                  label="Name"
-                  value={form.name}
-                  onChange={(value) => setForm({ ...form, name: value })}
-                />
-                <TextField
-                  label="Phone"
-                  value={form.phone}
-                  onChange={(value) => setForm({ ...form, phone: value })}
-                />
-                <TextField
-                  label="Email"
-                  value={form.email}
-                  onChange={(value) => setForm({ ...form, email: value })}
-                />
-                <TextField
-                  label="Address"
-                  value={form.address}
-                  onChange={(value) => setForm({ ...form, address: value })}
-                />
-                <label className="block text-sm font-medium">
-                  Customer Type
-                  <select
-                    value={form.customerType}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        customerType: event.target
-                          .value as Contact["customerType"],
-                      })
-                    }
-                    className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
-                  >
-                    <option>Homeowner</option>
-                    <option>Business</option>
-                    <option>Property Manager</option>
-                  </select>
-                </label>
-                <label className="block text-sm font-medium">
-                  Notes
-                  <textarea
-                    value={form.notes}
-                    onChange={(event) =>
-                      setForm({ ...form, notes: event.target.value })
-                    }
-                    className="mt-2 min-h-24 w-full resize-none rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
-                  />
-                </label>
-              </div>
-
-              {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
-
-              <button
-                onClick={createContact}
-                className="mt-5 w-full rounded-md bg-[#ff5c35] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#e94820]"
-              >
-                Create Contact
-              </button>
-            </section>
-
+          <div className="mt-8">
             <section>
               <input
                 value={search}
@@ -293,28 +244,27 @@ export default function ContactsPage() {
 
               {/* Desktop table */}
               <div className="mt-5 hidden overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
-                <div className="grid min-w-190 grid-cols-[1.4fr_1fr_1fr_1.3fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+                <div className="grid min-w-190 grid-cols-[1.2fr_1.5fr_0.9fr_1fr_1.3fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
                   <span>Name</span>
+                  <span>Address</span>
                   <span>Type</span>
                   <span>Phone</span>
                   <span>Email</span>
-                  <span>Created</span>
                 </div>
                 <div className="min-w-190 divide-y divide-gray-100">
                   {filteredContacts.map((contact) => (
                     <button
                       key={contact.id}
                       onClick={() => setSelectedContactId(contact.id)}
-                      className="grid w-full grid-cols-[1.4fr_1fr_1fr_1.3fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                      className="grid w-full grid-cols-[1.2fr_1.5fr_0.9fr_1fr_1.3fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                     >
                       <div className="min-w-0">
                         <p className="truncate font-medium text-black">{contact.name}</p>
-                        <p className="mt-1 truncate text-gray-500">{contact.address || "No address"}</p>
                       </div>
+                      <span className="truncate text-gray-600">{contact.address || "No address"}</span>
                       <span>{contact.customerType}</span>
                       <span className="text-gray-600">{contact.phone || "No phone"}</span>
                       <span className="truncate text-gray-600">{contact.email || "No email"}</span>
-                      <span>{contact.createdAt}</span>
                     </button>
                   ))}
                 </div>
@@ -336,6 +286,104 @@ export default function ContactsPage() {
           </div>
         </div>
       </main>
+
+      {showCreateDrawer && (
+        <div
+          className="fixed inset-0 z-50 bg-[#213343]/35 backdrop-blur-sm"
+          onClick={() => setShowCreateDrawer(false)}
+        >
+          <aside
+            onClick={(event) => event.stopPropagation()}
+            className="ml-auto flex h-full w-full max-w-xl flex-col border-l border-[#d9e2ec] bg-white shadow-2xl dark:border-slate-600"
+          >
+            <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">
+                  Create Contact
+                </h3>
+                <p className="mt-0.5 text-sm text-gray-500">
+                  Add customer details before linking projects and proposals.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateDrawer(false)}
+                className="rounded-md p-1.5 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-black"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid flex-1 gap-4 overflow-auto px-6 py-5">
+              <TextField
+                label="Name"
+                value={form.name}
+                onChange={(value) => setForm({ ...form, name: value })}
+              />
+              <TextField
+                label="Phone"
+                value={form.phone}
+                onChange={(value) => setForm({ ...form, phone: value })}
+              />
+              <TextField
+                label="Email"
+                value={form.email}
+                onChange={(value) => setForm({ ...form, email: value })}
+              />
+              <TextField
+                label="Address"
+                value={form.address}
+                onChange={(value) => setForm({ ...form, address: value })}
+              />
+              <label className="block text-sm font-medium">
+                Customer Type
+                <select
+                  value={form.customerType}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      customerType: event.target
+                        .value as Contact["customerType"],
+                    })
+                  }
+                  className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
+                >
+                  <option>Homeowner</option>
+                  <option>Business</option>
+                  <option>Property Manager</option>
+                </select>
+              </label>
+              <label className="block text-sm font-medium">
+                Notes
+                <textarea
+                  value={form.notes}
+                  onChange={(event) =>
+                    setForm({ ...form, notes: event.target.value })
+                  }
+                  className="mt-2 min-h-24 w-full resize-none rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+                />
+              </label>
+              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            </div>
+
+            <div className="sticky bottom-0 flex justify-end gap-3 border-t border-[#d9e2ec] bg-white px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowCreateDrawer(false)}
+                className="rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createContact}
+                className="rounded-md bg-[#ff5c35] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
+              >
+                Create Contact
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {selectedContact ? (
         <ContactDetailPanel

@@ -336,6 +336,13 @@ export function ProposalDocument({
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {items.map((item) => (
                 <div key={item.id} className="break-inside-avoid border border-[#d9e2ec] bg-white p-4">
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt={`${item.product || item.category} material`}
+                      className="mb-3 h-28 w-full rounded object-cover"
+                    />
+                  ) : null}
                   <p className="text-xs font-semibold uppercase tracking-widest text-[#ff5c35]">{item.category}</p>
                   <p className="mt-1 font-bold text-[#213343]">{item.product}</p>
                   {item.brand ? <p className="mt-1 text-sm text-gray-500">{item.brand}</p> : null}
@@ -353,7 +360,15 @@ export function ProposalDocument({
             <div className="mt-6 space-y-3">
               {items.map((item) => (
                 <div key={item.id} className="flex items-start gap-3 border-b border-[#e8eef5] pb-3 break-inside-avoid">
-                  <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff5c35]" />
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt={`${item.product || item.category} material`}
+                      className="h-12 w-12 shrink-0 rounded object-cover"
+                    />
+                  ) : (
+                    <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff5c35]" />
+                  )}
                   <div>
                     <p className="text-sm font-semibold text-[#213343]">{item.category} — {item.product}</p>
                     {item.brand ? <p className="text-xs text-gray-500">{item.brand}</p> : null}
@@ -368,14 +383,16 @@ export function ProposalDocument({
             <div className="mt-6 overflow-hidden border border-[#d9e2ec]">
               <table className="w-full table-fixed text-xs">
                 <colgroup>
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "21%" }} />
                   <col style={{ width: "14%" }} />
+                  <col style={{ width: "18%" }} />
                   <col style={{ width: "23%" }} />
-                  <col style={{ width: "14%" }} />
-                  <col style={{ width: "20%" }} />
-                  <col style={{ width: "29%" }} />
                 </colgroup>
                 <thead className="bg-[#213343] text-left text-[10px] font-semibold uppercase tracking-widest text-white">
                   <tr>
+                    <th className="px-3 py-2.5">Image</th>
                     <th className="px-3 py-2.5">Category</th>
                     <th className="px-3 py-2.5">Product</th>
                     <th className="px-3 py-2.5">Brand</th>
@@ -386,6 +403,17 @@ export function ProposalDocument({
                 <tbody className="divide-y divide-[#d9e2ec] bg-white">
                   {items.map((item) => (
                     <tr key={item.id} className="align-top">
+                      <td className="px-3 py-2">
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt={`${item.product || item.category} material`}
+                            className="h-10 w-10 rounded object-cover"
+                          />
+                        ) : (
+                          <span className="text-[10px] text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="break-words px-3 py-2 font-medium leading-snug text-[#213343]">{item.category}</td>
                       <td className="break-words px-3 py-2 leading-snug text-[#213343]">{item.product}</td>
                       <td className="break-words px-3 py-2 leading-snug text-gray-500">{item.brand}</td>

@@ -3,6 +3,7 @@
 import { Check, Copy, Info, Minus, Pencil, Plus, RotateCcw, Save } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
@@ -85,8 +86,29 @@ const coverLayoutOptions: { value: ProposalCoverLayout; label: string }[] = [
 ];
 
 const TRADE_KEYS = tradeOptions;
+type ProposalTab = "templates" | "content" | "settings" | "brand";
+
+function parseSettingsSection(value: string | null): SettingsSection | null {
+  if (value === "Company Profile" || value === "Pricing" || value === "Proposals" || value === "App Preferences" || value === "Data") {
+    return value;
+  }
+  return null;
+}
+
+function parseProposalTab(value: string | null): ProposalTab | null {
+  if (value === "templates" || value === "content" || value === "settings" || value === "brand") {
+    return value;
+  }
+  return null;
+}
+
+function parsePriceTier(value: string | null): PriceOptionName | null {
+  if (value === "Good" || value === "Better" || value === "Best") return value;
+  return null;
+}
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [activeSection, setActiveSection] =
     useState<SettingsSection>("Company Profile");
@@ -103,6 +125,20 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [settingsConnectionsInfoOpen, setSettingsConnectionsInfoOpen] = useState(false);
+  const requestedSection = useMemo(
+    () => parseSettingsSection(searchParams.get("section")),
+    [searchParams]
+  );
+  const requestedTier = useMemo(
+    () => parsePriceTier(searchParams.get("tier")),
+    [searchParams]
+  );
+  const requestedProposalTab = useMemo(() => {
+    const parsed = parseProposalTab(searchParams.get("proposalTab"));
+    if (parsed) return parsed;
+    if (requestedTier) return "settings";
+    return null;
+  }, [searchParams, requestedTier]);
 
   const loadSettings = useCallback(async () => {
     setIsLoading(true);
@@ -138,6 +174,11 @@ export default function SettingsPage() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsConnectionsInfoOpen]);
+
+  useEffect(() => {
+    if (!requestedSection) return;
+    setActiveSection(requestedSection);
+  }, [requestedSection]);
 
   const hasUnsavedChanges = useMemo(
     () => JSON.stringify(settings) !== JSON.stringify(normalizedSavedSettings),
@@ -367,6 +408,8 @@ export default function SettingsPage() {
                   settings={settings}
                   setSettings={setSettings}
                   onNavigateToSection={setActiveSection}
+                  initialTab={requestedProposalTab}
+                  focusTier={requestedTier}
                 />
               ) : null}
               {activeSection === "App Preferences" ? (
@@ -1261,8 +1304,21 @@ function CostRulesSection({ settings, setSettings }: SectionProps) {
   );
 }
 
-function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
+function ProposalSettingsSection({
+  settings,
+  setSettings,
+  focusTier,
+}: SectionProps & { focusTier?: PriceOptionName | null }) {
   const proposal = settings.proposalSettings;
+  const focusTierLower = focusTier?.toLowerCase();
+
+  useEffect(() => {
+    if (!focusTierLower) return;
+    const id = `proposal-tier-${focusTierLower}`;
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusTierLower]);
 
   return (
     <SettingsSection
@@ -1495,7 +1551,11 @@ function ProposalSettingsSection({ settings, setSettings }: SectionProps) {
                   : "bestTierMaterialsTable";
             const items = (proposal[tableKey] as MaterialItem[] | undefined) ?? [];
             return (
-              <div key={tier} className="border-b border-[#e8eef3] pb-5 last:border-0 last:pb-0">
+              <div
+                id={`proposal-tier-${tier.toLowerCase()}`}
+                key={tier}
+                className="border-b border-[#e8eef3] pb-5 last:border-0 last:pb-0"
+              >
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {getTierDisplayName(settings, tier as PriceOptionName)} package
                 </p>
@@ -2446,14 +2506,22 @@ function updatePreference<K extends keyof AppSettings["appPreferences"]>(
   }));
 }
 
-type ProposalTab = "templates" | "content" | "settings" | "brand";
-
 function ProposalsSection({
   settings,
   setSettings,
   onNavigateToSection,
-}: SectionProps & { onNavigateToSection: (section: SettingsSection) => void }) {
-  const [tab, setTab] = useState<ProposalTab>("templates");
+  initialTab,
+  focusTier,
+}: SectionProps & {
+  onNavigateToSection: (section: SettingsSection) => void;
+  initialTab?: ProposalTab | null;
+  focusTier?: PriceOptionName | null;
+}) {
+  const [tab, setTab] = useState<ProposalTab>(initialTab ?? "templates");
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   const tabs: { id: ProposalTab; label: string; description: string }[] = [
     {
@@ -2524,7 +2592,13 @@ function ProposalsSection({
 
       {tab === "templates" && <TemplatesSection />}
       {tab === "content" && <ContentDefaultsSection settings={settings} setSettings={setSettings} />}
-      {tab === "settings" && <ProposalSettingsSection settings={settings} setSettings={setSettings} />}
+      {tab === "settings" && (
+        <ProposalSettingsSection
+          settings={settings}
+          setSettings={setSettings}
+          focusTier={focusTier}
+        />
+      )}
       {tab === "brand" && <BrandingSection settings={settings} setSettings={setSettings} />}
     </div>
   );
