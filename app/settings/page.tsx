@@ -2,7 +2,7 @@
 
 import { Check, Copy, Info, Minus, Pencil, Plus, RotateCcw, Save } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
@@ -107,7 +107,7 @@ function parsePriceTier(value: string | null): PriceOptionName | null {
   return null;
 }
 
-export default function SettingsPage() {
+function SettingsPageInner() {
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [activeSection, setActiveSection] =
@@ -445,6 +445,23 @@ export default function SettingsPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[var(--page-bg)] lg:flex">
+          <AppSidebar />
+          <main className="min-w-0 flex-1 p-5 sm:p-8 lg:p-10">
+            <PageSkeleton rows={5} />
+          </main>
+        </div>
+      }
+    >
+      <SettingsPageInner />
+    </Suspense>
   );
 }
 
