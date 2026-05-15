@@ -6,7 +6,7 @@ export const strings = {
     emptyProjects: "No projects yet",
     emptyProjectsHint: "Create a project to track costs and send proposals.",
     emptyQuotes: "No proposals yet",
-    emptyQuotesHint: "Open a project and build a quote to see it here.",
+    emptyQuotesHint: "Open a project and build a proposal to see it here.",
     emptyContacts: "No contacts yet",
     emptyContactsHint: "Add homeowners and businesses you work with.",
     emptyDashboardQuotes: "No recent proposals",

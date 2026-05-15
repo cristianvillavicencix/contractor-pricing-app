@@ -1,10 +1,62 @@
-import type { AppSettings, Contact, Project, Quote, ScopeTemplate } from "@/lib/app-data";
+import type {
+  AppSettings,
+  Contact,
+  LeadStage,
+  PaymentStatus,
+  Project,
+  Quote,
+  ScopeTemplate,
+} from "@/lib/app-data";
 import { mergeAppSettings } from "@/lib/app-data";
 import { getAppSettingsValidationError } from "@/lib/settings-validation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { ProposalTemplate } from "@/lib/proposal-templates";
 
 type SupabaseClient = ReturnType<typeof createSupabaseBrowserClient>;
+const CONTACT_META_MARKER = "\n[[CRM_META]]";
+
+function splitContactNotes(value: string | null | undefined) {
+  const source = value ?? "";
+  const markerIdx = source.lastIndexOf(CONTACT_META_MARKER);
+  if (markerIdx < 0) return { notes: source, meta: {} as Partial<Contact> };
+  const notes = source.slice(0, markerIdx).trimEnd();
+  const payload = source.slice(markerIdx + CONTACT_META_MARKER.length);
+  try {
+    return {
+      notes,
+      meta: JSON.parse(payload) as Partial<Contact>,
+    };
+  } catch {
+    return { notes: source, meta: {} as Partial<Contact> };
+  }
+}
+
+function withContactMeta(contact: Contact) {
+  const meta = {
+    leadStage: contact.leadStage,
+    leadSource: contact.leadSource ?? "",
+    nextFollowUpAt: contact.nextFollowUpAt ?? "",
+    owner: contact.owner ?? "",
+  };
+  const notes = contact.notes.trimEnd();
+  return `${notes}${CONTACT_META_MARKER}${JSON.stringify(meta)}`;
+}
+
+function normalizeLeadStage(value: string | undefined): LeadStage {
+  if (value === "Qualified") return "Qualified";
+  if (value === "Proposal Sent") return "Proposal Sent";
+  if (value === "Negotiation") return "Negotiation";
+  if (value === "Won") return "Won";
+  if (value === "Lost") return "Lost";
+  return "New";
+}
+
+function normalizePaymentStatus(value: string | undefined): PaymentStatus {
+  if (value === "Paid") return "Paid";
+  if (value === "Failed") return "Failed";
+  if (value === "Refunded") return "Refunded";
+  return "Pending";
+}
 
 async function requireCompanyId(supabase: SupabaseClient): Promise<string> {
   const { data, error } = await supabase.rpc("current_company_id");
@@ -108,7 +160,12 @@ export async function listQuotes(supabase: SupabaseClient): Promise<Quote[]> {
   return (data ?? []).map((row: unknown) => {
     const r = row as Record<string, unknown>;
     const q = (r.data ?? {}) as Quote;
-    return { ...q, id: r.id as string, projectId: (r.project_id as string | null) ?? q.projectId };
+    return {
+      ...q,
+      id: r.id as string,
+      projectId: (r.project_id as string | null) ?? q.projectId,
+      depositStatus: normalizePaymentStatus(q.depositStatus),
+    };
   });
 }
 
@@ -123,7 +180,12 @@ export async function getQuote(supabase: SupabaseClient, quoteId: string): Promi
   if (error) throw error;
   if (!data) return null;
   const q = (data.data ?? {}) as Quote;
-  return { ...q, id: data.id, projectId: data.project_id ?? q.projectId };
+  return {
+    ...q,
+    id: data.id,
+    projectId: data.project_id ?? q.projectId,
+    depositStatus: normalizePaymentStatus(q.depositStatus),
+  };
 }
 
 export async function upsertQuote(supabase: SupabaseClient, quote: Quote) {
@@ -157,14 +219,20 @@ export async function listContacts(supabase: SupabaseClient): Promise<Contact[]>
   if (error) throw error;
   return (data ?? []).map((row: unknown) => {
     const r = row as Record<string, unknown>;
+    const rawNotes = (r.notes as string) ?? "";
+    const parsed = splitContactNotes(rawNotes);
     return {
       id: r.id as string,
       name: (r.name as string) ?? "",
       phone: (r.phone as string) ?? "",
       email: (r.email as string) ?? "",
       address: (r.address as string) ?? "",
-      notes: (r.notes as string) ?? "",
+      notes: parsed.notes,
       customerType: ((r.customer_type as string) ?? "Homeowner") as Contact["customerType"],
+      leadStage: normalizeLeadStage(parsed.meta.leadStage as string | undefined),
+      leadSource: (parsed.meta.leadSource as string | undefined) ?? "",
+      nextFollowUpAt: (parsed.meta.nextFollowUpAt as string | undefined) ?? "",
+      owner: (parsed.meta.owner as string | undefined) ?? "",
       createdAt: r.created_at as string,
     } as Contact;
   });
@@ -179,7 +247,7 @@ export async function upsertContact(supabase: SupabaseClient, contact: Contact) 
     phone: contact.phone,
     email: contact.email,
     address: contact.address,
-    notes: contact.notes,
+    notes: withContactMeta(contact),
     customer_type: contact.customerType,
   });
   if (error) throw error;

@@ -4,6 +4,7 @@ import {
   CLIENT_CONTRACT_CHECKLIST_IDS,
   isContractChecklistComplete,
 } from "@/lib/proposal-client-portal";
+import { ensureProjectForAcceptedPaidQuote } from "@/lib/proposal-project-workflow";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -87,6 +88,7 @@ export async function POST(
     ...quote,
     selectedOption,
     status: "Accepted",
+    depositStatus: quote.depositStatus ?? "Pending",
     signedAt,
     signedBy: signedName,
   };
@@ -110,9 +112,12 @@ export async function POST(
     return NextResponse.json({ error: insertAcceptError.message }, { status: 500 });
   }
 
-  if (quote.projectId) {
-    await admin.from("projects").update({ status: "Won" }).eq("id", quote.projectId);
-  }
+  await ensureProjectForAcceptedPaidQuote({
+    admin,
+    companyId,
+    quoteId,
+    quote: nextQuote,
+  });
 
   return NextResponse.json({ ok: true, signedAt });
 }

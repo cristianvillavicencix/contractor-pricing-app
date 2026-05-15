@@ -29,6 +29,8 @@ type FormState = {
   riskLevel: RiskLevel;
   notes: string;
 };
+type ContactInput = Omit<Contact, "id" | "createdAt" | "leadStage"> &
+  Partial<Pick<Contact, "leadStage" | "leadSource" | "nextFollowUpAt" | "owner">>;
 
 const initialForm: FormState = {
   projectName: "",
@@ -53,7 +55,7 @@ export function ProjectForm({
 }: {
   onCreate: (project: Project) => void;
   onCancel: () => void;
-  onCreateContact?: (contact: Omit<Contact, "id" | "createdAt">) => Contact;
+  onCreateContact?: (contact: ContactInput) => Contact;
   contacts?: Contact[];
 }) {
   const [form, setForm] = useState<FormState>(initialForm);
@@ -141,6 +143,10 @@ export function ProjectForm({
         address: buildAddress(form),
         notes: "",
         customerType: "Homeowner",
+        leadStage: "Qualified",
+        leadSource: "Project intake",
+        nextFollowUpAt: "",
+        owner: "",
       });
 
     onCreate({

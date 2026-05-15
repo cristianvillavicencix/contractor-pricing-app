@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Copy, ExternalLink, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, Trash2 } from "lucide-react";
 import {
   calculatePricingEngine,
   type PricingEngineInput,
@@ -18,7 +18,6 @@ import {
   stateOptions,
   statusOptions,
   strategyOptions,
-  tradeOptions,
   TYPICAL_COSTS,
   type AppSettings,
   type CostBreakdown,
@@ -26,15 +25,13 @@ import {
   type PricingResult,
   type Project,
   type ProjectSize,
-  type ProjectState,
   type ProjectStatus,
   type RiskLevel,
   type Strategy,
   type Trade,
 } from "@/lib/app-data";
-import { ProjectStatusBadge } from "./project-status-badge";
 
-type Tab = "overview" | "costs" | "quote" | "notes";
+type Tab = "costs" | "proposal" | "notes";
 
 type CoreCostFieldKey = keyof Pick<
   CostBreakdown,
@@ -60,7 +57,8 @@ export function ProjectDetailPanel({
   onUpdateProject,
   onPriceProject: _onPriceProject,
   onCreateQuote,
-  onDuplicateProject,
+  onDuplicateProject: _onDuplicateProject,
+  onOpenContact,
   onDeleteProject,
   quotes = [],
   onPreviewQuote,
@@ -91,16 +89,15 @@ export function ProjectDetailPanel({
     }
   ) => void;
   onDuplicateProject?: (project: Project) => void;
+  onOpenContact?: () => void;
   quotes?: import("@/lib/app-data").Quote[];
   onPreviewQuote?: (quoteId: string) => void;
 }) {
   const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [draftProject, setDraftProject] = useState(project);
-  const [isEditing, setIsEditing] = useState(false);
   const [selectedOption, setSelectedOption] = useState<PriceOptionName>("Better");
   const [message, setMessage] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteQuotesToo, setDeleteQuotesToo] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -265,31 +262,20 @@ export function ProjectDetailPanel({
 
   const result = useMemo(() => calculatePricingEngine(engineInput), [engineInput]);
   const baseCost = getTotalCost(draftProject.costs);
-
-  function updateField<K extends keyof Project>(key: K, value: Project[K]) {
-    setDraftProject((prev) => ({ ...prev, [key]: value }));
-  }
+  const recommendedOption = result.options.find((opt) => opt.recommended) ?? result.options[1];
+  const lastCalculationDate = quotes[0]?.createdAt ?? new Date().toLocaleDateString();
+  const selectedProposalResult =
+    selectedOption === "Good"
+      ? result.options[0]
+      : selectedOption === "Better"
+        ? result.options[1]
+        : result.options[2];
 
   function updateCost(key: CoreCostFieldKey, value: number) {
     setDraftProject((prev) => ({
       ...prev,
       costs: { ...prev.costs, [key]: Number.isFinite(value) ? value : 0 },
     }));
-  }
-
-  function updateTierMaterial(
-    key: "materialsGood" | "materialsBetter" | "materialsBest",
-    value: number | undefined
-  ) {
-    setDraftProject((prev) => {
-      const nextCosts = { ...prev.costs };
-      if (value === undefined || Number.isNaN(value)) {
-        delete nextCosts[key];
-      } else {
-        nextCosts[key] = value;
-      }
-      return { ...prev, costs: nextCosts };
-    });
   }
 
   function saveCosts() {
@@ -304,18 +290,12 @@ export function ProjectDetailPanel({
     setMessage("Costs saved.");
   }
 
-  function saveOverview() {
-    onUpdateProject(draftProject);
-    setIsEditing(false);
-    setMessage("Project saved.");
-  }
-
   function saveNotes() {
     onUpdateProject(draftProject);
     setMessage("Notes saved.");
   }
 
-  function createQuote() {
+  function createProposal() {
     const pricingForQuote: PricingResult[] = result.options.map((opt) => ({
       name: opt.name,
       salePrice: opt.salePrice,
@@ -337,7 +317,7 @@ export function ProjectDetailPanel({
       termsText: mergedSettings.proposalSettings.defaultTerms,
       proposalTitle: mergedSettings.proposalSettings.defaultProposalTitle,
     });
-    setMessage(`${getTierDisplayName(mergedSettings, selectedOption)} quote created.`);
+    setMessage(`${getTierDisplayName(mergedSettings, selectedOption)} proposal created.`);
   }
 
   function updateStatus(status: ProjectStatus) {
@@ -368,22 +348,48 @@ export function ProjectDetailPanel({
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-xl font-semibold tracking-tight">
-                {draftProject.projectName}
-              </h2>
-              <ProjectStatusBadge status={draftProject.status} />
+            <h2 className="text-xl font-semibold tracking-tight text-[#0f172a]">
+              {draftProject.projectName}{" "}
+              <span className="font-normal text-gray-400">|</span>{" "}
+              <span className="text-lg font-medium">{draftProject.status}</span>{" "}
+              <span className="font-normal text-gray-400">|</span>{" "}
+              <span className="text-lg font-medium">{draftProject.trade}</span>
+            </h2>
+            <div className="mt-2 space-y-0.5 text-sm text-gray-600">
+              <p>
+                Contact:{" "}
+                {onOpenContact ? (
+                  <button
+                    type="button"
+                    onClick={onOpenContact}
+                    className="font-semibold text-[var(--brand-accent)] underline underline-offset-2"
+                  >
+                    {draftProject.customerName}
+                  </button>
+                ) : (
+                  <span className="font-medium text-gray-700">{draftProject.customerName}</span>
+                )}
+              </p>
+              <p className="whitespace-nowrap overflow-hidden text-ellipsis">
+                Address: {[draftProject.address, draftProject.city, draftProject.state, draftProject.zipCode].filter(Boolean).join(", ") || "Not set"}
+              </p>
             </div>
-            <p className="mt-1 text-sm text-gray-500">
-              {draftProject.trade} · {draftProject.customerName} · {draftProject.createdAt}
-            </p>
           </div>
-          <button
-            onClick={onClose}
-            className="shrink-0 rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-          >
-            Close
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <label className="sr-only" htmlFor="project-status-select">Project status</label>
+            <select
+              id="project-status-select"
+              value={draftProject.status}
+              onChange={(e) => updateStatus(e.target.value as ProjectStatus)}
+              className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-semibold text-[#213343] outline-none transition hover:bg-[#f6f8fb] focus:border-[#ff5c35]"
+            >
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {message ? (
@@ -396,9 +402,8 @@ export function ProjectDetailPanel({
         <div className="mt-5 flex border-b border-[#d9e2ec]">
           {(
             [
-              { id: "overview", label: "Overview" },
-              { id: "costs", label: "Costs & Pricing" },
-              { id: "quote", label: "Quote" },
+              { id: "costs", label: "Costs" },
+              { id: "proposal", label: "Proposal" },
               { id: "notes", label: "Notes" },
             ] as { id: Tab; label: string }[]
           ).map((tab) => (
@@ -416,438 +421,55 @@ export function ProjectDetailPanel({
           ))}
         </div>
 
-        {/* ── Overview ── */}
-        {activeTab === "overview" && (
-          <div className="mt-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <span />
-              <div className="flex gap-2">
-                {isEditing && (
-                  <button
-                    onClick={() => setIsEditing(false)}
-                    className="rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button
-                  onClick={() => (isEditing ? saveOverview() : setIsEditing(true))}
-                  className="rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                >
-                  {isEditing ? "Save" : "Edit"}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <PanelBlock title="Customer">
-                {isEditing ? (
-                  <div className="space-y-4">
-                    <InputField
-                      label="Name"
-                      value={draftProject.customerName}
-                      onChange={(v) => updateField("customerName", v)}
-                    />
-                    <InputField
-                      label="Phone"
-                      value={draftProject.customerPhone}
-                      onChange={(v) => updateField("customerPhone", v)}
-                    />
-                    <InputField
-                      label="Email"
-                      value={draftProject.customerEmail}
-                      onChange={(v) => updateField("customerEmail", v)}
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <FieldText label="Name" value={draftProject.customerName} />
-                    <FieldText
-                      label="Phone"
-                      value={draftProject.customerPhone || "Not set"}
-                    />
-                    <FieldText
-                      label="Email"
-                      value={draftProject.customerEmail || "Not set"}
-                    />
-                  </>
-                )}
-              </PanelBlock>
-
-              <PanelBlock title="Address">
-                {isEditing ? (
-                  <div className="space-y-4">
-                    <InputField
-                      label="Street"
-                      value={draftProject.address}
-                      onChange={(v) => updateField("address", v)}
-                    />
-                    <InputField
-                      label="City"
-                      value={draftProject.city}
-                      onChange={(v) => updateField("city", v)}
-                    />
-                    <InputField
-                      label="ZIP"
-                      value={draftProject.zipCode}
-                      onChange={(v) => updateField("zipCode", v)}
-                    />
-                    <SelectField
-                      label="State"
-                      value={draftProject.state}
-                      options={stateOptions}
-                      onChange={(v) => updateField("state", v as ProjectState)}
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <FieldText label="Street" value={draftProject.address} />
-                    <FieldText
-                      label="City, State ZIP"
-                      value={`${draftProject.city}, ${draftProject.state} ${draftProject.zipCode}`}
-                    />
-                  </>
-                )}
-              </PanelBlock>
-            </div>
-
-            <div className="border border-[#d9e2ec]/80 p-5">
-              <h3 className="text-sm font-medium">Project Setup</h3>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <InputField
-                  label="Project name"
-                  value={draftProject.projectName}
-                  disabled={!isEditing}
-                  onChange={(v) => updateField("projectName", v)}
-                />
-                <SelectField
-                  label="Trade"
-                  value={draftProject.trade}
-                  options={tradeOptions}
-                  disabled={!isEditing}
-                  onChange={(v) => updateField("trade", v as Trade)}
-                />
-                <SelectField
-                  label="Status"
-                  value={draftProject.status}
-                  options={statusOptions}
-                  disabled={!isEditing}
-                  onChange={(v) => updateField("status", v as ProjectStatus)}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => updateStatus("Won")}
-                className="rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              >
-                Mark as Won
-              </button>
-              <button
-                onClick={() => updateStatus("Lost")}
-                className="rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              >
-                Mark as Lost
-              </button>
-              {onDuplicateProject && (
-                <button
-                  onClick={() => onDuplicateProject(draftProject)}
-                  className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Duplicate
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Costs & Pricing ── */}
+        {/* ── Costs ── */}
         {activeTab === "costs" && (
           <div className="mt-5 space-y-5">
-            {/* Quick cost inputs */}
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Quick Costs
-              </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {costFields.map((field) => (
-                  <MoneyField
-                    key={field.key}
-                    label={field.label}
-                    value={draftProject.costs[field.key]}
-                    onChange={(v) => updateCost(field.key, v)}
-                  />
-                ))}
-              </div>
-              <div className="mt-4 rounded border border-[#d9e2ec]/80 bg-[#fafcfd] px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Per-tier material cost (optional)
-                </p>
-                <p className="mt-1 text-xs text-gray-500">
-                  Leave blank to use the Materials amount for that tier. When set, Good / Better / Best each use their
-                  own material dollars so sale prices reflect different specs.
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <OptionalMoneyField
-                    label={`${getTierDisplayName(mergedSettings, "Good")} materials`}
-                    value={draftProject.costs.materialsGood}
-                    onChange={(v) => updateTierMaterial("materialsGood", v)}
-                  />
-                  <OptionalMoneyField
-                    label={`${getTierDisplayName(mergedSettings, "Better")} materials`}
-                    value={draftProject.costs.materialsBetter}
-                    onChange={(v) => updateTierMaterial("materialsBetter", v)}
-                  />
-                  <OptionalMoneyField
-                    label={`${getTierDisplayName(mergedSettings, "Best")} materials`}
-                    value={draftProject.costs.materialsBest}
-                    onChange={(v) => updateTierMaterial("materialsBest", v)}
-                  />
-                </div>
-              </div>
-              <div className="mt-3 flex items-center justify-between border-t border-[#d9e2ec] pt-3">
-                <span className="text-sm text-gray-500">Base Cost</span>
-                <span className="text-base font-semibold">{formatMoney(baseCost)}</span>
-              </div>
-            </div>
-
-            {/* Advanced options */}
-            <div className="rounded border border-[#d9e2ec]/80">
-              <button
-                onClick={() => setAdvancedOpen((v) => !v)}
-                className="flex w-full items-center justify-between px-5 py-3 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              >
-                <span>Advanced Options</span>
-                {advancedOpen ? (
-                  <ChevronUp className="h-4 w-4 text-gray-400" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-gray-400" />
-                )}
-              </button>
-
-              {advancedOpen && (
-                <div className="border-t border-[#d9e2ec] px-5 py-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <SelectField
-                      label="Overhead Method"
-                      value={overheadMethod}
-                      options={[
-                        "Percentage",
-                        "Flat Per Project",
-                        "Project Duration",
-                        "Ignore For Now",
-                      ]}
-                      onChange={(v) =>
-                        setOverheadMethod(
-                          v as PricingEngineInput["businessCosts"]["overheadAllocationMethod"]
-                        )
-                      }
-                    />
-
-                    <NumberField
-                      label="Minimum Job Price"
-                      value={minimumJobPrice}
-                      onChange={setMinimumJobPrice}
-                    />
-
-                    <NumberField
-                      label="Overhead %"
-                      value={overheadPct}
-                      onChange={setOverheadPct}
-                    />
-
-                    <NumberField
-                      label="Flat Overhead"
-                      value={flatOverhead}
-                      onChange={setFlatOverhead}
-                    />
-
-                    <NumberField
-                      label="Monthly Overhead"
-                      value={monthlyOverhead}
-                      onChange={setMonthlyOverhead}
-                    />
-
-                    <NumberField
-                      label="Billable Days / Month"
-                      value={billableDays}
-                      onChange={setBillableDays}
-                    />
-
-                    <NumberField
-                      label="Project Duration Days"
-                      value={durationDays}
-                      onChange={setDurationDays}
-                    />
-
-                    <NumberField
-                      label="Labor Burden %"
-                      value={laborBurdenPct}
-                      onChange={setLaborBurdenPct}
-                    />
-
-                    <ToggleNumberField
-                      label="Misc Buffer %"
-                      value={miscBufferPct}
-                      enabled={includeMiscBuffer}
-                      onToggle={setIncludeMiscBuffer}
-                      onChange={setMiscBufferPct}
-                    />
-
-                    <NumberField
-                      label="Permit Buffer"
-                      value={permitBuffer}
-                      onChange={setPermitBuffer}
-                    />
-
-                    <ToggleNumberField
-                      label="Commission %"
-                      value={commissionPct}
-                      enabled={includeCommission}
-                      onToggle={setIncludeCommission}
-                      onChange={setCommissionPct}
-                    />
-
-                    <ToggleNumberField
-                      label="Financing Fee %"
-                      value={financingPct}
-                      enabled={includeFinancing}
-                      onToggle={setIncludeFinancing}
-                      onChange={setFinancingPct}
-                    />
-
-                    <ToggleNumberField
-                      label="Credit Card Fee %"
-                      value={ccPct}
-                      enabled={includeCc}
-                      onToggle={setIncludeCc}
-                      onChange={setCcPct}
-                    />
-
-                    <ToggleNumberField
-                      label="Tax %"
-                      value={taxPct}
-                      enabled={includeTax}
-                      onToggle={setIncludeTax}
-                      onChange={setTaxPct}
-                    />
-
-                    <SelectField
-                      label="Risk Level"
-                      value={riskLevel}
-                      options={riskLevelOptions}
-                      onChange={(v) => setRiskLevel(v as RiskLevel)}
-                    />
-
-                    <SelectField
-                      label="Project Size"
-                      value={projectSize}
-                      options={projectSizeOptions}
-                      onChange={(v) => setProjectSize(v as ProjectSize)}
-                    />
-
-                    <SelectField
-                      label="Strategy"
-                      value={strategy}
-                      options={strategyOptions}
-                      onChange={(v) => setStrategy(v as Strategy)}
-                    />
-                  </div>
-                  <p className="mt-3 text-xs text-gray-400">
-                    Defaults loaded from your Settings. Changes here only affect this calculation.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Real-time results */}
             {baseCost > 0 ? (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded border border-[#d9e2ec]/80 p-4">
-                    <p className="text-xs text-gray-500">Breakeven Price</p>
-                    <p className="mt-1 text-lg font-semibold">
-                      {formatMoney(result.breakevenPrice)}
-                    </p>
-                    <p className="mt-1 text-xs text-gray-400">
-                      Includes overhead, burden, buffers, fees.
-                    </p>
-                  </div>
-                  <div className="rounded border border-[#d9e2ec]/80 p-4">
-                    <p className="text-xs text-gray-500">Min Safe Price</p>
-                    <p className="mt-1 text-lg font-semibold">
-                      {formatMoney(result.minimumSafePrice)}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {formatMargin(result.minimumSafeMargin)} min margin
-                    </p>
-                  </div>
+              <div className="rounded border border-[#d9e2ec]/80 bg-[#f8fafd] p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Calculator summary
+                </p>
+                <div className="mt-2 grid gap-2 text-sm sm:grid-cols-3">
+                  <MiniRow label="Last calculation" value={lastCalculationDate} />
+                  <MiniRow
+                    label="Recommended option"
+                    value={getTierDisplayName(mergedSettings, recommendedOption.name)}
+                    strong
+                  />
+                  <MiniRow label="Recommended price" value={formatMoney(recommendedOption.salePrice)} strong />
                 </div>
-
-                <div className="rounded border border-[#d9e2ec]/80 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Cost Protection
-                  </p>
-                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                    <MiniRow label="Labor burden" value={formatMoney(result.laborBurdenCost)} />
-                    <MiniRow label="Overhead" value={formatMoney(result.overheadCost)} />
-                    <MiniRow label="Misc buffer" value={formatMoney(result.bufferCost)} />
-                    <MiniRow label="Permit buffer" value={formatMoney(result.permitBufferCost)} />
-                    <MiniRow label="Tax on Better" value={formatMoney(result.taxCost)} />
-                    <MiniRow label="Total protection" value={formatMoney(result.businessCostTotal)} strong />
-                  </div>
-                </div>
-
-                {/* Pricing cards */}
-                <div className="grid grid-cols-3 gap-3">
-                  {result.options.map((opt) => (
-                    <PricingCard
-                      key={opt.name}
-                      option={opt}
-                      tierLabel={getTierDisplayName(mergedSettings, opt.name)}
-                      selected={selectedOption === opt.name}
-                      onSelect={() => setSelectedOption(opt.name)}
-                    />
-                  ))}
-                </div>
-
-                {/* Project health */}
-                <ProjectHealthBadge
-                  status={result.projectStatus}
-                  reason={result.projectStatusReason}
-                />
-
-                {/* Pricing insight */}
-                <div className="rounded border border-[#d9e2ec]/80 bg-[#f6f8fb] px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Pricing Insight
-                  </p>
-                  <p className="mt-1 text-sm text-gray-600">{pricingInsight}</p>
-                </div>
-              </>
+                <p className="mt-3 text-xs text-gray-500">
+                  Full pricing controls live in Calculator.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => _onPriceProject(draftProject)}
+                  className="mt-3 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                >
+                  Open Calculator
+                </button>
+              </div>
             ) : (
-              <p className="text-sm text-gray-400">
-                Enter costs above to see pricing recommendations.
-              </p>
+              <div className="rounded border border-[#d9e2ec]/80 bg-[#f8fafd] p-4">
+                <p className="text-sm text-gray-500">
+                  No calculator summary yet for this project.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => _onPriceProject(draftProject)}
+                  className="mt-3 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+                >
+                  Open Calculator
+                </button>
+              </div>
             )}
-
-            <TypicalCostHint trade={draftProject.trade} size={projectSize} />
-
-            <button
-              onClick={saveCosts}
-              className="rounded-md bg-[#ff5c35] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
-            >
-              Save Costs
-            </button>
           </div>
         )}
 
-        {/* ── Quote ── */}
-        {activeTab === "quote" && (
+        {/* ── Proposal ── */}
+        {activeTab === "proposal" && (
           <div className="mt-5 space-y-5">
-            {/* Existing quotes for this project */}
+            {/* Existing proposals for this project */}
             {quotes.length > 0 && (
               <div>
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -891,33 +513,44 @@ export function ProjectDetailPanel({
               </div>
             )}
 
-            {/* Create new quote */}
+            {/* Create new proposal */}
             <div>
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                {quotes.length > 0 ? "New Quote" : "Create Quote"}
+                {quotes.length > 0 ? "New Proposal" : "Create Proposal"}
               </p>
               {baseCost === 0 ? (
                 <p className="text-sm text-gray-400">
-                  Add costs in the Costs &amp; Pricing tab first.
+                  Add costs in the Costs tab first.
                 </p>
               ) : (
                 <>
-                  <div className="grid grid-cols-3 gap-3">
-                    {result.options.map((opt) => (
-                      <PricingCard
-                        key={opt.name}
-                        option={opt}
-                        tierLabel={getTierDisplayName(mergedSettings, opt.name)}
-                        selected={selectedOption === opt.name}
-                        onSelect={() => setSelectedOption(opt.name)}
-                      />
-                    ))}
+                  <div className="rounded-lg border border-[#d9e2ec] bg-white p-4">
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Proposal tier
+                      <select
+                        value={selectedOption}
+                        onChange={(e) => setSelectedOption(e.target.value as PriceOptionName)}
+                        className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
+                      >
+                        {result.options.map((opt) => (
+                          <option key={opt.name} value={opt.name}>
+                            {getTierDisplayName(mergedSettings, opt.name)}
+                            {opt.recommended ? " (Recommended)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                      <MiniRow label="Sale Price" value={formatMoney(selectedProposalResult.salePrice)} strong />
+                      <MiniRow label="Profit" value={formatMoney(selectedProposalResult.netProfit)} />
+                      <MiniRow label="Margin" value={formatMargin(selectedProposalResult.margin)} />
+                    </div>
                   </div>
                   <button
-                    onClick={createQuote}
+                    onClick={createProposal}
                     className="mt-4 rounded-md bg-[#ff5c35] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
                   >
-                    Create {getTierDisplayName(mergedSettings, selectedOption)} Quote
+                    Create {getTierDisplayName(mergedSettings, selectedOption)} Proposal
                   </button>
                 </>
               )}
@@ -930,7 +563,7 @@ export function ProjectDetailPanel({
           <div className="mt-5 space-y-4">
             <textarea
               value={draftProject.notes}
-              onChange={(e) => updateField("notes", e.target.value)}
+              onChange={(e) => setDraftProject((prev) => ({ ...prev, notes: e.target.value }))}
               placeholder="Add project notes..."
               className="min-h-48 w-full resize-none rounded-md border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
             />
@@ -966,11 +599,11 @@ export function ProjectDetailPanel({
                   {quotes.length > 0 ? (
                     <>
                       There {quotes.length === 1 ? "is" : "are"}{" "}
-                      <strong>{quotes.length}</strong> quote
+                      <strong>{quotes.length}</strong> proposal
                       {quotes.length === 1 ? "" : "s"} linked to this project.
                     </>
                   ) : (
-                    "No quotes are linked."
+                    "No proposals are linked."
                   )}
                 </p>
                 {quotes.length > 0 ? (
@@ -982,7 +615,7 @@ export function ProjectDetailPanel({
                       className="mt-0.5 rounded border-red-300"
                     />
                     <span>
-                      Also delete {quotes.length === 1 ? "this quote" : "these quotes"} from the
+                      Also delete {quotes.length === 1 ? "this proposal" : "these proposals"} from the
                       database (required to remove the project).
                     </span>
                   </label>
@@ -1164,24 +797,6 @@ function ProjectHealthBadge({
   );
 }
 
-function PanelBlock({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="border border-[#d9e2ec]/80 p-5">
-      <h3 className="text-sm font-medium text-black">{title}</h3>
-      <div className="mt-4 space-y-3">{children}</div>
-    </div>
-  );
-}
-
-function FieldText({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="text-sm">
-      <p className="text-gray-500">{label}</p>
-      <p className="mt-1 font-medium text-black">{value}</p>
-    </div>
-  );
-}
-
 function MiniRow({
   label,
   value,
@@ -1198,30 +813,6 @@ function MiniRow({
         {value}
       </span>
     </div>
-  );
-}
-
-function InputField({
-  label,
-  value,
-  onChange,
-  disabled = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="block text-sm font-medium">
-      {label}
-      <input
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-2 w-full rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm outline-none transition focus:border-[#ff5c35] disabled:bg-[#f6f8fb] disabled:text-gray-500"
-      />
-    </label>
   );
 }
 
@@ -1309,39 +900,6 @@ function MoneyField({
           value={value || ""}
           placeholder="0"
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full rounded-md border border-[#d9e2ec] py-2.5 pl-7 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
-        />
-      </div>
-    </label>
-  );
-}
-
-function OptionalMoneyField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number | undefined;
-  onChange: (v: number | undefined) => void;
-}) {
-  return (
-    <label className="block text-sm font-medium">
-      {label}
-      <div className="relative mt-1.5">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-          $
-        </span>
-        <input
-          type="number"
-          min="0"
-          value={value === undefined ? "" : value}
-          placeholder="Same as Materials"
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === "") onChange(undefined);
-            else onChange(Math.max(0, Number(raw) || 0));
-          }}
           className="w-full rounded-md border border-[#d9e2ec] py-2.5 pl-7 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
         />
       </div>

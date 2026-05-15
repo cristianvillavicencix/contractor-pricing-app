@@ -53,11 +53,11 @@
 }
 
 :root {
-  /* App shell / marketing accents (align onboarding + dashboard) */
-  --brand-accent: #ff5c35;
-  --brand-accent-hover: #e94820;
-  --brand-navy: #213343;
-  --page-bg: #f5f8fa;
+  /* Minimal professional visual system (slate + deep blue) */
+  --brand-accent: #1f3a5f;
+  --brand-accent-hover: #162a45;
+  --brand-navy: #0f172a;
+  --page-bg: #f3f6fa;
 
   --background: oklch(0.973 0.006 235);
   --foreground: oklch(0.255 0.035 245);
@@ -68,7 +68,7 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
 
-  --primary: oklch(0.63 0.17 42);
+  --primary: oklch(0.39 0.06 255);
   --primary-foreground: oklch(1 0 0);
 
   --secondary: oklch(0.965 0.008 235);
@@ -77,24 +77,24 @@
   --muted: oklch(0.955 0.008 235);
   --muted-foreground: oklch(0.53 0.026 245);
 
-  --accent: oklch(0.955 0.04 70);
+  --accent: oklch(0.95 0.012 250);
   --accent-foreground: oklch(0.255 0.035 245);
 
   --destructive: oklch(0.577 0.245 27.325);
 
   --border: oklch(0.885 0.012 235);
   --input: oklch(0.885 0.012 235);
-  --ring: oklch(0.63 0.17 42);
+  --ring: oklch(0.49 0.06 255);
 
-  --radius: 0.25rem;
+  --radius: 0.5rem;
 
   --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.255 0.035 245);
 
-  --sidebar-primary: oklch(0.63 0.17 42);
+  --sidebar-primary: oklch(0.39 0.06 255);
   --sidebar-primary-foreground: oklch(1 0 0);
 
-  --sidebar-accent: oklch(0.955 0.04 70);
+  --sidebar-accent: oklch(0.95 0.012 250);
   --sidebar-accent-foreground: oklch(0.255 0.035 245);
 
   --sidebar-border: oklch(0.885 0.012 235);
@@ -162,13 +162,14 @@
     font-family: var(--font-geist-sans), sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
     text-rendering: optimizeLegibility;
+    line-height: 1.45;
   }
 
   h1,
   h2,
   h3,
   h4 {
-    color: #213343;
+    color: #0f172a;
   }
 
   /* Tighter main column padding when compact mode is on (see `app-compact` on <html>) */
@@ -205,6 +206,32 @@
   select {
     font: inherit;
   }
+
+  /* Professional defaults for app forms/tables */
+  main :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    border-color: #cbd5e1;
+    border-radius: 0.6rem;
+    background: #ffffff;
+  }
+
+  main :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus {
+    border-color: var(--brand-accent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-accent) 16%, white);
+    outline: none;
+  }
+
+  main :where(button) {
+    letter-spacing: 0.01em;
+  }
+
+  main :where(table th) {
+    color: #64748b;
+    font-weight: 600;
+  }
+
+  main :where(table td) {
+    color: #0f172a;
+  }
 }
 
 @layer components {
@@ -227,6 +254,79 @@
    */
   .elevated-panel {
     @apply text-neutral-900;
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.04),
+      0 8px 20px rgba(15, 23, 42, 0.03);
+  }
+
+  /* Unified panel edge tone for a cleaner, serious look */
+  .elevated-panel,
+  .rounded-lg,
+  .rounded-xl {
+    border-color: #d8e2ec;
+  }
+}
+
+@layer utilities {
+  /* Global remap: legacy orange accent -> deep blue accent */
+  [class*="bg-[#ff5c35]"] {
+    background-color: var(--brand-accent) !important;
+  }
+
+  [class*="hover:bg-[#e94820]"]:hover {
+    background-color: var(--brand-accent-hover) !important;
+  }
+
+  [class*="text-[#ff5c35]"] {
+    color: var(--brand-accent) !important;
+  }
+
+  [class*="hover:text-[#e94820]"]:hover {
+    color: var(--brand-accent-hover) !important;
+  }
+
+  [class*="border-[#ff5c35]"] {
+    border-color: var(--brand-accent) !important;
+  }
+
+  [class*="focus:border-[#ff5c35]"]:focus {
+    border-color: var(--brand-accent) !important;
+  }
+
+  [class*="ring-[#ff5c35]"] {
+    --tw-ring-color: color-mix(in oklab, var(--brand-accent) 42%, white) !important;
+  }
+
+  [class*="accent-[#ff5c35]"] {
+    accent-color: var(--brand-accent) !important;
+  }
+
+  [class*="bg-[#fff1ea]"] {
+    background-color: #eef3fb !important;
+  }
+
+  [class*="border-[#d9e2ec]"] {
+    border-color: #d1dbe7 !important;
+  }
+
+  [class*="border-[#e8eef3]"] {
+    border-color: #dbe5f0 !important;
+  }
+
+  [class*="bg-[#f6f8fb]"] {
+    background-color: #f4f7fb !important;
+  }
+
+  [class*="bg-[#f5f8fa]"] {
+    background-color: #f3f6fa !important;
+  }
+
+  [class*="text-[#213343]"] {
+    color: #0f172a !important;
+  }
+
+  [class*="hover:bg-[#f6f8fb]"]:hover {
+    background-color: #eef3f9 !important;
   }
 }
 

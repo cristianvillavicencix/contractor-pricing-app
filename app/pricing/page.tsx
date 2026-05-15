@@ -224,6 +224,8 @@ type ProjectDraft = {
   address: string;
   city: string;
 };
+type ContactInput = Omit<Contact, "id" | "createdAt" | "leadStage"> &
+  Partial<Pick<Contact, "leadStage" | "leadSource" | "nextFollowUpAt" | "owner">>;
 
 const emptyDraft: ProjectDraft = {
   contactId: "",
@@ -406,7 +408,7 @@ function PricingPageInner() {
     setSessionHistory(loadPricingSessionHistory());
   }
 
-  async function saveProject() {
+  async function createProposalOnly() {
     if (!projectDraft.projectName.trim() || !projectDraft.customerName.trim()) {
       setProjectError("Project name and customer name are required.");
       return;
@@ -430,50 +432,24 @@ function PricingPageInner() {
           .join(", "),
         notes: "",
         customerType: "Homeowner",
+        leadStage: "Qualified",
+        leadSource: "Calculator",
+        nextFollowUpAt: "",
+        owner: "",
       });
-    const newProject: Project = {
-      id: crypto.randomUUID(),
-      projectName: projectDraft.projectName.trim(),
-      customerName: projectDraft.customerName.trim(),
-      customerPhone: projectDraft.customerPhone.trim(),
-      customerEmail: projectDraft.customerEmail.trim(),
-      contactId: contact.id,
-      address: projectDraft.address.trim(),
-      city: projectDraft.city.trim(),
-      state: input.setup.state as ProjectState,
-      zipCode: "",
-      trade: input.setup.trade as Trade,
-      projectSize: input.setup.projectSize,
-      riskLevel: input.setup.riskLevel,
-      status: "Pricing",
-      notes: "",
-      costs: {
-        materials: input.costs.material,
-        labor: input.costs.labor,
-        dumpster: input.costs.dumpster,
-        permits: input.costs.permits,
-        equipment: input.costs.equipment,
-        subcontractor: input.costs.subcontractor,
-        miscellaneous: input.costs.miscellaneous,
-      },
-      createdAt: getTodayLabel(),
-    };
     const proposalSelection =
       pendingProposalOption ?? result.options.find((opt) => opt.recommended)?.name ?? "Better";
-    setProjects((prev) => [newProject, ...prev]);
     try {
       await upsertContact(supabase, contact);
-      await upsertProject(supabase, newProject);
     } catch {
-      setProjects((prev) => prev.filter((p) => p.id !== newProject.id));
-      setProjectError("Could not save project. Check your connection and try again.");
+      setProjectError("Could not save contact. Check your connection and try again.");
       return;
     }
     appendPricingSessionHistory({
-      label: `Saved: ${newProject.projectName}`,
+      label: `Proposal: ${projectDraft.projectName.trim()}`,
       input: cloneEngineInput(input),
       projectDraft: { ...projectDraft },
-      sourceProjectId: newProject.id,
+      sourceProjectId: sourceProject?.id ?? null,
     });
     setSessionHistory(loadPricingSessionHistory());
     const pricingForQuote = result.options.map((opt) => ({
@@ -488,16 +464,22 @@ function PricingPageInner() {
     }));
     const quote: Quote = {
       id: crypto.randomUUID(),
-      projectId: newProject.id,
+      projectId: sourceProject?.id,
       contactId: contact.id,
-      projectName: newProject.projectName,
-      customerName: newProject.customerName,
-      customerPhone: newProject.customerPhone,
-      customerEmail: newProject.customerEmail,
-      customerAddress: [newProject.address, newProject.city, newProject.state]
+      projectName: projectDraft.projectName.trim(),
+      customerName: projectDraft.customerName.trim(),
+      customerPhone: projectDraft.customerPhone.trim(),
+      customerEmail: projectDraft.customerEmail.trim(),
+      customerAddress: [projectDraft.address.trim(), projectDraft.city.trim(), input.setup.state]
         .filter((part) => part.trim())
         .join(", "),
-      trade: newProject.trade,
+      trade: input.setup.trade,
+      jobAddress: projectDraft.address.trim(),
+      jobCity: projectDraft.city.trim(),
+      jobState: input.setup.state as ProjectState,
+      jobZipCode: "",
+      projectSize: input.setup.projectSize,
+      riskLevel: input.setup.riskLevel,
       proposalTitle: mergedSettings.proposalSettings.defaultProposalTitle,
       proposalNumber: computeNextProposalNumber(quotes),
       warrantyText: mergedSettings.proposalSettings.defaultWarrantyText,
@@ -508,6 +490,7 @@ function PricingPageInner() {
       best: pricingForQuote[2],
       selectedOption: proposalSelection,
       status: "Draft",
+      depositStatus: "Pending",
       createdAt: getTodayLabel(),
       expiresAt: getExpirationLabel(14),
     };
@@ -519,7 +502,7 @@ function PricingPageInner() {
       return;
     } catch {
       setProjectError(
-        "Project saved, but proposal could not be created. Please try again from Projects."
+        "Could not create proposal. Please try again."
       );
       return;
     }
@@ -562,10 +545,14 @@ function PricingPageInner() {
     setSessionHistory(loadPricingSessionHistory());
   }
 
-  function createContact(contact: Omit<Contact, "id" | "createdAt">) {
+  function createContact(contact: ContactInput) {
     const nextContact: Contact = {
       id: crypto.randomUUID(),
       ...contact,
+      leadStage: contact.leadStage ?? "New",
+      leadSource: contact.leadSource ?? "",
+      nextFollowUpAt: contact.nextFollowUpAt ?? "",
+      owner: contact.owner ?? "",
       createdAt: getTodayLabel(),
     };
     setContacts((current) => [nextContact, ...current]);
@@ -883,7 +870,7 @@ function PricingPageInner() {
         </div>
       </main>
 
-      {/* Create Project Modal */}
+      {/* Create Proposal Modal */}
       {showProjectModal && (
         <div
           onClick={handleAttemptCloseModal}
@@ -895,7 +882,7 @@ function PricingPageInner() {
           >
             <div className="flex items-start justify-between border-b border-[#d9e2ec] px-6 py-5">
               <div>
-                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">Create Project</h3>
+                <h3 className="text-lg font-semibold tracking-tight text-[#213343]">Create Proposal</h3>
                 <p className="mt-0.5 text-sm text-gray-500">
                   {pendingProposalOption
                     ? `Create ${pendingProposalOption} proposal · ${input.setup.trade} · ${input.setup.state} · ${input.setup.projectSize}`
@@ -927,7 +914,7 @@ function PricingPageInner() {
                   ))}
                 </select>
               </label>
-              <ModalField label="Project name *" value={projectDraft.projectName} placeholder="e.g. Roof replacement" onChange={(v) => setProjectDraft((d) => ({ ...d, projectName: v }))} className="sm:col-span-2" />
+              <ModalField label="Proposal title / job name *" value={projectDraft.projectName} placeholder="e.g. Roof replacement" onChange={(v) => setProjectDraft((d) => ({ ...d, projectName: v }))} className="sm:col-span-2" />
               <ModalField label="Customer name *" value={projectDraft.customerName} placeholder="Full name" onChange={(v) => setProjectDraft((d) => ({ ...d, customerName: v }))} />
               <ModalField label="Customer phone" value={projectDraft.customerPhone} placeholder="(000) 000-0000" onChange={(v) => setProjectDraft((d) => ({ ...d, customerPhone: v }))} />
               <ModalField label="Customer email" value={projectDraft.customerEmail} placeholder="email@example.com" onChange={(v) => setProjectDraft((d) => ({ ...d, customerEmail: v }))} />
@@ -971,12 +958,12 @@ function PricingPageInner() {
                 Cancel
               </button>
               <button
-                onClick={() => void saveProject()}
+                onClick={() => void createProposalOnly()}
                 className="rounded-md bg-[#ff5c35] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
               >
                 {pendingProposalOption
                   ? `Create ${pendingProposalOption} Proposal`
-                  : "Create & Go to Projects"}
+                  : "Create Proposal"}
               </button>
             </div>
           </div>

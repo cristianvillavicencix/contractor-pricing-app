@@ -7,7 +7,18 @@ import {
   defaultRoofingGoodTierMaterialsTable,
 } from "./default-roofing-tier-materials";
 
-export type ProjectStatus = "Draft" | "Pricing" | "Quoted" | "Won" | "Lost" | "Archived";
+export type ProjectStatus =
+  | "Draft"
+  | "Pricing"
+  | "Quoted"
+  | "Won"
+  | "Lost"
+  | "Archived"
+  | "Planned"
+  | "In Progress"
+  | "Completed"
+  | "On Hold"
+  | "Cancelled";
 
 export type Trade =
   | "Roofing"
@@ -39,7 +50,21 @@ export type ProjectSize = "Small" | "Medium" | "Large";
 export type RiskLevel = "Low" | "Medium" | "High";
 export type Strategy = "Competitive" | "Balanced" | "Premium";
 export type PriceOptionName = "Good" | "Better" | "Best";
-export type QuoteStatus = "Draft" | "Sent" | "Accepted" | "Declined";
+export type QuoteStatus =
+  | "Draft"
+  | "Sent"
+  | "Viewed"
+  | "Accepted"
+  | "Declined"
+  | "Expired";
+export type PaymentStatus = "Pending" | "Paid" | "Failed" | "Refunded";
+export type LeadStage =
+  | "New"
+  | "Qualified"
+  | "Proposal Sent"
+  | "Negotiation"
+  | "Won"
+  | "Lost";
 export type ProposalCredentialPlacement =
   | "Before Signatures"
   | "After Scope"
@@ -105,6 +130,10 @@ export type Contact = {
   address: string;
   notes: string;
   customerType: "Homeowner" | "Business" | "Property Manager";
+  leadStage: LeadStage;
+  leadSource?: string;
+  nextFollowUpAt?: string;
+  owner?: string;
   createdAt: string;
 };
 
@@ -175,10 +204,20 @@ export type Quote = {
   tierMaterialsTable?: Partial<Record<PriceOptionName, MaterialItem[]>>;
   selectedOption: PriceOptionName;
   status: QuoteStatus;
+  depositStatus?: PaymentStatus;
+  depositPaidAt?: string;
   createdAt: string;
   expiresAt: string;
   signedAt?: string;
   signedBy?: string;
+  projectCreatedAt?: string;
+  projectCreatedFromProposalId?: string;
+  jobAddress?: string;
+  jobCity?: string;
+  jobState?: ProjectState;
+  jobZipCode?: string;
+  projectSize?: ProjectSize;
+  riskLevel?: RiskLevel;
   /** Secret for client link: `/proposal/:id/accept?t=…` (stored in quote JSON). */
   clientPortalToken?: string;
   /** Supabase Storage paths (`proposal-photos`, company-prefixed). */
@@ -442,6 +481,11 @@ export const statusOptions: ProjectStatus[] = [
   "Draft",
   "Pricing",
   "Quoted",
+  "Planned",
+  "In Progress",
+  "Completed",
+  "On Hold",
+  "Cancelled",
   "Won",
   "Lost",
   "Archived",
@@ -449,8 +493,10 @@ export const statusOptions: ProjectStatus[] = [
 export const quoteStatusOptions: QuoteStatus[] = [
   "Draft",
   "Sent",
+  "Viewed",
   "Accepted",
   "Declined",
+  "Expired",
 ];
 
 export const defaultCompanyCredentials: CompanyCredential[] = [
@@ -918,6 +964,10 @@ export const initialContacts: Contact[] = initialProjects.map((project) => ({
   address: `${project.address}, ${project.city}, ${project.state} ${project.zipCode}`,
   notes: `Created from ${project.projectName}.`,
   customerType: "Homeowner",
+  leadStage: "Qualified",
+  leadSource: "Existing customer",
+  nextFollowUpAt: "",
+  owner: "",
   createdAt: project.createdAt,
 }));
 

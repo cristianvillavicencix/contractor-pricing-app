@@ -26,21 +26,30 @@ import {
 } from "@/lib/supabase/data";
 import { t } from "@/lib/ui-strings";
 
+type ProposalsPageCache = {
+  quotes: Quote[];
+  projects: Project[];
+  contacts: Contact[];
+};
+
+let proposalsPageCache: ProposalsPageCache | null = null;
+
 export default function QuotesPage() {
   const router = useRouter();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [quotes, setQuotes] = useState<Quote[]>(() => proposalsPageCache?.quotes ?? []);
+  const [projects, setProjects] = useState<Project[]>(() => proposalsPageCache?.projects ?? []);
+  const [contacts, setContacts] = useState<Contact[]>(() => proposalsPageCache?.contacts ?? []);
+  const [isLoading, setIsLoading] = useState(() => !proposalsPageCache);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"All" | QuoteStatus>("All");
   const [search, setSearch] = useState("");
 
   const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent);
+    const shouldBlock = !silent && !proposalsPageCache;
     if (!silent) {
-      setIsLoading(true);
+      if (shouldBlock) setIsLoading(true);
       setLoadError(null);
     }
     try {
@@ -52,12 +61,17 @@ export default function QuotesPage() {
       setQuotes(dbQuotes);
       setProjects(dbProjects);
       setContacts(dbContacts);
+      proposalsPageCache = {
+        quotes: dbQuotes,
+        projects: dbProjects,
+        contacts: dbContacts,
+      };
     } catch (e) {
       if (!silent) {
-        setLoadError(e instanceof Error ? e.message : "Failed to load quotes");
+        setLoadError(e instanceof Error ? e.message : "Failed to load proposals");
       }
     } finally {
-      if (!silent) {
+      if (shouldBlock) {
         setIsLoading(false);
       }
     }
@@ -160,26 +174,26 @@ export default function QuotesPage() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+          <header className="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
             <div>
-              <p className="page-kicker text-sm font-medium">Quotes</p>
-              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Quotes
+              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Proposals</p>
+              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
+                Proposals
               </h2>
-              <p className="page-description mt-3 max-w-2xl text-sm">
+              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
                 Review and export client-ready proposals from your pricing results.
               </p>
             </div>
 
             <Link
               href="/pricing"
-              className="rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
+              className="rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
             >
               New Pricing
             </Link>
           </header>
 
-          <section className="mt-8 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4">
+          <section className="mt-8 elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row">
               <label className="relative flex-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -187,13 +201,13 @@ export default function QuotesPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by project, customer, or proposal #"
-                  className="w-full rounded-md border border-[#d9e2ec] py-3 pl-11 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
+                  className="w-full rounded-lg border border-[#d9e2ec] py-3.5 pl-11 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
                 />
               </label>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as "All" | QuoteStatus)}
-                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35] sm:w-48"
+                className="rounded-lg border border-[#d9e2ec] bg-white px-4 py-3.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35] sm:w-52"
               >
                 <option value="All">All statuses</option>
                 {quoteStatusOptions.map((status) => (
@@ -235,12 +249,9 @@ export default function QuotesPage() {
                           {expired && (quote.status === "Draft" || quote.status === "Sent") ? (
                             <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Expired</span>
                           ) : null}
-                          <span className={`rounded px-2 py-0.5 text-xs font-medium ${
-                            quote.status === "Accepted" ? "bg-green-50 text-green-700" :
-                            quote.status === "Sent" ? "bg-blue-50 text-blue-700" :
-                            quote.status === "Declined" ? "bg-red-50 text-red-700" :
-                            "bg-gray-100 text-gray-600"
-                          }`}>{quote.status}</span>
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${quoteStatusPill(quote.status)}`}>
+                            {quote.status}
+                          </span>
                         </div>
                       </div>
                       <div className="mt-2.5 flex items-center gap-3 text-sm">
@@ -260,7 +271,7 @@ export default function QuotesPage() {
                             event.stopPropagation();
                             printQuote(quote.id);
                           }}
-                          className="rounded border border-[#d9e2ec] px-3 py-1.5 text-xs font-medium text-[#213343] transition hover:bg-[#f6f8fb]"
+                          className="rounded-md border border-[#d9e2ec] px-3 py-1.5 text-xs font-semibold text-[#213343] transition hover:bg-[#f6f8fb]"
                         >
                           Print
                         </button>
@@ -270,7 +281,7 @@ export default function QuotesPage() {
                             event.stopPropagation();
                             void removeQuote(quote.id);
                           }}
-                          className="rounded border border-[#f0d5d2] px-3 py-1.5 text-xs font-medium text-[#b42318] transition hover:bg-[#fff5f4]"
+                          className="rounded-md border border-[#f0d5d2] px-3 py-1.5 text-xs font-semibold text-[#b42318] transition hover:bg-[#fff5f4]"
                         >
                           Delete
                         </button>
@@ -281,8 +292,8 @@ export default function QuotesPage() {
               </div>
 
               {/* Desktop table */}
-              <div className="hidden overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
-                <div className="grid min-w-290 grid-cols-[1fr_1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.9fr_1.2fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+              <div className="hidden overflow-x-auto elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
+                <div className="grid min-w-290 grid-cols-[1fr_1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.9fr_1.2fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-6 py-3.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">
                   <span>Contact</span>
                   <span>Project</span>
                   <span>Status</span>
@@ -290,7 +301,7 @@ export default function QuotesPage() {
                   <span>Sale Price</span>
                   <span>Profit</span>
                   <span>Margin</span>
-                  <span>Quote</span>
+                  <span>Proposal</span>
                   <span className="text-right">Actions</span>
                 </div>
                 <div className="min-w-290 divide-y divide-gray-100">
@@ -309,11 +320,13 @@ export default function QuotesPage() {
                             openQuoteEditor(quote.id);
                           }
                         }}
-                        className="grid w-full grid-cols-[1fr_1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.9fr_1.2fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                        className="grid w-full grid-cols-[1fr_1fr_0.8fr_0.8fr_0.9fr_0.9fr_0.9fr_1.2fr_1fr] items-center gap-4 px-6 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                       >
                         <span className="truncate text-gray-700">{findQuoteContactName(quote, contacts)}</span>
                         <span className="truncate text-gray-700">{findQuoteProjectName(quote, projects)}</span>
-                        <span className="text-gray-600">{quote.status}</span>
+                        <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${quoteStatusPill(quote.status)}`}>
+                          {quote.status}
+                        </span>
                         <span>{quote.selectedOption}</span>
                         <span className="font-medium">{formatMoney(selected.salePrice)}</span>
                         <span>{formatMoney(selected.profit)}</span>
@@ -337,7 +350,7 @@ export default function QuotesPage() {
                               event.stopPropagation();
                               printQuote(quote.id);
                             }}
-                            className="rounded border border-[#d9e2ec] px-2.5 py-1 text-[11px] font-medium text-[#213343] transition hover:bg-[#f6f8fb]"
+                            className="rounded-md border border-[#d9e2ec] px-2.5 py-1 text-[11px] font-medium text-[#213343] transition hover:bg-[#f6f8fb]"
                           >
                             Print
                           </button>
@@ -347,7 +360,7 @@ export default function QuotesPage() {
                               event.stopPropagation();
                               void removeQuote(quote.id);
                             }}
-                            className="rounded border border-[#f0d5d2] px-2.5 py-1 text-[11px] font-medium text-[#b42318] transition hover:bg-[#fff5f4]"
+                            className="rounded-md border border-[#f0d5d2] px-2.5 py-1 text-[11px] font-medium text-[#b42318] transition hover:bg-[#fff5f4]"
                           >
                             Delete
                           </button>
@@ -361,7 +374,7 @@ export default function QuotesPage() {
           ) : (
             <section className="mt-6 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-10 text-center">
               <p className="text-lg font-semibold tracking-tight">
-                {quotes.length === 0 ? t("emptyQuotes") : "No quotes match filters"}
+                {quotes.length === 0 ? t("emptyQuotes") : "No proposals match filters"}
               </p>
               <p className="mt-2 text-sm text-gray-500">
                 {quotes.length === 0 ? t("emptyQuotesHint") : "Try another search or status."}
@@ -369,9 +382,9 @@ export default function QuotesPage() {
               {quotes.length === 0 ? (
                 <Link
                   href="/projects"
-                  className="mt-4 inline-block text-sm font-medium text-[var(--brand-accent)] hover:underline"
+                  className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
                 >
-                  Go to projects →
+                  Go to projects
                 </Link>
               ) : null}
             </section>
@@ -415,6 +428,15 @@ function isExpired(quote: Quote) {
   if (!quote.expiresAt) return false;
   const expiry = new Date(quote.expiresAt);
   return expiry < new Date();
+}
+
+function quoteStatusPill(status: QuoteStatus) {
+  if (status === "Accepted") return "bg-green-50 text-green-700";
+  if (status === "Sent") return "bg-blue-50 text-blue-700";
+  if (status === "Viewed") return "bg-indigo-50 text-indigo-700";
+  if (status === "Declined") return "bg-red-50 text-red-700";
+  if (status === "Expired") return "bg-amber-50 text-amber-700";
+  return "bg-gray-100 text-gray-600";
 }
 
 function samePhone(left: string, right: string) {

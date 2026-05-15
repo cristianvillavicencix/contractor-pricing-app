@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { Building2, Mail, MapPin, Pencil, Phone, Plus, Trash2, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import {
@@ -33,15 +33,27 @@ const emptyContact: ContactForm = {
   address: "",
   notes: "",
   customerType: "Homeowner",
+  leadStage: "New",
+  leadSource: "",
+  nextFollowUpAt: "",
+  owner: "",
 };
+
+type ContactsPageCache = {
+  contacts: Contact[];
+  projects: Project[];
+  quotes: Quote[];
+};
+
+let contactsPageCache: ContactsPageCache | null = null;
 
 export default function ContactsPage() {
   const router = useRouter();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [contacts, setContacts] = useState<Contact[]>(() => contactsPageCache?.contacts ?? []);
+  const [projects, setProjects] = useState<Project[]>(() => contactsPageCache?.projects ?? []);
+  const [quotes, setQuotes] = useState<Quote[]>(() => contactsPageCache?.quotes ?? []);
+  const [isLoading, setIsLoading] = useState(() => !contactsPageCache);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ContactForm>(emptyContact);
@@ -56,8 +68,9 @@ export default function ContactsPage() {
 
   const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent);
+    const shouldBlock = !silent && !contactsPageCache;
     if (!silent) {
-      setIsLoading(true);
+      if (shouldBlock) setIsLoading(true);
       setLoadError(null);
     }
     try {
@@ -69,12 +82,17 @@ export default function ContactsPage() {
       setContacts(dbContacts);
       setProjects(dbProjects);
       setQuotes(dbQuotes);
+      contactsPageCache = {
+        contacts: dbContacts,
+        projects: dbProjects,
+        quotes: dbQuotes,
+      };
     } catch (e) {
       if (!silent) {
         setLoadError(e instanceof Error ? e.message : "Failed to load");
       }
     } finally {
-      if (!silent) {
+      if (shouldBlock) {
         setIsLoading(false);
       }
     }
@@ -185,15 +203,15 @@ export default function ContactsPage() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+          <header className="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
             <div>
-              <p className="page-kicker text-sm font-medium">Contacts</p>
-              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Contacts</p>
+              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
                 Contacts
               </h2>
-              <p className="page-description mt-3 max-w-2xl text-sm">
+              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
                 Store basic customer information before connecting projects and
-                quotes to a full CRM later.
+                proposals to a full CRM later.
               </p>
             </div>
             <button
@@ -203,7 +221,7 @@ export default function ContactsPage() {
                 setError("");
                 setShowCreateDrawer(true);
               }}
-              className="inline-flex items-center gap-2 rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
+              className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
             >
               <Plus className="h-4 w-4" />
               Create Contact
@@ -216,7 +234,7 @@ export default function ContactsPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search contacts"
-                className="w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+                className="w-full rounded-lg border border-[#d9e2ec] px-4 py-3.5 text-sm outline-none transition focus:border-[#ff5c35]"
               />
 
               {/* Mobile cards */}
@@ -243,26 +261,32 @@ export default function ContactsPage() {
               </div>
 
               {/* Desktop table */}
-              <div className="mt-5 hidden overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
-                <div className="grid min-w-190 grid-cols-[1.2fr_1.5fr_0.9fr_1fr_1.3fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+              <div className="mt-5 hidden overflow-x-auto elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600 sm:block">
+                <div className="grid min-w-220 grid-cols-[1.1fr_1.4fr_0.8fr_1fr_0.9fr_1.2fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-6 py-3.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">
                   <span>Name</span>
                   <span>Address</span>
+                  <span>Lead</span>
                   <span>Type</span>
                   <span>Phone</span>
                   <span>Email</span>
                 </div>
-                <div className="min-w-190 divide-y divide-gray-100">
+                <div className="min-w-220 divide-y divide-gray-100">
                   {filteredContacts.map((contact) => (
                     <button
                       key={contact.id}
                       onClick={() => setSelectedContactId(contact.id)}
-                      className="grid w-full grid-cols-[1.2fr_1.5fr_0.9fr_1fr_1.3fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                      className="grid w-full grid-cols-[1.1fr_1.4fr_0.8fr_1fr_0.9fr_1.2fr] items-center gap-4 px-6 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                     >
                       <div className="min-w-0">
                         <p className="truncate font-medium text-black">{contact.name}</p>
                       </div>
                       <span className="truncate text-gray-600">{contact.address || "No address"}</span>
-                      <span>{contact.customerType}</span>
+                      <span className="inline-flex w-fit rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                        {contact.leadStage}
+                      </span>
+                      <span className="inline-flex w-fit rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        {contact.customerType}
+                      </span>
                       <span className="text-gray-600">{contact.phone || "No phone"}</span>
                       <span className="truncate text-gray-600">{contact.email || "No email"}</span>
                     </button>
@@ -280,6 +304,19 @@ export default function ContactsPage() {
                       ? t("emptyContactsHint")
                       : "Try a different search."}
                   </p>
+                  {contacts.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm(emptyContact);
+                        setError("");
+                        setShowCreateDrawer(true);
+                      }}
+                      className="mt-4 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
+                    >
+                      Create your first contact
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -336,6 +373,41 @@ export default function ContactsPage() {
                 onChange={(value) => setForm({ ...form, address: value })}
               />
               <label className="block text-sm font-medium">
+                Lead stage
+                <select
+                  value={form.leadStage}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      leadStage: event.target.value as Contact["leadStage"],
+                    })
+                  }
+                  className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
+                >
+                  <option>New</option>
+                  <option>Qualified</option>
+                  <option>Proposal Sent</option>
+                  <option>Negotiation</option>
+                  <option>Won</option>
+                  <option>Lost</option>
+                </select>
+              </label>
+              <TextField
+                label="Lead source"
+                value={form.leadSource ?? ""}
+                onChange={(value) => setForm({ ...form, leadSource: value })}
+              />
+              <TextField
+                label="Owner"
+                value={form.owner ?? ""}
+                onChange={(value) => setForm({ ...form, owner: value })}
+              />
+              <TextField
+                label="Next follow-up"
+                value={form.nextFollowUpAt ?? ""}
+                onChange={(value) => setForm({ ...form, nextFollowUpAt: value })}
+              />
+              <label className="block text-sm font-medium">
                 Customer Type
                 <select
                   value={form.customerType}
@@ -376,7 +448,7 @@ export default function ContactsPage() {
               </button>
               <button
                 onClick={createContact}
-                className="rounded-md bg-[#ff5c35] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820]"
+                className="rounded-lg bg-[#ff5c35] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
               >
                 Create Contact
               </button>
@@ -395,7 +467,7 @@ export default function ContactsPage() {
           onUpdate={updateContact}
           onDelete={() => deleteContact(selectedContact.id)}
           onOpenProject={(projectId) =>
-            router.push(`/projects?projectId=${projectId}&projectTab=overview`)
+            router.push(`/projects?projectId=${projectId}&projectTab=costs`)
           }
           onOpenQuote={(quoteId) => router.push(`/quotes/preview?id=${quoteId}`)}
         />
@@ -425,6 +497,7 @@ function ContactDetailPanel({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<Contact>(contact);
+  const [recordsTab, setRecordsTab] = useState<"projects" | "proposals">("projects");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteWorking, setDeleteWorking] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
@@ -445,13 +518,21 @@ function ContactDetailPanel({
         className="elevated-panel ml-auto h-full w-full overflow-auto border-l border-[#d9e2ec] bg-white p-5 sm:p-6 dark:border-slate-600 lg:w-1/2"
       >
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-2xl font-semibold tracking-tight">
-              {contact.name}
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              {contact.customerType} · created {contact.createdAt}
-            </p>
+          <div className="min-w-0">
+            <div className="min-w-0">
+              <h3 className="truncate text-2xl font-semibold tracking-tight">
+                {contact.name}
+              </h3>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[#e6f4ea] px-2.5 py-0.5 text-xs font-semibold text-[#067647]">
+                  {contact.customerType}
+                </span>
+              <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                {contact.leadStage}
+              </span>
+                <span className="text-xs text-gray-500">Created {contact.createdAt}</span>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -476,6 +557,24 @@ function ContactDetailPanel({
             <TextField label="Phone" value={draft.phone} onChange={(v) => setDraft({ ...draft, phone: v })} />
             <TextField label="Email" value={draft.email} onChange={(v) => setDraft({ ...draft, email: v })} />
             <TextField label="Address" value={draft.address} onChange={(v) => setDraft({ ...draft, address: v })} />
+            <label className="block text-sm font-medium">
+              Lead stage
+              <select
+                value={draft.leadStage}
+                onChange={(e) => setDraft({ ...draft, leadStage: e.target.value as Contact["leadStage"] })}
+                className="mt-2 w-full rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
+              >
+                <option>New</option>
+                <option>Qualified</option>
+                <option>Proposal Sent</option>
+                <option>Negotiation</option>
+                <option>Won</option>
+                <option>Lost</option>
+              </select>
+            </label>
+            <TextField label="Lead source" value={draft.leadSource ?? ""} onChange={(v) => setDraft({ ...draft, leadSource: v })} />
+            <TextField label="Owner" value={draft.owner ?? ""} onChange={(v) => setDraft({ ...draft, owner: v })} />
+            <TextField label="Next follow-up" value={draft.nextFollowUpAt ?? ""} onChange={(v) => setDraft({ ...draft, nextFollowUpAt: v })} />
             <label className="block text-sm font-medium">
               Customer Type
               <select
@@ -512,11 +611,35 @@ function ContactDetailPanel({
             </div>
           </section>
         ) : (
-          <section className="mt-8 grid gap-4 sm:grid-cols-2">
-            <DetailBlock label="Phone" value={contact.phone || "No phone"} />
-            <DetailBlock label="Email" value={contact.email || "No email"} />
-            <DetailBlock label="Address" value={contact.address || "No address"} />
-            <DetailBlock label="Customer type" value={contact.customerType} />
+          <section className="mt-6 space-y-3">
+              <ContactInfoRow
+                icon={<Building2 className="h-4 w-4 text-gray-400" />}
+                value={contact.customerType}
+              />
+              <ContactInfoRow
+                icon={<Building2 className="h-4 w-4 text-gray-400" />}
+                value={`Lead: ${contact.leadStage}`}
+              />
+              <ContactInfoRow
+                icon={<Building2 className="h-4 w-4 text-gray-400" />}
+                value={`Owner: ${contact.owner || "Unassigned"}`}
+              />
+              <ContactInfoRow
+                icon={<Building2 className="h-4 w-4 text-gray-400" />}
+                value={`Follow-up: ${contact.nextFollowUpAt || "Not set"}`}
+              />
+              <ContactInfoRow
+                icon={<Mail className="h-4 w-4 text-gray-400" />}
+                value={contact.email || "No email"}
+              />
+              <ContactInfoRow
+                icon={<Phone className="h-4 w-4 text-gray-400" />}
+                value={contact.phone || "No phone"}
+              />
+              <ContactInfoRow
+                icon={<MapPin className="h-4 w-4 text-gray-400" />}
+                value={contact.address || "No address"}
+              />
           </section>
         )}
 
@@ -530,93 +653,99 @@ function ContactDetailPanel({
         )}
 
         <section className="mt-4 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-black">
-                Connected Projects
-              </p>
-              <p className="mt-1 text-sm text-gray-500">
-                Projects assigned or matched to this customer.
-              </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex rounded-md border border-[#d9e2ec] bg-white p-1">
+              <button
+                type="button"
+                onClick={() => setRecordsTab("projects")}
+                className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                  recordsTab === "projects"
+                    ? "bg-[#213343] text-white"
+                    : "text-gray-600 hover:bg-[#f6f8fb]"
+                }`}
+              >
+                Projects ({projects.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecordsTab("proposals")}
+                className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                  recordsTab === "proposals"
+                    ? "bg-[#213343] text-white"
+                    : "text-gray-600 hover:bg-[#f6f8fb]"
+                }`}
+              >
+                Proposals ({quotes.length})
+              </button>
             </div>
-            <span className="rounded-md border border-[#d9e2ec] px-3 py-1 text-xs text-gray-600">
-              {projects.length}
-            </span>
+            <p className="text-xs text-gray-500">
+              {recordsTab === "projects"
+                ? "Projects assigned or matched to this customer."
+                : "Proposals created for this customer."}
+            </p>
           </div>
 
-          <div className="mt-4 divide-y divide-gray-100">
-            {projects.length > 0 ? (
-              projects.map((project) => (
-                <button
-                  key={project.id}
-                  onClick={() => onOpenProject(project.id)}
-                  className="grid w-full gap-3 py-4 text-left text-sm transition hover:bg-[#f6f8fb] sm:grid-cols-[1.4fr_1fr_1fr]"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-black">
-                      {project.projectName}
-                    </p>
-                    <p className="mt-1 truncate text-gray-500">
-                      {project.address}, {project.city}
-                    </p>
-                  </div>
-                  <span className="text-gray-600">{project.trade}</span>
-                  <span className="font-medium">{project.status}</span>
-                </button>
-              ))
-            ) : (
-              <p className="py-6 text-sm text-gray-500">
-                No connected projects yet.
-              </p>
-            )}
-          </div>
-        </section>
-
-        <section className="mt-4 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-black">
-                Connected Quotes
-              </p>
-              <p className="mt-1 text-sm text-gray-500">
-                Quotes created for this customer.
-              </p>
-            </div>
-            <span className="rounded-md border border-[#d9e2ec] px-3 py-1 text-xs text-gray-600">
-              {quotes.length}
-            </span>
-          </div>
-
-          <div className="mt-4 divide-y divide-gray-100">
-            {quotes.length > 0 ? (
-              quotes.map((quote) => {
-                const selected = getSelectedQuote(quote);
-                return (
+          {recordsTab === "projects" ? (
+            <div className="mt-4 divide-y divide-gray-100">
+              {projects.length > 0 ? (
+                projects.map((project) => (
                   <button
-                    key={quote.id}
-                    onClick={() => onOpenQuote(quote.id)}
-                    className="grid w-full gap-3 py-4 text-left text-sm transition hover:bg-[#f6f8fb] sm:grid-cols-[1.3fr_1fr_1fr_1fr]"
+                    key={project.id}
+                    onClick={() => onOpenProject(project.id)}
+                    className="grid w-full gap-3 py-4 text-left text-sm transition hover:bg-[#f6f8fb] sm:grid-cols-[1.4fr_1fr_1fr]"
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-black">
-                        {quote.projectName}
+                        {project.projectName}
                       </p>
-                      <p className="mt-1 text-gray-500">
-                        {quote.selectedOption} · {quote.status}
+                      <p className="mt-1 truncate text-gray-500">
+                        {project.address}, {project.city}
                       </p>
                     </div>
-                    <span>{formatMoney(selected.salePrice)}</span>
-                    <span>{formatMoney(selected.profit)}</span>
-                    <span>{formatMargin(selected.margin)}</span>
+                    <span className="text-gray-600">{project.trade}</span>
+                    <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${projectStatusPill(project.status)}`}>
+                      {project.status}
+                    </span>
                   </button>
-                );
-              })
-            ) : (
-              <p className="py-6 text-sm text-gray-500">
-                No connected quotes yet.
-              </p>
-            )}
-          </div>
+                ))
+              ) : (
+                <p className="py-6 text-sm text-gray-500">
+                  No connected projects yet.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="mt-4 divide-y divide-gray-100">
+              {quotes.length > 0 ? (
+                quotes.map((quote) => {
+                  const selected = getSelectedQuote(quote);
+                  return (
+                    <button
+                      key={quote.id}
+                      onClick={() => onOpenQuote(quote.id)}
+                      className="grid w-full gap-3 py-4 text-left text-sm transition hover:bg-[#f6f8fb] sm:grid-cols-[1.3fr_1fr_1fr_1fr]"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-black">
+                          {quote.projectName}
+                        </p>
+                        <p className="mt-1 text-gray-500">
+                          {quote.selectedOption} · {quote.status}
+                        </p>
+                      </div>
+                      <span>{formatMoney(selected.salePrice)}</span>
+                      <span>{formatMoney(selected.profit)}</span>
+                      <span>{formatMargin(selected.margin)}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="py-6 text-sm text-gray-500">
+                  No connected proposals yet.
+                </p>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Delete contact */}
@@ -631,7 +760,7 @@ function ContactDetailPanel({
                   jobs).
                 </li>
                 <li>
-                  <strong>{quotes.length}</strong> quote
+                  <strong>{quotes.length}</strong> proposal
                   {quotes.length === 1 ? "" : "s"} stay in the app; open each proposal if you need to
                   change the customer link.
                 </li>
@@ -733,11 +862,23 @@ function samePhone(left: string, right: string) {
   return digits(left) === digits(right) && digits(left).length > 0;
 }
 
-function DetailBlock({ label, value }: { label: string; value: string }) {
+function projectStatusPill(status: Project["status"]) {
+  if (status === "Planned") return "bg-blue-50 text-blue-700";
+  if (status === "In Progress") return "bg-indigo-50 text-indigo-700";
+  if (status === "Completed") return "bg-green-50 text-green-700";
+  if (status === "On Hold") return "bg-amber-50 text-amber-700";
+  if (status === "Cancelled") return "bg-red-50 text-red-700";
+  if (status === "Won") return "bg-green-50 text-green-700";
+  if (status === "Lost") return "bg-red-50 text-red-700";
+  if (status === "Quoted") return "bg-blue-50 text-blue-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function ContactInfoRow({ icon, value }: { icon: React.ReactNode; value: string }) {
   return (
-    <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 text-sm">
-      <p className="text-gray-500">{label}</p>
-      <p className="mt-2 font-medium text-black">{value}</p>
+    <div className="flex items-center gap-2 text-sm text-gray-700">
+      {icon}
+      <span>{value}</span>
     </div>
   );
 }

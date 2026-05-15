@@ -250,10 +250,10 @@ function SettingsPageInner() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <header className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 lg:max-w-[min(100%,42rem)]">
-              <p className="page-kicker text-sm font-medium">Settings</p>
-              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Settings</p>
+              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
                 Settings
               </h2>
               <p className="page-description mt-3 max-w-3xl text-sm leading-6">
@@ -264,14 +264,14 @@ function SettingsPageInner() {
 
             <div className="relative flex w-full flex-wrap items-center justify-end gap-3 lg:w-auto lg:flex-shrink-0">
               {hasUnsavedChanges ? (
-                <span className="rounded-md border border-[#d9e2ec] px-3 py-2 text-xs font-medium text-gray-600 dark:border-slate-600 dark:text-slate-300">
+                <span className="rounded-lg border border-[#d9e2ec] px-3 py-2 text-xs font-semibold text-gray-600 dark:border-slate-600 dark:text-slate-300">
                   Unsaved changes
                 </span>
               ) : null}
               <button
                 type="button"
                 onClick={() => setSettingsConnectionsInfoOpen((o) => !o)}
-                className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-gray-500 transition hover:bg-[#f6f8fb] hover:text-[#213343] dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 ${
+                className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border text-gray-500 transition hover:bg-[#f6f8fb] hover:text-[#213343] dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 ${
                   settingsConnectionsInfoOpen
                     ? "border-[#ff5c35] bg-[#fff1ea] text-[#ff5c35]"
                     : "border-[#d9e2ec]"
@@ -321,13 +321,7 @@ function SettingsPageInner() {
                     </ul>
                     <p className="mt-3 border-t border-[#eef2f6] pt-3 text-xs text-gray-500">
                       Open{" "}
-                      <Link
-                        href="/quotes"
-                        className="font-medium text-[#ff5c35] underline hover:text-[#e94820]"
-                        onClick={() => setSettingsConnectionsInfoOpen(false)}
-                      >
-                        Quotes
-                      </Link>{" "}
+                      <Link href="/quotes" className="font-semibold text-[var(--brand-accent)] underline" onClick={() => setSettingsConnectionsInfoOpen(false)}>Proposals</Link>{" "}
                       → Preview to see this live.
                     </p>
                   </div>
@@ -335,14 +329,14 @@ function SettingsPageInner() {
               ) : null}
               <button
                 onClick={resetSettings}
-                className="inline-flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3 text-sm font-medium text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
+                className="inline-flex items-center gap-2 rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
               >
                 <RotateCcw className="h-4 w-4" />
                 Reset
               </button>
               <button
                 onClick={saveSettings}
-                className={`inline-flex items-center gap-2 rounded-md px-4 py-3 text-sm font-medium text-white transition-all duration-300 ${
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 ${
                   saveStatus === "saved"
                     ? "bg-[#16a34a] hover:bg-[#15803d]"
                     : "bg-[#ff5c35] hover:bg-[#e94820]"
@@ -370,16 +364,16 @@ function SettingsPageInner() {
           ) : null}
 
           <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
-            <aside className="elevated-panel h-fit rounded-lg border border-[#d9e2ec] bg-white p-2 dark:border-slate-600">
+            <aside className="elevated-panel h-fit rounded-xl border border-[#d9e2ec] bg-white p-2 dark:border-slate-600">
               <div className="space-y-0.5">
                 {SETTINGS_NAV_ITEMS.map((item) => (
                   <button
                     key={item}
                     type="button"
                     onClick={() => setActiveSection(item)}
-                    className={`w-full rounded-md px-4 py-2.5 text-left text-sm transition ${
+                    className={`w-full rounded-lg px-4 py-2.5 text-left text-sm transition ${
                       activeSection === item
-                        ? "bg-[#fff1ea] font-medium text-[#213343]"
+                        ? "bg-[#eef3fb] font-semibold text-[#213343]"
                         : "text-gray-500 hover:bg-[#f6f8fb] hover:text-black"
                     }`}
                   >

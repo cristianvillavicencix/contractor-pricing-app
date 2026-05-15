@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
-  Copy,
   Download,
   Edit3,
   ExternalLink,
@@ -35,10 +34,12 @@ import {
   getEnabledCompanyCredentials,
   getTierMaterialSummaries,
   mergeAppSettings,
+  quoteStatusOptions,
   type AppSettings,
   type PriceOptionName,
   type Project,
   type Quote,
+  type QuoteStatus,
 } from "@/lib/app-data";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
@@ -934,10 +935,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
         <div className="text-center">
-          <p className="text-lg font-semibold text-[#b42318]">Failed to load quote</p>
+          <p className="text-lg font-semibold text-[#b42318]">Failed to load proposal</p>
           <p className="mt-2 text-sm text-gray-500">{loadError}</p>
-          <Link href="/quotes" className="mt-3 block text-sm text-[#ff5c35] underline">
-            Back to Quotes
+          <Link href="/quotes" className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]">
+            Back to Proposals
           </Link>
         </div>
       </div>
@@ -946,7 +947,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   if (blockingState === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
-        Loading quote…
+        Loading proposal…
       </div>
     );
   }
@@ -954,9 +955,9 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
         <div className="text-center">
-          <p className="text-lg font-semibold">Quote not found</p>
-          <Link href="/quotes" className="mt-3 block text-sm text-[#ff5c35] underline">
-            Back to Quotes
+          <p className="text-lg font-semibold">Proposal not found</p>
+          <Link href="/quotes" className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]">
+            Back to Proposals
           </Link>
         </div>
       </div>
@@ -970,22 +971,40 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   return (
     <div className="h-screen overflow-hidden bg-[#f5f8fa] text-[#213343]">
       {/* Toolbar */}
-      <div className="print:hidden sticky top-0 z-10 border-b border-[#d9e2ec] bg-white">
+      <div className="print:hidden sticky top-0 z-10 border-b border-[#d9e2ec] bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4 px-5 py-3 sm:px-8">
           <Link
             href="/quotes"
-            className="flex items-center gap-2 text-sm font-medium text-gray-500 transition hover:text-black"
+            className="flex items-center gap-2 text-sm font-semibold text-gray-500 transition hover:text-black"
           >
             <ArrowLeft className="h-4 w-4" />
-            Quotes
+            Proposals
           </Link>
           <p className="hidden text-sm text-gray-500 sm:block">
             {doc.proposalNumber} · {quote.customerName}
           </p>
           <div className="flex flex-wrap gap-2">
+            <label className="inline-flex items-center gap-2 rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-semibold text-gray-600">
+              <span>Status</span>
+              <select
+                value={quote.status}
+                onChange={(event) => {
+                  const nextStatus = event.target.value as QuoteStatus;
+                  setQuote((current) => (current ? { ...current, status: nextStatus } : current));
+                  setIsDirty(true);
+                }}
+                className="rounded border border-[#d9e2ec] bg-white px-2 py-1 text-xs text-[#213343] outline-none focus:border-[var(--brand-accent)]"
+              >
+                {quoteStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               onClick={handleSave}
-              className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition ${
+              className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${
                 isSaved
                   ? "border-green-200 bg-green-50 text-green-700"
                   : isDirty
@@ -1002,34 +1021,8 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               </span>
             </button>
             <button
-              type="button"
-              onClick={() => {
-                setTemplateEditorDraft(null);
-                setShowTemplateEditor(true);
-              }}
-              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              title="Edit proposal template for this quote’s trade"
-            >
-              <Edit3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Edit Template</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!proposalTemplate) return;
-                setDuplicateTemplateTradeName(`${proposalTemplate.trade} (copy)`);
-                setDuplicateTemplateError("");
-                setShowDuplicateTemplateModal(true);
-              }}
-              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
-              title="Save a copy of this template under another trade (e.g. Commercial Roofing)"
-            >
-              <Copy className="h-4 w-4" />
-              <span className="hidden sm:inline">Duplicate</span>
-            </button>
-            <button
               onClick={handlePrint}
-              className="flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2 text-sm font-medium transition hover:bg-[#f6f8fb]"
+              className="flex items-center gap-2 rounded-lg border border-[#d9e2ec] px-4 py-2 text-sm font-semibold transition hover:bg-[#f6f8fb]"
             >
               <Printer className="h-4 w-4" />
               <span className="hidden sm:inline">Print</span>
@@ -1037,7 +1030,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
             <button
               onClick={handleDownload}
               disabled={isDownloading}
-              className="flex items-center gap-2 rounded-md bg-[#111111] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#333333] disabled:opacity-60"
+              className="flex items-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)] disabled:opacity-60"
             >
               <Download className="h-4 w-4" />
               <span className="hidden sm:inline">
@@ -1052,13 +1045,13 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       <div className="print:hidden sticky top-16.25 z-10 flex border-b border-[#d9e2ec] bg-white lg:hidden">
         <button
           onClick={() => setMobileTab("preview")}
-          className={`flex-1 py-2.5 text-sm font-medium transition ${mobileTab === "preview" ? "border-b-2 border-[#ff5c35] text-[#213343]" : "text-gray-400"}`}
+          className={`flex-1 py-3 text-sm font-semibold transition ${mobileTab === "preview" ? "border-b-2 border-[var(--brand-accent)] text-[#213343]" : "text-gray-400"}`}
         >
           Preview
         </button>
         <button
           onClick={() => setMobileTab("edit")}
-          className={`flex-1 py-2.5 text-sm font-medium transition ${mobileTab === "edit" ? "border-b-2 border-[#ff5c35] text-[#213343]" : "text-gray-400"}`}
+          className={`flex-1 py-3 text-sm font-semibold transition ${mobileTab === "edit" ? "border-b-2 border-[var(--brand-accent)] text-[#213343]" : "text-gray-400"}`}
         >
           Edit
         </button>
@@ -2127,7 +2120,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                         }
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`flex items-center justify-center gap-2 rounded border border-[#ff5c35] px-3 py-2 text-xs font-medium text-[#ff5c35] transition hover:bg-[#fff1ea] ${!quote.clientPortalToken ? "pointer-events-none opacity-50" : ""}`}
+                        className={`flex items-center justify-center gap-2 rounded-lg border border-[#ff5c35] px-3 py-2 text-xs font-semibold text-[#ff5c35] transition hover:bg-[#fff1ea] ${!quote.clientPortalToken ? "pointer-events-none opacity-50" : ""}`}
                         aria-disabled={!quote.clientPortalToken}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -2152,7 +2145,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                       <button
                         type="button"
                         onClick={() => removeCustomSection(custom.id)}
-                        className="flex w-full items-center justify-center gap-1.5 rounded border border-red-200 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50"
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 py-2 text-xs font-semibold text-red-500 transition hover:bg-red-50"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         Delete Section
@@ -2285,7 +2278,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         {/* ── Document preview ── */}
         <div ref={previewScrollRef} className={`min-w-0 flex-1 overflow-y-auto pr-1 ${mobileTab === "edit" ? "hidden lg:block" : "block"}`}>
           <div className="mx-auto max-w-260 space-y-6">
-            <div className="print:hidden rounded border border-[#d9e2ec] bg-white px-4 py-3">
+            <div className="print:hidden rounded-xl border border-[#d9e2ec] bg-white px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                 Live A4 Proposal Preview
               </p>

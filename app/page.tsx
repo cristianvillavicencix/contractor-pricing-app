@@ -40,11 +40,25 @@ export default function DashboardPage() {
   const quotes = data?.quotes ?? [];
 
   const activeProjects = projects.filter(
-    (p) => p.status !== "Won" && p.status !== "Lost" && p.status !== "Archived"
+    (p) =>
+      p.status === "Planned" ||
+      p.status === "In Progress" ||
+      p.status === "On Hold" ||
+      p.status === "Draft" ||
+      p.status === "Pricing" ||
+      p.status === "Quoted"
   );
-  const wonProjects = projects.filter((p) => p.status === "Won");
-  const pendingQuotes = quotes.filter((q) => q.status === "Draft" || q.status === "Sent");
-  const acceptedQuotes = quotes.filter((q) => q.status === "Accepted");
+  const wonProjects = projects.filter((p) => p.status === "Completed" || p.status === "Won");
+  const pendingQuotes = quotes.filter(
+    (q) =>
+      q.status === "Draft" ||
+      q.status === "Sent" ||
+      q.status === "Viewed" ||
+      (q.status === "Accepted" && q.depositStatus !== "Paid")
+  );
+  const acceptedQuotes = quotes.filter(
+    (q) => q.status === "Accepted" && q.depositStatus === "Paid"
+  );
   const recentlySignedQuotes = useMemo(
     () =>
       acceptedQuotes.filter((q) => {
@@ -212,7 +226,21 @@ export default function DashboardPage() {
               <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white p-5 dark:border-slate-600">
                 <h3 className="text-sm font-semibold tracking-tight">Projects by Status</h3>
                 <div className="mt-4 space-y-2">
-                  {(["Draft", "Pricing", "Quoted", "Won", "Lost", "Archived"] as const).map((status) => {
+                  {(
+                    [
+                      "Draft",
+                      "Pricing",
+                      "Quoted",
+                      "Planned",
+                      "In Progress",
+                      "On Hold",
+                      "Completed",
+                      "Won",
+                      "Lost",
+                      "Cancelled",
+                      "Archived",
+                    ] as const
+                  ).map((status) => {
                     const count = statusCounts[status] ?? 0;
                     const pct = projects.length > 0 ? (count / projects.length) * 100 : 0;
                     return (
@@ -316,8 +344,10 @@ function QuoteStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Draft: "bg-gray-100 text-gray-600",
     Sent: "bg-blue-50 text-blue-700",
+    Viewed: "bg-indigo-50 text-indigo-700",
     Accepted: "bg-green-50 text-green-700",
     Declined: "bg-red-50 text-red-700",
+    Expired: "bg-amber-50 text-amber-700",
   };
   return (
     <span

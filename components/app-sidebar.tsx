@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   BriefcaseBusiness,
@@ -22,8 +22,8 @@ const sidebarItems = [
   { name: "Dashboard", href: "/", icon: BarChart3 },
   { name: "Calculator", href: "/pricing", icon: Calculator },
   { name: "Contacts", href: "/contacts", icon: Users },
-  { name: "Projects", href: "/projects", icon: BriefcaseBusiness },
   { name: "Proposals", href: "/quotes", icon: FileText },
+  { name: "Projects", href: "/projects", icon: BriefcaseBusiness },
 ];
 
 const settingsItem = { name: "Settings", href: "/settings", icon: Settings };
@@ -31,9 +31,11 @@ const allMobileItems = [...sidebarItems, settingsItem];
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const prefetchedRoutesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +84,15 @@ export function AppSidebar() {
     return href === "/" ? pathname === "/" : pathname.startsWith(href);
   }
 
+  const prefetchRoute = useCallback(
+    (href: string) => {
+      if (prefetchedRoutesRef.current.has(href)) return;
+      prefetchedRoutesRef.current.add(href);
+      void router.prefetch(href);
+    },
+    [router]
+  );
+
   // Avoid layout jump: keep default expanded until prefs load (usually instant).
   const collapsed = prefsLoaded ? isCollapsed : false;
 
@@ -102,6 +113,9 @@ export function AppSidebar() {
         >
           <Link
             href="/"
+            onMouseEnter={() => prefetchRoute("/")}
+            onFocus={() => prefetchRoute("/")}
+            onClick={() => prefetchRoute("/")}
             className={`flex min-w-0 items-center gap-3 ${
               collapsed ? "flex-col justify-center gap-0" : ""
             }`}
@@ -148,6 +162,7 @@ export function AppSidebar() {
                 item={item}
                 active={isActive(item.href)}
                 collapsed={collapsed}
+                onPrefetch={prefetchRoute}
               />
             ))}
           </div>
@@ -156,6 +171,7 @@ export function AppSidebar() {
               item={settingsItem}
               active={isActive(settingsItem.href)}
               collapsed={collapsed}
+              onPrefetch={prefetchRoute}
             />
             <SignOutButton collapsed={collapsed} />
           </div>
@@ -171,6 +187,9 @@ export function AppSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onMouseEnter={() => prefetchRoute(item.href)}
+              onFocus={() => prefetchRoute(item.href)}
+              onClick={() => prefetchRoute(item.href)}
               className={`flex flex-1 flex-col items-center justify-center py-2 gap-0.5 transition-colors ${
                 active ? "text-[#ff5c35]" : "text-muted-foreground"
               }`}
@@ -189,15 +208,20 @@ function DesktopLink({
   item,
   active,
   collapsed,
+  onPrefetch,
 }: {
   item: { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
   active: boolean;
   collapsed: boolean;
+  onPrefetch: (href: string) => void;
 }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
+      onMouseEnter={() => onPrefetch(item.href)}
+      onFocus={() => onPrefetch(item.href)}
+      onClick={() => onPrefetch(item.href)}
       title={collapsed ? item.name : undefined}
       className={`flex w-full items-center rounded-md text-sm transition ${
         collapsed ? "justify-center px-0 py-3" : "gap-3 px-4 py-3"

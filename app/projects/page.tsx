@@ -47,7 +47,18 @@ import { t } from "@/lib/ui-strings";
 
 type StatusFilter = "All" | ProjectStatus;
 type TradeFilter = "All" | Trade;
-type ProjectDetailTab = "overview" | "costs" | "quote" | "notes";
+type ProjectDetailTab = "costs" | "proposal" | "notes";
+type ContactInput = Omit<Contact, "id" | "createdAt" | "leadStage"> &
+  Partial<Pick<Contact, "leadStage" | "leadSource" | "nextFollowUpAt" | "owner">>;
+
+type ProjectsPageCache = {
+  projects: Project[];
+  contacts: Contact[];
+  quotes: Quote[];
+  settings: AppSettings;
+};
+
+let projectsPageCache: ProjectsPageCache | null = null;
 
 export default function ProjectsPage() {
   return (
@@ -71,11 +82,11 @@ function ProjectsPageClient() {
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [isLoading, setIsLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>(() => projectsPageCache?.projects ?? []);
+  const [contacts, setContacts] = useState<Contact[]>(() => projectsPageCache?.contacts ?? []);
+  const [quotes, setQuotes] = useState<Quote[]>(() => projectsPageCache?.quotes ?? []);
+  const [settings, setSettings] = useState<AppSettings>(() => projectsPageCache?.settings ?? defaultSettings);
+  const [isLoading, setIsLoading] = useState(() => !projectsPageCache);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
@@ -130,8 +141,9 @@ function ProjectsPageClient() {
 
   const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent);
+    const shouldBlock = !silent && !projectsPageCache;
     if (!silent) {
-      setIsLoading(true);
+      if (shouldBlock) setIsLoading(true);
       setLoadError(null);
     }
     try {
@@ -141,16 +153,23 @@ function ProjectsPageClient() {
         listContacts(supabase),
         listQuotes(supabase),
       ]);
-      setSettings(mergeAppSettings(dbSettings ?? defaultSettings));
+      const mergedSettings = mergeAppSettings(dbSettings ?? defaultSettings);
+      setSettings(mergedSettings);
       setProjects(dbProjects);
       setContacts(dbContacts);
       setQuotes(dbQuotes);
+      projectsPageCache = {
+        settings: mergedSettings,
+        projects: dbProjects,
+        contacts: dbContacts,
+        quotes: dbQuotes,
+      };
     } catch (e) {
       if (!silent) {
         setLoadError(e instanceof Error ? e.message : "Failed to load data");
       }
     } finally {
-      if (!silent) {
+      if (shouldBlock) {
         setIsLoading(false);
       }
     }
@@ -187,7 +206,7 @@ function ProjectsPageClient() {
     }
   }
 
-  function createContact(contact: Omit<Contact, "id" | "createdAt">) {
+  function createContact(contact: ContactInput) {
     const existing = contacts.find(
       (item) =>
         (Boolean(contact.email) && Boolean(item.email) && sameText(item.email, contact.email)) ||
@@ -200,6 +219,10 @@ function ProjectsPageClient() {
     const nextContact: Contact = {
       id: crypto.randomUUID(),
       ...contact,
+      leadStage: contact.leadStage ?? "New",
+      leadSource: contact.leadSource ?? "",
+      nextFollowUpAt: contact.nextFollowUpAt ?? "",
+      owner: contact.owner ?? "",
       createdAt: getTodayLabel(),
     };
     setContacts((current) => [nextContact, ...current]);
@@ -327,6 +350,12 @@ function ProjectsPageClient() {
       customerEmail: snapshot?.customerEmail,
       customerAddress: snapshot?.customerAddress,
       trade: snapshot?.trade,
+      jobAddress: project.address,
+      jobCity: project.city,
+      jobState: project.state,
+      jobZipCode: project.zipCode,
+      projectSize: project.projectSize,
+      riskLevel: project.riskLevel,
       proposalTitle: snapshot?.proposalTitle,
       proposalNumber: computeNextProposalNumber(quotes),
       warrantyText: snapshot?.warrantyText,
@@ -337,6 +366,7 @@ function ProjectsPageClient() {
       best: pricing[2],
       selectedOption,
       status: "Draft",
+      depositStatus: "Pending",
       createdAt: getTodayLabel(),
       expiresAt: getExpirationLabel(14),
     };
@@ -390,27 +420,27 @@ function ProjectsPageClient() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+          <header className="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
             <div>
-              <p className="page-kicker text-sm font-medium">Projects</p>
-              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Projects</p>
+              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
                 Projects
               </h2>
-              <p className="page-description mt-3 max-w-2xl text-sm">
+              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
                 Manage job opportunities, costs, and pricing recommendations.
               </p>
             </div>
 
             <button
               onClick={() => setIsFormOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
             >
               <Plus className="h-4 w-4" />
               New Project
             </button>
           </header>
 
-          <section className="mt-8 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-4 sm:p-5">
+          <section className="mt-8 elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 sm:p-6">
             <div className="grid gap-4 lg:grid-cols-[1fr_180px_180px]">
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -418,7 +448,7 @@ function ProjectsPageClient() {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search by project, customer, or address"
-                  className="w-full rounded-md border border-[#d9e2ec] py-3 pl-11 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
+                  className="w-full rounded-lg border border-[#d9e2ec] py-3.5 pl-11 pr-4 text-sm outline-none transition focus:border-[#ff5c35]"
                 />
               </label>
 
@@ -427,7 +457,7 @@ function ProjectsPageClient() {
                 onChange={(event) =>
                   setStatusFilter(event.target.value as StatusFilter)
                 }
-                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
+                className="rounded-lg border border-[#d9e2ec] bg-white px-4 py-3.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
               >
                 <option value="All">All statuses</option>
                 {statusOptions.map((status) => (
@@ -442,7 +472,7 @@ function ProjectsPageClient() {
                 onChange={(event) =>
                   setTradeFilter(event.target.value as TradeFilter)
                 }
-                className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
+                className="rounded-lg border border-[#d9e2ec] bg-white px-4 py-3.5 text-sm text-neutral-900 outline-none transition focus:border-[#ff5c35]"
               >
                 <option value="All">All trades</option>
                 {tradeOptions.map((trade) => (
@@ -455,8 +485,8 @@ function ProjectsPageClient() {
           </section>
 
           {filteredProjects.length > 0 ? (
-            <section className="mt-6 overflow-x-auto elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600">
-              <div className="grid min-w-230 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-5 py-3 text-xs font-medium uppercase tracking-[0.08em] text-gray-400">
+            <section className="mt-6 overflow-x-auto elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600">
+              <div className="grid min-w-230 grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#d9e2ec] bg-[#f6f8fb] px-6 py-3.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400">
                 <span>Project</span>
                 <span>Trade</span>
                 <span>Status</span>
@@ -475,7 +505,7 @@ function ProjectsPageClient() {
                         setInitialProjectTab("costs");
                         setSelectedProjectId(project.id);
                       }}
-                      className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-5 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
+                      className="grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr] items-center gap-4 px-6 py-4 text-left text-sm transition hover:bg-[#f6f8fb]"
                     >
                       <div className="min-w-0">
                         <p className="truncate font-medium text-black">
@@ -485,12 +515,14 @@ function ProjectsPageClient() {
                           {project.customerName} · {project.address}
                         </p>
                       </div>
-                      <span className="text-gray-600">{project.trade}</span>
+                      <span className="inline-flex w-fit rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        {project.trade}
+                      </span>
                       <ProjectStatusBadge status={project.status} />
-                      <span className="font-medium">
+                      <span className="font-semibold">
                         {formatMoney(row?.totalCost ?? 0)}
                       </span>
-                      <span className="font-medium">
+                      <span className="font-semibold">
                         {formatMoney(row?.betterSale ?? 0)}
                       </span>
                       <span>{formatMargin(row?.betterMargin ?? 0)}</span>
@@ -513,7 +545,7 @@ function ProjectsPageClient() {
                 <button
                   type="button"
                   onClick={() => setIsFormOpen(true)}
-                  className="mt-4 rounded-md bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--brand-accent-hover)]"
+                  className="mt-4 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--brand-accent-hover)]"
                 >
                   New project
                 </button>
@@ -550,6 +582,17 @@ function ProjectsPageClient() {
           onDeleteProject={removeProject}
           quotes={quotes.filter((q) => q.projectId === selectedProject.id)}
           onPreviewQuote={(id) => router.push(`/quotes/preview?id=${id}`)}
+          onOpenContact={() => {
+            const matchedContact =
+              contacts.find((contact) => contact.id === selectedProject.contactId) ??
+              contacts.find((contact) =>
+                sameText(contact.name, selectedProject.customerName) ||
+                (Boolean(contact.email) && Boolean(selectedProject.customerEmail) && sameText(contact.email, selectedProject.customerEmail)) ||
+                (Boolean(contact.phone) && Boolean(selectedProject.customerPhone) && samePhone(contact.phone, selectedProject.customerPhone))
+              );
+            if (!matchedContact) return;
+            router.push(`/contacts?contactId=${encodeURIComponent(matchedContact.id)}`);
+          }}
         />
       ) : null}
     </div>
@@ -558,13 +601,14 @@ function ProjectsPageClient() {
 
 function getProjectTab(value: string | null): ProjectDetailTab {
   if (
-    value === "overview" ||
     value === "costs" ||
-    value === "quote" ||
+    value === "proposal" ||
     value === "notes"
   ) {
     return value;
   }
+
+  if (value === "quote" || value === "overview") return "costs";
 
   return "costs";
 }
