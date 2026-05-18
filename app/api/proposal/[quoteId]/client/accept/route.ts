@@ -17,7 +17,7 @@ type Body = {
 };
 
 function isProposalExpired(quote: Quote) {
-  if (!quote.expiresAt || quote.status === "Accepted") return false;
+  if (!quote.expiresAt || quote.status === "Accepted" || quote.status === "converted_to_project") return false;
   return new Date(quote.expiresAt) < new Date();
 }
 
@@ -69,7 +69,7 @@ export async function POST(
   if (!quote.clientPortalToken || quote.clientPortalToken !== token) {
     return NextResponse.json({ error: "Invalid link" }, { status: 403 });
   }
-  if (quote.status === "Accepted") {
+  if (quote.status === "Accepted" || quote.status === "converted_to_project") {
     return NextResponse.json({ error: "This proposal was already accepted" }, { status: 409 });
   }
   if (isProposalExpired(quote)) {
@@ -101,9 +101,20 @@ export async function POST(
 
   const { error: insertAcceptError } = await admin.from("proposal_acceptances").insert({
     quote_id: quoteId,
+    proposal_id: quoteId,
     company_id: companyId,
+    contact_id: quote.contactId ?? null,
+    accepted_option_id: quoteId,
     selected_option: selectedOption,
     signed_name: signedName,
+    accepted_by_name: signedName,
+    accepted_by_email: quote.customerEmail ?? null,
+    signature: signedName,
+    ip_address:
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      request.headers.get("x-real-ip") ??
+      null,
+    accepted_at: signedAt,
     signed_at: signedAt,
     contract_checklist: checklistPayload,
   });

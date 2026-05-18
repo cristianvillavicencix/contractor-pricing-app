@@ -39,47 +39,32 @@ export default function DashboardPage() {
   const projects = data?.projects ?? [];
   const quotes = data?.quotes ?? [];
 
+  const activeProjectStatuses = new Set(["not_started", "scheduled", "in_progress", "on_hold"]);
+  const closedProjectStatuses = new Set(["completed", "invoiced", "paid", "closed"]);
   const activeProjects = projects.filter(
-    (p) =>
-      p.status === "Planned" ||
-      p.status === "In Progress" ||
-      p.status === "On Hold" ||
-      p.status === "Draft" ||
-      p.status === "Pricing" ||
-      p.status === "Quoted"
+    (p) => activeProjectStatuses.has(p.status)
   );
-  const wonProjects = projects.filter((p) => p.status === "Completed" || p.status === "Won");
-  const pendingQuotes = quotes.filter(
-    (q) =>
-      q.status === "Draft" ||
-      q.status === "Sent" ||
-      q.status === "Viewed" ||
-      (q.status === "Accepted" && q.depositStatus !== "Paid")
-  );
-  const acceptedQuotes = quotes.filter(
-    (q) => q.status === "Accepted" && q.depositStatus === "Paid"
-  );
+  const closedProjects = projects.filter((p) => closedProjectStatuses.has(p.status));
+  const pendingQuotes = quotes.filter((q) => q.status === "Sent" || q.status === "Viewed");
+  const acceptedQuotes = quotes.filter((q) => q.status === "Accepted");
+  const convertedQuotes = quotes.filter((q) => q.status === "converted_to_project");
+  const acceptedPendingConversion = acceptedQuotes.filter((q) => !q.projectId);
   const recentlySignedQuotes = useMemo(
     () =>
-      acceptedQuotes.filter((q) => {
+      [...acceptedQuotes, ...convertedQuotes].filter((q) => {
         if (!q.signedAt) return false;
         const sinceMs = new Date().getTime() - new Date(q.signedAt).getTime();
         return sinceMs < 7 * 24 * 60 * 60 * 1000;
       }),
-    [acceptedQuotes]
+    [acceptedQuotes, convertedQuotes]
   );
-  const winRate = quotes.length > 0 ? acceptedQuotes.length / quotes.length : 0;
+  const decisionQuotes = quotes.filter((q) =>
+    q.status === "Accepted" || q.status === "converted_to_project" || q.status === "Declined"
+  );
+  const winRate = decisionQuotes.length > 0 ? (acceptedQuotes.length + convertedQuotes.length) / decisionQuotes.length : 0;
 
-  const pipelineValue = activeProjects.reduce((sum, p) => {
-    const matchedQuote = quotes
-      .filter((q) => q.projectId === p.id)
-      .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))[0];
-    if (matchedQuote) {
-      const selected = getSelectedResult(matchedQuote);
-      return sum + selected.salePrice;
-    }
-    return sum;
-  }, 0);
+  const pipelineValue = pendingQuotes.reduce((sum, quote) => sum + getSelectedResult(quote).salePrice, 0);
+  const approvedRevenue = projects.reduce((sum, project) => sum + (project.approvedAmount ?? 0), 0);
 
   const quoteMargins = quotes.map((q) => getSelectedResult(q).margin);
   const quoteProfits = quotes.map((q) => getSelectedResult(q).profit);
@@ -129,39 +114,32 @@ export default function DashboardPage() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
-            <div>
-              <p className="page-kicker text-sm font-medium">Dashboard</p>
-              <h2 className="page-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Overview</h2>
-              <p className="page-description mt-3 max-w-2xl text-sm">
-                Your business at a glance — pipeline, quotes, and margins.
-              </p>
-            </div>
+          <header className="flex justify-end">
             <Link
               href="/pricing"
               className="inline-flex items-center justify-center gap-2 rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--brand-accent-hover)]"
             >
-              New Pricing
+              New Proposal
               <ArrowRight className="h-4 w-4" />
             </Link>
           </header>
 
-          <section className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <section className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
               label="Pipeline Value"
               value={formatMoney(pipelineValue)}
-              detail={`${activeProjects.length} active project${activeProjects.length !== 1 ? "s" : ""}`}
+              detail={`${pendingQuotes.length} sent/viewed proposal${pendingQuotes.length !== 1 ? "s" : ""}`}
               accent
             />
             <MetricCard
               label="Active Projects"
               value={String(activeProjects.length)}
-              detail={`${wonProjects.length} won · ${projects.filter((p) => p.status === "Lost").length} lost`}
+              detail={`${closedProjects.length} completed/closed`}
             />
             <MetricCard
-              label="Quotes Pending"
+              label="Pending Proposals"
               value={String(pendingQuotes.length)}
-              detail={`${acceptedQuotes.length} accepted`}
+              detail={`${acceptedPendingConversion.length} accepted pending conversion`}
               badge={
                 recentlySignedQuotes.length > 0
                   ? `${recentlySignedQuotes.length} signed this week`
@@ -169,9 +147,9 @@ export default function DashboardPage() {
               }
             />
             <MetricCard
-              label="Win Rate"
-              value={quotes.length ? `${(winRate * 100).toFixed(0)}%` : "—"}
-              detail={`Avg margin ${quotes.length ? formatMargin(avgMargin) : "—"}`}
+              label="Approved Revenue"
+              value={formatMoney(approvedRevenue)}
+              detail={`Win rate ${decisionQuotes.length ? `${(winRate * 100).toFixed(0)}%` : "—"} · Avg margin ${quotes.length ? formatMargin(avgMargin) : "—"}`}
             />
           </section>
 
@@ -179,10 +157,10 @@ export default function DashboardPage() {
             <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600">
               <div className="flex items-center justify-between border-b border-[#d9e2ec] p-5 sm:p-6">
                 <div>
-                  <h3 className="text-base font-semibold tracking-tight">Recent Quotes</h3>
+                  <h3 className="text-base font-semibold tracking-tight">Recent Proposals</h3>
                   <p className="mt-0.5 text-sm text-gray-500">Latest proposals across all projects.</p>
                 </div>
-                <Link href="/quotes" className="text-xs font-medium text-gray-400 transition hover:text-black">
+                <Link href="/proposals" className="text-xs font-medium text-gray-400 transition hover:text-black">
                   View all →
                 </Link>
               </div>
@@ -228,17 +206,15 @@ export default function DashboardPage() {
                 <div className="mt-4 space-y-2">
                   {(
                     [
-                      "Draft",
-                      "Pricing",
-                      "Quoted",
-                      "Planned",
-                      "In Progress",
-                      "On Hold",
-                      "Completed",
-                      "Won",
-                      "Lost",
-                      "Cancelled",
-                      "Archived",
+                      "not_started",
+                      "scheduled",
+                      "in_progress",
+                      "on_hold",
+                      "completed",
+                      "invoiced",
+                      "paid",
+                      "closed",
+                      "cancelled",
                     ] as const
                   ).map((status) => {
                     const count = statusCounts[status] ?? 0;
@@ -246,7 +222,7 @@ export default function DashboardPage() {
                     return (
                       <div key={status}>
                         <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">{status}</span>
+                          <span className="text-gray-600">{formatProjectStatus(status)}</span>
                           <span className="font-medium text-black">{count}</span>
                         </div>
                         <div className="mt-1 h-1.5 w-full rounded-full bg-[#f0f4f8]">
@@ -283,7 +259,7 @@ export default function DashboardPage() {
               <div className="space-y-2">
                 {[
                   { title: "Projects", href: "/projects", desc: `${projects.length} total` },
-                  { title: "Quotes", href: "/quotes", desc: `${quotes.length} saved` },
+                  { title: "Proposals", href: "/proposals", desc: `${quotes.length} saved` },
                   { title: "Contacts", href: "/contacts", desc: "Customer directory" },
                 ].map((item) => (
                   <Link
@@ -346,6 +322,7 @@ function QuoteStatusBadge({ status }: { status: string }) {
     Sent: "bg-blue-50 text-blue-700",
     Viewed: "bg-indigo-50 text-indigo-700",
     Accepted: "bg-green-50 text-green-700",
+    converted_to_project: "bg-emerald-50 text-emerald-700",
     Declined: "bg-red-50 text-red-700",
     Expired: "bg-amber-50 text-amber-700",
   };
@@ -353,7 +330,7 @@ function QuoteStatusBadge({ status }: { status: string }) {
     <span
       className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${styles[status] ?? "bg-gray-100 text-gray-600"}`}
     >
-      {status}
+      {status === "converted_to_project" ? "Converted" : status}
     </span>
   );
 }
@@ -367,4 +344,11 @@ function getSelectedResult(quote: Quote) {
 function average(values: number[]) {
   if (values.length === 0) return 0;
   return values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+function formatProjectStatus(status: string) {
+  return status
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

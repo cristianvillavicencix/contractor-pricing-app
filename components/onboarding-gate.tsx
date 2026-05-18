@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   defaultSettings,
@@ -14,27 +14,26 @@ const ONBOARDING_PATH = "/onboarding";
 const LOGIN_PREFIX = "/login";
 const AUTH_PREFIX = "/auth";
 
-/**
- * Redirects to onboarding when the user is authenticated but has not completed the wizard.
- * Does not block paint; skips login, auth, public proposal routes, and onboarding itself.
- */
+const SKIP_PREFIXES = [
+  ONBOARDING_PATH,
+  LOGIN_PREFIX,
+  "/signup",
+  "/forgot-password",
+  AUTH_PREFIX,
+  "/proposal/",
+];
+
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  // Once we confirm onboarding is done, skip all future checks this session.
+  const onboardingConfirmed = useRef(false);
 
   useEffect(() => {
     if (!pathname) return;
-
-    if (
-      pathname === ONBOARDING_PATH ||
-      pathname.startsWith(LOGIN_PREFIX) ||
-      pathname.startsWith(AUTH_PREFIX) ||
-      pathname.startsWith("/proposal/") ||
-      pathname.startsWith("/auth/complete")
-    ) {
-      return;
-    }
+    if (onboardingConfirmed.current) return;
+    if (SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) return;
 
     let cancelled = false;
     (async () => {
@@ -44,16 +43,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         const settings = mergeAppSettings(raw ?? defaultSettings);
         if (!settings.onboardingCompletedAt) {
           router.replace(ONBOARDING_PATH);
+        } else {
+          onboardingConfirmed.current = true;
         }
       } catch {
-        /* Missing company / settings row — new accounts should complete onboarding */
         router.replace(ONBOARDING_PATH);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [pathname, router, supabase]);
 
   return <>{children}</>;

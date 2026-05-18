@@ -10,6 +10,7 @@ import {
   getTierDisplayName,
   getTierMaterialSummaries,
   getTierMaterialsTableForProposal,
+  getUploadedCompanyLogoUrl,
 } from "@/lib/app-data";
 import type { CoverLayout } from "@/lib/pdf-generator";
 import {
@@ -847,7 +848,7 @@ function CoverSection({
     const detail = getElegantCoverDetailLine(quote);
     const displayCompanyName = c.elegantBusinessName?.trim() || company.businessName;
     const displayLogo =
-      c.elegantLogoUrl?.trim() || brand.logoUrl?.trim() || null;
+      c.elegantLogoUrl?.trim() || getUploadedCompanyLogoUrl(brand.logoUrl) || null;
     const displayPrice =
       c.elegantPriceDisplay?.trim() ||
       (quote ? formatMoney(getSelectedQuotePrice(quote)) : "—");
@@ -949,10 +950,11 @@ function CoverBrand({
   dark: boolean;
   centered?: boolean;
 }) {
-  if (brand.logoUrl) {
+  const uploadedLogoUrl = getUploadedCompanyLogoUrl(brand.logoUrl);
+  if (uploadedLogoUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={brand.logoUrl} alt="Company logo" className={`h-12 object-contain ${centered ? "mx-auto" : ""}`} />
+      <img src={uploadedLogoUrl} alt="Company logo" className={`h-12 object-contain ${centered ? "mx-auto" : ""}`} />
     );
   }
   return (
@@ -1017,11 +1019,12 @@ function CoverMeta({
 }) {
   const muted = dark ? "text-white/40" : "text-gray-400";
   const strong = dark ? "text-white/60" : "text-[#213343]";
+  const uploadedLogoUrl = getUploadedCompanyLogoUrl(brand.logoUrl);
   return (
     <div className={`flex items-end justify-between gap-8 text-sm ${muted} ${centered ? "justify-center text-center" : ""}`}>
       {!centered && (
         <div className="space-y-1">
-          {brand.logoUrl && <p className={`font-semibold ${strong}`}>{company.businessName}</p>}
+          {uploadedLogoUrl && <p className={`font-semibold ${strong}`}>{company.businessName}</p>}
           {company.phone && <p>{company.phone}</p>}
           {company.email && <p>{company.email}</p>}
           {company.website && <p>{company.website}</p>}

@@ -3,13 +3,16 @@ import type {
   Contact,
   LeadStage,
   PaymentStatus,
+  PriceOptionName,
   Project,
   Quote,
   ScopeTemplate,
+  TierProduct,
 } from "@/lib/app-data";
 import { mergeAppSettings } from "@/lib/app-data";
 import { getAppSettingsValidationError } from "@/lib/settings-validation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getDefaultTierProducts, mergeTierProductsWithDefaults } from "@/lib/tier-products-defaults";
 import type { ProposalTemplate } from "@/lib/proposal-templates";
 
 type SupabaseClient = ReturnType<typeof createSupabaseBrowserClient>;
@@ -58,11 +61,55 @@ function normalizePaymentStatus(value: string | undefined): PaymentStatus {
   return "Pending";
 }
 
+function nullableUuid(value: string | undefined) {
+  if (!value) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : null;
+}
+
+// Promise cache keyed by user ID — eliminates redundant RPC calls within the same session.
+// Parallel callers share the same in-flight promise instead of each firing their own RPC.
+const _companyIdCache = new Map<string, PromiseLike<string>>();
+
+function isMissingOptionalTableError(error: unknown) {
+  const maybeError = error as { code?: string; message?: string } | null | undefined;
+  const message = maybeError?.message?.toLowerCase() ?? "";
+  return (
+    maybeError?.code === "PGRST205" ||
+    maybeError?.code === "42P01" ||
+    message.includes("could not find the table") ||
+    message.includes("does not exist")
+  );
+}
+
+function isMissingColumnError(error: unknown) {
+  const maybeError = error as { code?: string; message?: string } | null | undefined;
+  const message = maybeError?.message?.toLowerCase() ?? "";
+  return (
+    maybeError?.code === "PGRST204" ||
+    (message.includes("could not find the") && message.includes("column"))
+  );
+}
+
+export function clearCompanyIdCache() {
+  _companyIdCache.clear();
+}
+
 async function requireCompanyId(supabase: SupabaseClient): Promise<string> {
-  const { data, error } = await supabase.rpc("current_company_id");
-  if (error) throw error;
-  if (!data) throw new Error("No company found for this user");
-  return data as string;
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id ?? "anon";
+
+  if (!_companyIdCache.has(userId)) {
+    const promise = supabase.rpc("current_company_id").then(({ data, error }) => {
+      if (error) { _companyIdCache.delete(userId); throw error; }
+      if (!data) { _companyIdCache.delete(userId); throw new Error("No company found for this user"); }
+      return data as string;
+    });
+    _companyIdCache.set(userId, promise);
+  }
+
+  return _companyIdCache.get(userId)!;
 }
 
 export async function loadCompanySettings<T = unknown>(supabase: SupabaseClient): Promise<T | null> {
@@ -100,6 +147,11 @@ export async function listProjects(supabase: SupabaseClient): Promise<Project[]>
     const r = row as Record<string, unknown>;
     return {
       id: r.id as string,
+      quoteId: (r.quote_id as string | undefined) ?? undefined,
+      proposalId: (r.proposal_id as string | undefined) ?? undefined,
+      selectedOptionId: (r.selected_option_id as string | undefined) ?? undefined,
+      selectedTier: (r.selected_tier as PriceOptionName | undefined) ?? undefined,
+      approvedAmount: (r.approved_amount as number | undefined) ?? undefined,
       projectName: r.project_name as string,
       customerName: r.customer_name as string,
       customerPhone: (r.customer_phone as string) ?? "",
@@ -140,6 +192,11 @@ export async function upsertProject(supabase: SupabaseClient, project: Project) 
     project_size: project.projectSize,
     risk_level: project.riskLevel,
     contact_id: project.contactId ?? null,
+    quote_id: project.quoteId ?? null,
+    proposal_id: project.proposalId ?? null,
+    selected_option_id: project.selectedOptionId ?? null,
+    selected_tier: project.selectedTier ?? null,
+    approved_amount: project.approvedAmount ?? null,
   });
   if (error) throw error;
 }
@@ -390,6 +447,101 @@ export async function uploadImageViaApi(args: {
   return (await res.json()) as { path: string };
 }
 
+export async function listTierProducts(supabase: SupabaseClient): Promise<TierProduct[]> {
+  const companyId = await requireCompanyId(supabase);
+  const { data, error } = await supabase
+    .from("company_tier_products")
+    .select("*")
+    .eq("company_id", companyId);
+  if (isMissingOptionalTableError(error)) return getDefaultTierProducts();
+  if (error) throw error;
+  const products = (data ?? []).map((row: unknown) => {
+    const r = row as Record<string, unknown>;
+    return {
+      id: r.id as string,
+      trade: (r.trade as string) ?? "",
+      tier: (r.tier as string) ?? "",
+      productName: (r.product_name as string) ?? "",
+      productType: (r.product_type as string) ?? "",
+      productBrand: (r.product_brand as string) ?? "",
+      productLine: (r.product_line as string) ?? "",
+      colorName: (r.color_name as string) ?? "",
+      colorHex: (r.color_hex as string) ?? "",
+      imageUrl: (r.image_url as string) ?? "",
+      warrantyYears: (r.warranty_years as number) ?? 0,
+      productId: (r.product_id as string) ?? undefined,
+      description: (r.description as string) ?? "",
+      unitCost: (r.unit_cost as number) ?? 0,
+      laborCost: (r.labor_cost as number) ?? 0,
+      defaultMargin: (r.default_margin as number) ?? 0,
+      defaultMarkup: (r.default_markup as number) ?? 0,
+      isActive: (r.is_active as boolean) ?? true,
+      notes: (r.notes as string) ?? "",
+    } as TierProduct;
+  });
+  return mergeTierProductsWithDefaults(products);
+}
+
+export async function upsertTierProduct(supabase: SupabaseClient, product: TierProduct) {
+  const companyId = await requireCompanyId(supabase);
+  const row = {
+    id: product.id,
+    company_id: companyId,
+    trade: product.trade,
+    tier: product.tier,
+    product_name: product.productName,
+    product_type: product.productType ?? "",
+    product_id: nullableUuid(product.productId),
+    description: product.description ?? "",
+    product_brand: product.productBrand,
+    product_line: product.productLine,
+    color_name: product.colorName ?? "",
+    color_hex: product.colorHex ?? "",
+    image_url: product.imageUrl,
+    warranty_years: product.warrantyYears,
+    unit_cost: product.unitCost ?? 0,
+    labor_cost: product.laborCost ?? 0,
+    default_margin: product.defaultMargin ?? 0,
+    default_markup: product.defaultMarkup ?? 0,
+    is_active: product.isActive ?? true,
+    notes: product.notes,
+  };
+  const { error } = await supabase.from("company_tier_products").upsert(row);
+  if (isMissingOptionalTableError(error)) return;
+  if (isMissingColumnError(error)) {
+    const legacyRow: Partial<typeof row> = { ...row };
+    for (const key of [
+      "color_hex",
+      "color_name",
+      "default_margin",
+      "default_markup",
+      "description",
+      "is_active",
+      "labor_cost",
+      "product_id",
+      "product_type",
+      "unit_cost",
+    ] as const) {
+      delete legacyRow[key];
+    }
+    const { error: legacyError } = await supabase.from("company_tier_products").upsert(legacyRow);
+    if (legacyError) throw legacyError;
+    return;
+  }
+  if (error) throw error;
+}
+
+export async function deleteTierProduct(supabase: SupabaseClient, id: string) {
+  const companyId = await requireCompanyId(supabase);
+  const { error } = await supabase
+    .from("company_tier_products")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("id", id);
+  if (isMissingOptionalTableError(error)) return;
+  if (error) throw error;
+}
+
 export async function getSignedUrlViaApi(args: {
   bucket: "proposal-photos" | "branding";
   path: string;
@@ -404,5 +556,3 @@ export async function getSignedUrlViaApi(args: {
   const data = (await res.json()) as { url: string };
   return data.url;
 }
-
-

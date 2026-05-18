@@ -1,9 +1,10 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, FolderPlus, History, X } from "lucide-react";
+import { AlertTriangle, FolderPlus, History, Info, X } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import {
   defaultSettings,
@@ -17,7 +18,6 @@ import {
   mergeAppSettings,
   projectSizeOptions,
   riskLevelOptions,
-  stateOptions,
   strategyOptions,
   tradeOptions,
   TYPICAL_COSTS,
@@ -27,9 +27,10 @@ import {
   type PriceOptionName,
   type Project,
   type ProjectSize,
-  type ProjectState,
   type Quote,
+  type ProjectState,
   type RiskLevel,
+  stateOptions,
   type Strategy,
   type Trade,
 } from "@/lib/app-data";
@@ -52,21 +53,22 @@ import {
   listContacts,
   listProjects,
   listQuotes,
+  listTierProducts,
   loadCompanySettings,
   upsertContact,
   upsertProject,
   upsertQuote,
 } from "@/lib/supabase/data";
+import type { TierProduct } from "@/lib/app-data";
 
-const STATE_ABBR: Record<string, string> = {
-  Alabama: "AL", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO",
-  Connecticut: "CT", Florida: "FL", Georgia: "GA", Idaho: "ID", Illinois: "IL",
-  Indiana: "IN", Iowa: "IA", Kansas: "KS", Kentucky: "KY", Louisiana: "LA",
-  Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN", Mississippi: "MS",
-  Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV", "New Jersey": "NJ",
-  "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", Ohio: "OH", Oklahoma: "OK",
-  Oregon: "OR", Pennsylvania: "PA", "South Carolina": "SC", Tennessee: "TN", Texas: "TX",
-  Utah: "UT", Virginia: "VA", Washington: "WA", "West Virginia": "WV", Wisconsin: "WI",
+const TRADE_INFO: Record<string, string> = {
+  Roofing: "Shingles, flat roofs, metal, repairs & replacements.\n\n📦 Include: underlayment, ice barrier, drip edge, ridge caps, nails.\n🗑️ Budget for dumpster — tear-off adds significant disposal cost.\n📋 Most jurisdictions require a permit for full replacements.\n⏱️ Typical job: 1–3 days for a standard residential roof.",
+  Siding: "Vinyl, fiber cement, wood & composite cladding.\n\n📦 Include: house wrap, trim boards, J-channel, fasteners.\n🔧 Account for removal & disposal of existing siding.\n🪟 Windows and corners add labor — price carefully.\n⏱️ Typical job: 3–10 days depending on size and material.",
+  Painting: "Interior & exterior residential and commercial painting.\n\n🖌️ Exterior: factor in pressure washing, caulking, and priming.\n🏠 Interior: ceiling cuts, trim detail, and furniture protection add time.\n🎨 Two-coat jobs cost more — specify in your quote.\n⏱️ Typical job: 1–5 days for a standard home.",
+  Drywall: "Hanging, taping, finishing, and texturing.\n\n📐 Price by the sheet or square foot — include waste (10–15%).\n🔧 Finish level matters: Level 3 for texture, Level 5 for paint-ready.\n💧 Water-damaged areas may need mold-resistant board.\n⏱️ Typical job: 2–7 days including drying time between coats.",
+  Gutters: "Installation, cleaning, repair, and gutter guards.\n\n📏 Price by linear foot — don't forget downspouts and elbows.\n🏚️ Inspect fascia condition before quoting — rotted fascia adds cost.\n🍃 Gutter guards significantly increase material cost.\n⏱️ Typical job: 4–8 hours for a standard home.",
+  Remodeling: "Kitchen, bath, basement, and room renovations.\n\n📋 Always get a permit for structural, electrical, or plumbing work.\n🔨 Demo and haul-away can be 10–20% of total job cost.\n🤝 Subcontractors (electrician, plumber) need their own markup.\n⏱️ Varies widely — budget extra time for surprises behind walls.",
+  "General Contractor": "Multi-trade projects managing subcontractors and scope.\n\n💼 Your markup covers coordination, scheduling, and liability.\n📋 Pull all permits and manage inspections.\n🤝 Sub costs should be marked up 10–20% minimum.\n⏱️ Timeline depends on trade sequence — plan for dependencies.",
 };
 
 const defaultInput: PricingEngineInput = {
@@ -255,50 +257,45 @@ function PricingPageInner() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [dataReady, setDataReady] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [sourceProject, setSourceProject] = useState<Project | null>(null);
   const [input, setInput] = useState<PricingEngineInput>(defaultInput);
   const [showBusinessRulesDrawer, setShowBusinessRulesDrawer] = useState(false);
   const [pendingProposalOption, setPendingProposalOption] = useState<PriceOptionName | null>(null);
   const [expandedCard, setExpandedCard] = useState<PriceOptionName | null>(null);
+  const [tierProducts, setTierProducts] = useState<TierProduct[]>([]);
+  const [rawMaterial, setRawMaterial] = useState(0);
+  const [wastePercent, setWastePercent] = useState(0);
   const [sessionHistory, setSessionHistory] = useState<PricingSessionHistoryEntry[]>([]);
   const [showSessionHistoryModal, setShowSessionHistoryModal] = useState(false);
+
+  const { data: initialData, isPending, error: queryError } = useQuery({
+    queryKey: ["pricing", "initial-data"],
+    queryFn: () => Promise.all([
+      loadCompanySettings<AppSettings | null>(supabase),
+      listContacts(supabase),
+      listProjects(supabase),
+      listQuotes(supabase),
+      listTierProducts(supabase),
+    ]),
+    staleTime: 30_000,
+  });
+
+  const dataReady = !isPending;
+  const loadError = queryError ? (queryError instanceof Error ? queryError.message : "Failed to load pricing data") : null;
+
+  useEffect(() => {
+    if (!initialData) return;
+    const [rawSettings, dbContacts, dbProjects, dbQuotes, dbTierProducts] = initialData;
+    setSettings(mergeAppSettings(rawSettings ?? defaultSettings));
+    setContacts(dbContacts);
+    setProjects(dbProjects);
+    setQuotes(dbQuotes);
+    setTierProducts(dbTierProducts);
+  }, [initialData]);
 
   const mergedSettings = useMemo(() => mergeAppSettings(settings), [settings]);
   const showAdvancedBreakdown = mergedSettings.appPreferences.showAdvancedPricingBreakdown;
   const showPricingWarnings = mergedSettings.appPreferences.showPricingWarnings;
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoadError(null);
-      try {
-        const [rawSettings, dbContacts, dbProjects, dbQuotes] = await Promise.all([
-          loadCompanySettings<AppSettings | null>(supabase),
-          listContacts(supabase),
-          listProjects(supabase),
-          listQuotes(supabase),
-        ]);
-        if (cancelled) return;
-        const merged = mergeAppSettings(rawSettings ?? defaultSettings);
-        setSettings(merged);
-        setContacts(dbContacts);
-        setProjects(dbProjects);
-        setQuotes(dbQuotes);
-        setDataReady(true);
-      } catch (e) {
-        if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : "Failed to load pricing data");
-          setDataReady(true);
-        }
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase]);
 
   useEffect(() => {
     if (!dataReady || loadError) return;
@@ -306,6 +303,8 @@ function PricingPageInner() {
     /* eslint-disable react-hooks/set-state-in-effect -- derive calculator input when URL / settings load */
     setSourceProject(proj);
     setInput(createInputFromSettings(mergedSettings, proj));
+    setRawMaterial(proj?.costs.materials ?? 0);
+    setWastePercent(0);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [dataReady, loadError, projectIdFromUrl, projects, mergedSettings]);
 
@@ -314,6 +313,8 @@ function PricingPageInner() {
       const e = ev as CustomEvent<PricingSessionHistoryEntry>;
       const d = e.detail;
       setInput(cloneEngineInput(d.input));
+      setRawMaterial(d.input.costs.material);
+      setWastePercent(0);
       setProjectDraft({
         contactId: d.projectDraft.contactId ?? "",
         projectName: d.projectDraft.projectName ?? "",
@@ -498,7 +499,7 @@ function PricingPageInner() {
       await upsertQuote(supabase, quote);
       setQuotes((prev) => [quote, ...prev]);
       closeModal();
-      router.push(`/quotes/preview?id=${encodeURIComponent(quote.id)}`);
+      router.push(`/proposals/preview?id=${encodeURIComponent(quote.id)}`);
       return;
     } catch {
       setProjectError(
@@ -514,6 +515,8 @@ function PricingPageInner() {
 
   function restoreSession(entry: PricingSessionHistoryEntry) {
     setInput(cloneEngineInput(entry.input));
+    setRawMaterial(entry.input.costs.material);
+    setWastePercent(0);
     setProjectDraft({
       contactId: entry.projectDraft.contactId ?? "",
       projectName: entry.projectDraft.projectName ?? "",
@@ -608,20 +611,17 @@ function PricingPageInner() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
         <div className="w-full">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="page-kicker text-sm font-medium">Calculator</p>
-              <h2 className="page-title mt-1 text-2xl font-semibold tracking-tight">Quick Pricing</h2>
-              {sourceProject && (
-                <p className="page-description mt-1 text-sm">
-                  From project:{" "}
-                  <span className="font-medium text-neutral-900 dark:text-slate-100">
-                    {sourceProject.projectName}
-                  </span>
-                </p>
-              )}
-            </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {sourceProject ? (
+              <p className="text-sm text-gray-500">
+                From project:{" "}
+                <span className="font-medium text-neutral-900 dark:text-slate-100">
+                  {sourceProject.projectName}
+                </span>
+              </p>
+            ) : (
+              <span />
+            )}
             <div className="flex flex-wrap gap-2">
               {hasResults && (
                 <button
@@ -673,7 +673,7 @@ function PricingPageInner() {
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                   Job Setup
                 </p>
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                <div className="grid grid-cols-3 gap-2.5">
                   <CompactSelect
                     label="Trade"
                     value={input.setup.trade}
@@ -681,23 +681,18 @@ function PricingPageInner() {
                     onChange={(v) => updateSetup("trade", v as PricingEngineInput["setup"]["trade"])}
                   />
                   <CompactSelect
-                    label="State"
-                    value={input.setup.state}
-                    options={stateOptions}
-                    displayMap={STATE_ABBR}
-                    onChange={(v) => updateSetup("state", v as PricingEngineInput["setup"]["state"])}
-                  />
-                  <CompactSelect
                     label="Size"
                     value={input.setup.projectSize}
                     options={projectSizeOptions}
                     onChange={(v) => updateSetup("projectSize", v as PricingEngineInput["setup"]["projectSize"])}
+                    info={`How big is this job?\n\n• Small — Under $5k, 1-2 days (patch, small repair)\n• Medium — $5k–$25k, up to 2 weeks\n• Large — $25k–$100k, multi-week project\n• Extra Large — $100k+, complex or multi-phase`}
                   />
                   <CompactSelect
                     label="Risk"
                     value={input.setup.riskLevel}
                     options={riskLevelOptions}
                     onChange={(v) => updateSetup("riskLevel", v as PricingEngineInput["setup"]["riskLevel"])}
+                    info={`How uncertain or complex is this job?\n\n• Low — Clear scope, known client, easy access\n• Medium — Some unknowns, standard complexity\n• High — Tight timeline, hard access, vague scope, or new client\n• Critical — High stakes, penalties for delays, or unusual conditions`}
                   />
                 </div>
 
@@ -708,8 +703,39 @@ function PricingPageInner() {
                   Project Costs
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <MoneyInput label="Materials" value={input.costs.material} onChange={(v) => updateCost("material", v)} />
-                  <MoneyInput label="Labor" value={input.costs.labor} onChange={(v) => updateCost("labor", v)} />
+                  <div>
+                    <MoneyInput
+                      label="Materials"
+                      value={rawMaterial}
+                      onChange={(v) => {
+                        setRawMaterial(v);
+                        updateCost("material", v * (1 + wastePercent / 100));
+                      }}
+                    />
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="text-[11px] text-gray-400">Waste %</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        step="1"
+                        value={wastePercent || ""}
+                        placeholder="0"
+                        onChange={(e) => {
+                          const pct = Math.max(0, Math.min(50, Number(e.target.value) || 0));
+                          setWastePercent(pct);
+                          updateCost("material", rawMaterial * (1 + pct / 100));
+                        }}
+                        className="w-14 rounded border border-[#d9e2ec] px-1.5 py-0.5 text-center text-xs text-neutral-900 outline-none transition focus:border-[#111111]"
+                      />
+                      {wastePercent > 0 && rawMaterial > 0 && (
+                        <span className="text-[11px] font-medium text-[#ff5c35]">
+                          = {formatMoney(rawMaterial * (1 + wastePercent / 100))}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <MoneyInput label="Own Labor" value={input.costs.labor} onChange={(v) => updateCost("labor", v)} />
                   <MoneyInput label="Dumpster" value={input.costs.dumpster} onChange={(v) => updateCost("dumpster", v)} />
                   <MoneyInput label="Permits" value={input.costs.permits} onChange={(v) => updateCost("permits", v)} />
                   <MoneyInput label="Equipment" value={input.costs.equipment} onChange={(v) => updateCost("equipment", v)} />
@@ -998,6 +1024,43 @@ function PricingPageInner() {
             </div>
 
             <div className="flex-1 space-y-3 overflow-auto px-6 py-5">
+              {(() => {
+                const assignedProduct = tierProducts.find(
+                  (p) => p.tier === expandedCard && p.trade === input.setup.trade && p.productName.trim()
+                );
+                if (!assignedProduct) return null;
+                return (
+                  <div className="flex items-start gap-3 rounded-lg border border-[#d9e2ec] bg-white p-3">
+                    {assignedProduct.imageUrl ? (
+                      <img
+                        src={assignedProduct.imageUrl}
+                        alt={assignedProduct.productName}
+                        className="h-14 w-14 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded border border-dashed border-[#d9e2ec] bg-[#f8fafc] text-[10px] text-gray-400">
+                        No img
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#ff5c35]">Assigned Product</p>
+                      <p className="mt-0.5 text-sm font-semibold text-[#213343]">
+                        {assignedProduct.productBrand ? `${assignedProduct.productBrand} · ` : ""}
+                        {assignedProduct.productName}
+                      </p>
+                      {assignedProduct.productLine && (
+                        <p className="text-xs text-gray-500">{assignedProduct.productLine}</p>
+                      )}
+                      {assignedProduct.warrantyYears > 0 && (
+                        <p className="mt-0.5 text-xs text-gray-400">{assignedProduct.warrantyYears}-year warranty</p>
+                      )}
+                      {assignedProduct.notes && (
+                        <p className="mt-0.5 text-xs text-gray-400">{assignedProduct.notes}</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="rounded-md bg-[#f6f8fb] px-3 py-2 text-sm text-gray-600">
                 <span className="font-semibold text-gray-700">Summary:</span>{" "}
                 {tierMaterials[expandedCard]?.trim() || "No summary set yet."}
@@ -1256,18 +1319,32 @@ function TypicalCostHint({ trade, size, baseCost }: { trade: string; size: strin
 }
 
 /* ── Compact select for job setup ── */
-function CompactSelect({ label, value, options, onChange, displayMap }: { label: string; value: string; options: readonly string[]; onChange: (v: string) => void; displayMap?: Record<string, string> }) {
+function CompactSelect({ label, value, options, onChange, displayMap, info }: {
+  label: string; value: string; options: readonly string[];
+  onChange: (v: string) => void; displayMap?: Record<string, string>; info?: string;
+}) {
   return (
-    <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-      {label}
+    <div className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      <div className="flex items-center gap-1 mb-1">
+        <span>{label}</span>
+        {info && (
+          <div className="relative flex items-center">
+            <Info className="peer h-3 w-3 cursor-default text-gray-300 transition-colors hover:text-[#ff5c35]" />
+            <div className="pointer-events-none invisible peer-hover:visible absolute top-full left-1/2 z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-[#d9e2ec] bg-white p-3 text-[11px] font-normal normal-case tracking-normal text-[#213343] shadow-lg opacity-0 peer-hover:opacity-100 transition-opacity">
+              <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-l border-t border-[#d9e2ec] bg-white" />
+              <div className="whitespace-pre-line leading-relaxed">{info}</div>
+            </div>
+          </div>
+        )}
+      </div>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-md border border-[#d9e2ec] bg-white px-2.5 py-2 text-sm font-normal normal-case tracking-normal text-[#213343] outline-none transition focus:border-[#111111]"
+        className="w-full rounded-md border border-[#d9e2ec] bg-white px-2.5 py-2 text-sm font-normal normal-case tracking-normal text-[#213343] outline-none transition focus:border-[#111111]"
       >
         {options.map((o) => <option key={o} value={o}>{displayMap ? displayMap[o] ?? o : o}</option>)}
       </select>
-    </label>
+    </div>
   );
 }
 

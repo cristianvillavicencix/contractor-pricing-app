@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const url = request.nextUrl.clone();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -30,6 +30,8 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isAuthRoute =
     path.startsWith("/login") ||
+    path.startsWith("/signup") ||
+    path.startsWith("/forgot-password") ||
     path.startsWith("/auth/callback") ||
     path.startsWith("/auth/complete") ||
     path.startsWith("/auth/update-password");
@@ -43,7 +45,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (session && path === "/login") {
+  if (session && (path === "/login" || path === "/signup")) {
     url.pathname = "/auth/complete";
     url.searchParams.set("next", "/projects");
     return NextResponse.redirect(url);
@@ -55,4 +57,3 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|vendor/).*)"],
 };
-

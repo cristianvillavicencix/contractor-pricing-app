@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Info, Minus, Pencil, Plus, RotateCcw, Save } from "lucide-react";
+import { Copy, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -15,17 +15,21 @@ import {
 } from "@/lib/proposal-templates";
 import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
 import { MaterialsTableEditor } from "@/components/proposals/materials-table-editor";
+import { TierProductsManager } from "@/components/products/tier-products-manager";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   deleteProposalTemplate,
+  deleteTierProduct,
   listProposalTemplates,
+  listTierProducts,
   loadCompanySettings,
   saveCompanySettings,
   upsertProposalTemplate,
+  upsertTierProduct,
 } from "@/lib/supabase/data";
+import type { TierProduct } from "@/lib/app-data";
 import type {
   AppSettings,
-  CompanyLevel,
   OverheadLineItem,
   PriceOptionName,
   ProjectSize,
@@ -37,8 +41,8 @@ import type {
   Strategy,
 } from "@/lib/app-data";
 import {
-  companyLevelOptions,
   defaultSettings,
+  getUploadedCompanyLogoUrl,
   getTierDisplayName,
   mergeAppSettings,
   OVERHEAD_BREAKDOWN_SUGGESTIONS,
@@ -59,15 +63,19 @@ type Level = "Low" | "Medium" | "High";
 
 type SettingsSection =
   | "Company Profile"
+  | "Documents"
   | "Pricing"
   | "Proposals"
+  | "Products"
   | "App Preferences"
   | "Data";
 
 const SETTINGS_NAV_ITEMS: SettingsSection[] = [
   "Company Profile",
+  "Documents",
   "Pricing",
   "Proposals",
+  "Products",
   "App Preferences",
   "Data",
 ];
@@ -89,7 +97,7 @@ const TRADE_KEYS = tradeOptions;
 type ProposalTab = "templates" | "content" | "settings" | "brand";
 
 function parseSettingsSection(value: string | null): SettingsSection | null {
-  if (value === "Company Profile" || value === "Pricing" || value === "Proposals" || value === "App Preferences" || value === "Data") {
+  if (value === "Company Profile" || value === "Documents" || value === "Pricing" || value === "Proposals" || value === "Products" || value === "App Preferences" || value === "Data") {
     return value;
   }
   return null;
@@ -121,10 +129,9 @@ function SettingsPageInner() {
     mergeAppSettings(savedSettings)
   );
   const [message, setMessage] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [settingsConnectionsInfoOpen, setSettingsConnectionsInfoOpen] = useState(false);
   const requestedSection = useMemo(
     () => parseSettingsSection(searchParams.get("section")),
     [searchParams]
@@ -167,15 +174,6 @@ function SettingsPageInner() {
   }, [isLoading, loadError, appPreferencesSerialized, settings.appPreferences]);
 
   useEffect(() => {
-    if (!settingsConnectionsInfoOpen) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setSettingsConnectionsInfoOpen(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsConnectionsInfoOpen]);
-
-  useEffect(() => {
     if (!requestedSection) return;
     setActiveSection(requestedSection);
   }, [requestedSection]);
@@ -187,6 +185,28 @@ function SettingsPageInner() {
 
   const validationMessage = getAppSettingsValidationError(settings);
 
+  useEffect(() => {
+    if (isLoading || loadError || !hasUnsavedChanges || validationMessage) return;
+
+    setSaveStatus("saving");
+    const timeout = window.setTimeout(() => {
+      saveCompanySettings(supabase, settings)
+        .then(() => {
+          setSavedSettings(settings);
+          setMessage("");
+          setSaveStatus("saved");
+          requestAppPreferencesSync();
+          window.setTimeout(() => setSaveStatus("idle"), 2500);
+        })
+        .catch((e) => {
+          setMessage(e instanceof Error ? e.message : "Failed to save settings");
+          setSaveStatus("idle");
+        });
+    }, 700);
+
+    return () => window.clearTimeout(timeout);
+  }, [hasUnsavedChanges, isLoading, loadError, settings, supabase, validationMessage]);
+
   function resetSettings() {
     setSettings(defaultSettings);
     setMessage("");
@@ -197,26 +217,6 @@ function SettingsPageInner() {
       })
       .catch((e) =>
         setMessage(e instanceof Error ? e.message : "Failed to reset settings")
-      );
-  }
-
-  function saveSettings() {
-    const validation = getAppSettingsValidationError(settings);
-    if (validation) {
-      setMessage(validation);
-      return;
-    }
-
-    saveCompanySettings(supabase, settings)
-      .then(() => {
-        setSavedSettings(settings);
-        setMessage("");
-        setSaveStatus("saved");
-        requestAppPreferencesSync();
-        setTimeout(() => setSaveStatus("idle"), 2500);
-      })
-      .catch((e) =>
-        setMessage(e instanceof Error ? e.message : "Failed to save settings")
       );
   }
 
@@ -250,120 +250,13 @@ function SettingsPageInner() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 sm:p-8 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 lg:max-w-[min(100%,42rem)]">
-              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Settings</p>
-              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
-                Settings
-              </h2>
-              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
-                Company and legal identity, calculator pricing rules, and everything clients see on quotes
-                and proposals — each category has one home in the sidebar.
-              </p>
-            </div>
-
-            <div className="relative flex w-full flex-wrap items-center justify-end gap-3 lg:w-auto lg:flex-shrink-0">
-              {hasUnsavedChanges ? (
-                <span className="rounded-lg border border-[#d9e2ec] px-3 py-2 text-xs font-semibold text-gray-600 dark:border-slate-600 dark:text-slate-300">
-                  Unsaved changes
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setSettingsConnectionsInfoOpen((o) => !o)}
-                className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border text-gray-500 transition hover:bg-[#f6f8fb] hover:text-[#213343] dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 ${
-                  settingsConnectionsInfoOpen
-                    ? "border-[#ff5c35] bg-[#fff1ea] text-[#ff5c35]"
-                    : "border-[#d9e2ec]"
-                }`}
-                aria-expanded={settingsConnectionsInfoOpen}
-                aria-controls="settings-connections-info"
-                title="How settings connect to quotes and proposals"
-              >
-                <Info className="h-5 w-5" aria-hidden />
-              </button>
-              {settingsConnectionsInfoOpen ? (
-                <>
-                  <button
-                    type="button"
-                    className="fixed inset-0 z-40 cursor-default bg-black/20"
-                    aria-label="Close help panel"
-                    onClick={() => setSettingsConnectionsInfoOpen(false)}
-                  />
-                  <div
-                    id="settings-connections-info"
-                    className="elevated-panel absolute right-0 top-full z-50 mt-2 w-[min(calc(100vw-2rem),26rem)] rounded-xl border border-[#d9e2ec] bg-white p-4 text-left shadow-xl dark:border-slate-600"
-                    role="dialog"
-                    aria-label="Settings and quotes"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      How settings connect to quotes and proposals
-                    </p>
-                    <ul className="mt-3 list-disc space-y-2 pl-4 text-xs leading-relaxed text-gray-600">
-                      <li>
-                        <span className="font-medium text-[#213343]">Company</span> — Name, contact, license, and
-                        certifications feed <strong>Quote Preview</strong>, PDFs, and the client portal when proposal toggles
-                        allow it.
-                      </li>
-                      <li>
-                        <span className="font-medium text-[#213343]">Pricing</span> — Margins, thresholds, location, and
-                        costs load into the <strong>Calculator</strong>; each quote stores its own Good/Better/Best prices
-                        after you price that job.
-                      </li>
-                      <li>
-                        <span className="font-medium text-[#213343]">Quotes &amp; proposals</span> — Templates, defaults,
-                        branding, and content snippets merge in <strong>Quote Preview</strong> for that quote&apos;s trade.
-                      </li>
-                      <li>
-                        <span className="font-medium text-[#213343]">App &amp; data</span> — App Preferences only change
-                        Calculator <em>display</em> (warnings, breakdown), not stored quote prices.
-                      </li>
-                    </ul>
-                    <p className="mt-3 border-t border-[#eef2f6] pt-3 text-xs text-gray-500">
-                      Open{" "}
-                      <Link href="/quotes" className="font-semibold text-[var(--brand-accent)] underline" onClick={() => setSettingsConnectionsInfoOpen(false)}>Proposals</Link>{" "}
-                      → Preview to see this live.
-                    </p>
-                  </div>
-                </>
-              ) : null}
-              <button
-                onClick={resetSettings}
-                className="inline-flex items-center gap-2 rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-[#f6f8fb] dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800"
-              >
-                <RotateCcw className="h-4 w-4" />
-                Reset
-              </button>
-              <button
-                onClick={saveSettings}
-                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 ${
-                  saveStatus === "saved"
-                    ? "bg-[#16a34a] hover:bg-[#15803d]"
-                    : "bg-[#ff5c35] hover:bg-[#e94820]"
-                }`}
-              >
-                {saveStatus === "saved" ? (
-                  <>
-                    <Check className="h-4 w-4" />
-                    Saved
-                  </>
-                ) : (
-                  <>
-                    <Save className="h-4 w-4" />
-                    Save Changes
-                  </>
-                )}
-              </button>
-            </div>
-          </header>
-
           {message || validationMessage ? (
-            <div className="elevated-panel mt-6 rounded-lg border border-[#d9e2ec] bg-white px-5 py-4 text-sm text-gray-700 dark:border-slate-600">
+            <div className="elevated-panel rounded-lg border border-[#d9e2ec] bg-white px-5 py-4 text-sm text-gray-700 dark:border-slate-600">
               {message || validationMessage}
             </div>
           ) : null}
 
-          <div className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]">
+          <div className={message || validationMessage ? "mt-4 grid gap-6 lg:grid-cols-[260px_1fr]" : "grid gap-6 lg:grid-cols-[260px_1fr]"}>
             <aside className="elevated-panel h-fit rounded-xl border border-[#d9e2ec] bg-white p-2 dark:border-slate-600">
               <div className="space-y-0.5">
                 {SETTINGS_NAV_ITEMS.map((item) => (
@@ -381,11 +274,20 @@ function SettingsPageInner() {
                   </button>
                 ))}
               </div>
+              <p className="px-4 pb-2 pt-3 text-xs text-gray-400">
+                {saveStatus === "saving" ? "Saving automatically..." : saveStatus === "saved" ? "Saved automatically" : "Changes save automatically"}
+              </p>
             </aside>
 
             <div>
               {activeSection === "Company Profile" ? (
                 <CompanyProfileSection
+                  settings={settings}
+                  setSettings={setSettings}
+                />
+              ) : null}
+              {activeSection === "Documents" ? (
+                <DocumentsSection
                   settings={settings}
                   setSettings={setSettings}
                 />
@@ -406,6 +308,9 @@ function SettingsPageInner() {
                   focusTier={requestedTier}
                 />
               ) : null}
+              {activeSection === "Products" ? (
+                <TierProductsManager supabase={supabase} />
+              ) : null}
               {activeSection === "App Preferences" ? (
                 <AppPreferencesSection
                   settings={settings}
@@ -415,6 +320,7 @@ function SettingsPageInner() {
               ) : null}
               {activeSection === "Data" ? (
                 <DataSection
+                  onResetSettings={resetSettings}
                   onExportSettings={() => {
                     const blob = new Blob([JSON.stringify(settings, null, 2)], {
                       type: "application/json",
@@ -464,90 +370,71 @@ function CompanyProfileSection({
   setSettings,
 }: SectionProps) {
   const profile = settings.companyProfile;
-  const [newCredential, setNewCredential] = useState("");
+  const uploadedLogoUrl = getUploadedCompanyLogoUrl(settings.branding.logoUrl);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 
-  function addCredential() {
-    const name = newCredential.trim();
-    if (!name) return;
+  async function uploadLogo(file: File) {
+    setLogoUploadError(null);
 
-    setSettings((current) => ({
-      ...current,
-      companyProfile: {
-        ...current.companyProfile,
-        certifications: [
-          ...current.companyProfile.certifications,
-          {
-            id: `credential-${Date.now()}`,
-            name,
-            enabled: true,
-          },
-        ],
-      },
-    }));
-    setNewCredential("");
-  }
+    if (!file.type.startsWith("image/")) {
+      setLogoUploadError("Please choose an image file.");
+      return;
+    }
 
-  function uploadCredentialDocument(credentialId: string, file: File) {
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
-      const result = event.target?.result;
-      if (typeof result !== "string") return;
-
-      setSettings((current) => ({
-        ...current,
-        companyProfile: {
-          ...current.companyProfile,
-          certifications: current.companyProfile.certifications.map((item) =>
-            item.id === credentialId
-              ? {
-                  ...item,
-                  documentName: file.name,
-                  documentType: file.type || "application/octet-stream",
-                  documentDataUrl: result,
-                  uploadedAt: new Date().toLocaleDateString("en-US"),
-                }
-              : item
-          ),
-        },
-      }));
-    };
-
-    reader.readAsDataURL(file);
-  }
-
-  function removeCredentialDocument(credentialId: string) {
-    setSettings((current) => ({
-      ...current,
-      companyProfile: {
-        ...current.companyProfile,
-        certifications: current.companyProfile.certifications.map((item) =>
-          item.id === credentialId
-            ? {
-                ...item,
-                documentName: undefined,
-                documentType: undefined,
-                documentDataUrl: undefined,
-                uploadedAt: undefined,
-              }
-            : item
-        ),
-      },
-    }));
+    const dataUrl = await readFileAsDataUrl(file);
+    updateBranding(setSettings, "logoUrl", dataUrl);
   }
 
   return (
     <SettingsSection
       title="Company Profile"
-      description="Legal identity, contact, and credentials. This data appears on proposals alongside text from Quotes & proposals (templates and defaults)."
+      description="Core company identity used across the app, proposals, PDFs, and the top profile menu."
     >
-      {/* ── Basic fields ── */}
+      <div className="mb-6 flex items-center gap-4">
+        <label className="group relative flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-[#d9e2ec] bg-[#f6f8fb] transition hover:border-black">
+          {uploadedLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={uploadedLogoUrl} alt="Company logo preview" className="h-full w-full object-contain p-2" />
+          ) : (
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">Logo</span>
+          )}
+          <span className="absolute inset-x-2 bottom-2 rounded bg-black/80 px-2 py-1 text-center text-[10px] font-semibold text-white opacity-0 transition group-hover:opacity-100">
+            Change
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void uploadLogo(file);
+            }}
+          />
+        </label>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-black">Company logo</p>
+          <p className="mt-1 max-w-xl text-xs leading-5 text-gray-500">
+            Click the logo to upload or replace it. Uploaded logos are used in proposals and in the top profile menu.
+          </p>
+          {uploadedLogoUrl ? (
+            <button
+              type="button"
+              onClick={() => updateBranding(setSettings, "logoUrl", "")}
+              className="mt-2 text-xs font-semibold text-gray-500 underline-offset-4 transition hover:text-black hover:underline"
+            >
+              Remove logo
+            </button>
+          ) : null}
+          {logoUploadError ? <p className="mt-2 text-xs text-red-600">{logoUploadError}</p> : null}
+        </div>
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <TextField
           label="Business Name"
-          placeholder="GA Castro Construction LLC"
+          placeholder="Latino Business Support"
           value={profile.businessName}
-          helperText="Appears on all proposals and PDFs."
+          helperText="Appears on proposals, PDFs, and your top profile menu."
           onChange={(value) =>
             setSettings((current) => ({
               ...current,
@@ -568,25 +455,12 @@ function CompanyProfileSection({
         />
         <TextField
           label="Job title / role"
-          placeholder="Senior Loan Officer · Owner · Project Manager"
+          placeholder="Owner · Project Manager · Sales Consultant"
           value={profile.contactJobTitle}
-          helperText="Shown under the contact name on the elegant proposal cover and PDF."
           onChange={(value) =>
             setSettings((current) => ({
               ...current,
               companyProfile: { ...current.companyProfile, contactJobTitle: value },
-            }))
-          }
-        />
-        <TextField
-          label="Contact photo URL"
-          placeholder="/branding/default-contact-photo.png"
-          value={profile.contactPhotoUrl}
-          helperText="Headshot shown on the elegant cover footer (circle). Use a public URL or path under /public."
-          onChange={(value) =>
-            setSettings((current) => ({
-              ...current,
-              companyProfile: { ...current.companyProfile, contactPhotoUrl: value },
             }))
           }
         />
@@ -611,12 +485,65 @@ function CompanyProfileSection({
             }))
           }
         />
+        <TextField
+          label="Website"
+          placeholder="www.lbs.bz"
+          value={profile.website}
+          helperText="Used for the top profile icon fallback when no logo is uploaded."
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, website: value },
+            }))
+          }
+        />
+        <TextField
+          label="Business Address"
+          placeholder="Street address"
+          value={profile.address}
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, address: value },
+            }))
+          }
+        />
+        <TextField
+          label="City"
+          value={profile.city}
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, city: value },
+            }))
+          }
+        />
+        <SelectField
+          label="State"
+          value={profile.state}
+          options={stateOptions}
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, state: value as ProjectState },
+            }))
+          }
+        />
+        <TextField
+          label="ZIP Code"
+          value={profile.zipCode}
+          onChange={(value) =>
+            setSettings((current) => ({
+              ...current,
+              companyProfile: { ...current.companyProfile, zipCode: value },
+            }))
+          }
+        />
         <SelectField
           label="Main Trade"
           value={profile.mainTrade}
           options={settingsTradeOptions}
           helperText="Default trade in the Calculator and new projects."
-          tooltip="Used as the default trade when you open the Calculator or create a new project. You can always change it per job. Pick the trade that represents most of your revenue."
           onChange={(value) =>
             setSettings((current) => ({
               ...current,
@@ -624,189 +551,296 @@ function CompanyProfileSection({
             }))
           }
         />
-        <SelectField
-          label="Company Level"
-          value={profile.companyLevel}
-          options={companyLevelOptions}
-          helperText="Adds or subtracts margin points automatically."
-          tooltip="Solo Owner = just you, no crew. Small Crew = 2–5 people on jobs. Established Company = 5+ years, solid reputation, repeat customers. Premium Company = recognized brand, high-end clients, premium pricing power. Established and Premium companies can typically charge more because customers trust their name."
-          onChange={(value) =>
-            setSettings((current) => ({
-              ...current,
-              companyProfile: { ...current.companyProfile, companyLevel: value as CompanyLevel },
-            }))
-          }
+      </div>
+    </SettingsSection>
+  );
+}
+
+function DocumentsSection({ settings, setSettings }: SectionProps) {
+  const credentials = settings.companyProfile.certifications;
+  const [newCredential, setNewCredential] = useState("");
+  const [selectedCredentialId, setSelectedCredentialId] = useState<string | null>(null);
+  const selectedCredential = selectedCredentialId
+    ? credentials.find((credential) => credential.id === selectedCredentialId) ?? null
+    : null;
+
+  function addCredential() {
+    const name = newCredential.trim();
+    if (!name) return;
+
+    const id = `credential-${Date.now()}`;
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: [
+          ...current.companyProfile.certifications,
+          { id, name, enabled: true },
+        ],
+      },
+    }));
+    setNewCredential("");
+    setSelectedCredentialId(id);
+  }
+
+  async function uploadCredentialDocument(credentialId: string, file: File) {
+    const dataUrl = await readFileAsDataUrl(file);
+
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: current.companyProfile.certifications.map((item) =>
+          item.id === credentialId
+            ? {
+                ...item,
+                documentName: file.name,
+                documentType: file.type || "application/octet-stream",
+                documentDataUrl: dataUrl,
+                uploadedAt: new Date().toLocaleDateString("en-US"),
+              }
+            : item
+        ),
+      },
+    }));
+  }
+
+  function removeCredentialDocument(credentialId: string) {
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: current.companyProfile.certifications.map((item) =>
+          item.id === credentialId
+            ? {
+                ...item,
+                documentName: undefined,
+                documentType: undefined,
+                documentDataUrl: undefined,
+                uploadedAt: undefined,
+              }
+            : item
+        ),
+      },
+    }));
+  }
+
+  function updateCredentialName(credentialId: string, name: string) {
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: current.companyProfile.certifications.map((item) =>
+          item.id === credentialId ? { ...item, name } : item
+        ),
+      },
+    }));
+  }
+
+  function toggleCredential(credentialId: string, enabled: boolean) {
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: current.companyProfile.certifications.map((item) =>
+          item.id === credentialId ? { ...item, enabled } : item
+        ),
+      },
+    }));
+  }
+
+  function deleteCredential(credentialId: string) {
+    setSettings((current) => ({
+      ...current,
+      companyProfile: {
+        ...current.companyProfile,
+        certifications: current.companyProfile.certifications.filter((item) => item.id !== credentialId),
+      },
+    }));
+    setSelectedCredentialId(null);
+  }
+
+  return (
+    <SettingsSection
+      title="Documents"
+      description="Store licenses, certifications, insurance certificates, and other proof documents used by proposals."
+    >
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <input
+          value={newCredential}
+          onChange={(event) => setNewCredential(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") addCredential();
+          }}
+          placeholder="Add document or certification name..."
+          className="min-w-0 flex-1 rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
         />
+        <button
+          type="button"
+          onClick={addCredential}
+          className="rounded-md bg-[var(--brand-accent)] px-4 py-3 text-sm font-semibold text-black transition hover:bg-[var(--brand-accent-hover)]"
+        >
+          Add document
+        </button>
       </div>
 
-      {/* ── Advanced ── */}
-      <AdvancedFields>
-        <div className="grid gap-4 md:grid-cols-2">
-          <TextField
-            label="Website"
-            value={profile.website}
-            onChange={(value) =>
-              setSettings((current) => ({
-                ...current,
-                companyProfile: { ...current.companyProfile, website: value },
-              }))
-            }
-          />
-          <TextField
-            label="State License Number"
-            value={profile.licenseNumber}
-            helperText="Loaded automatically into proposals when enabled."
-            tooltip="Your official state contractor license number. Find it on your license certificate or your state's Contractor Board website. Examples: CT-HIC-0123456, ROC-123456 (AZ), CGC-012345 (FL)."
-            onChange={(value) =>
-              setSettings((current) => ({
-                ...current,
-                companyProfile: { ...current.companyProfile, licenseNumber: value },
-              }))
-            }
-          />
-          <TextField
-            label="Insurance Provider"
-            value={profile.insuranceProvider}
-            helperText="Company name shown as a proposal credential."
-            tooltip="The name of your General Liability insurance company — not the policy number. Examples: Travelers, Nationwide, Zurich, The Hartford. Check your Certificate of Insurance (COI) or call your insurance agent."
-            onChange={(value) =>
-              setSettings((current) => ({
-                ...current,
-                companyProfile: { ...current.companyProfile, insuranceProvider: value },
-              }))
-            }
-          />
+      <div className="mt-5 overflow-hidden rounded-lg border border-[#d9e2ec] bg-white">
+        <div className="grid grid-cols-[1fr_110px_90px_220px] gap-3 border-b border-[#e8eef3] bg-[#f6f8fb] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 max-lg:grid-cols-[1fr_86px_74px_172px]">
+          <span>Name</span>
+          <span>Status</span>
+          <span>Enabled</span>
+          <span>Options</span>
         </div>
+        {credentials.map((credential) => (
+          <div
+            key={credential.id}
+            className="grid w-full grid-cols-[1fr_110px_90px_220px] items-center gap-3 border-b border-[#eef2f6] px-4 py-3 text-sm transition last:border-0 hover:bg-[#f6f8fb] max-lg:grid-cols-[1fr_86px_74px_172px]"
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedCredentialId(credential.id)}
+              className="min-w-0 text-left"
+            >
+              <span className="block truncate font-semibold text-[#213343]">{credential.name}</span>
+              {credential.documentName ? (
+                <span className="mt-0.5 block truncate text-xs text-gray-500">{credential.documentName}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedCredentialId(credential.id)}
+              className={`text-left ${credential.documentDataUrl ? "text-green-700" : "text-gray-400"}`}
+            >
+              {credential.documentDataUrl ? "Uploaded" : "Missing"}
+            </button>
+            <label className="relative inline-flex h-6 w-11 cursor-pointer items-center">
+              <input
+                type="checkbox"
+                checked={credential.enabled}
+                onChange={(event) => toggleCredential(credential.id, event.target.checked)}
+                className="peer sr-only"
+                aria-label={`Enable ${credential.name}`}
+              />
+              <span className="h-6 w-11 rounded-full bg-gray-200 transition peer-checked:bg-[#ff5c35]" />
+              <span className="absolute left-1 h-4 w-4 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="cursor-pointer text-xs font-semibold text-[#213343] underline-offset-4 hover:underline">
+                {credential.documentDataUrl ? "Replace" : "Upload"}
+                <input
+                  type="file"
+                  accept="application/pdf,image/*"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void uploadCredentialDocument(credential.id, file);
+                  }}
+                />
+              </label>
+              {credential.documentDataUrl ? (
+                <button
+                  type="button"
+                  onClick={() => removeCredentialDocument(credential.id)}
+                  className="text-xs font-semibold text-gray-500 underline-offset-4 hover:text-black hover:underline"
+                >
+                  Remove
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => deleteCredential(credential.id)}
+                className="text-xs font-semibold text-red-600 underline-offset-4 hover:underline"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+        {credentials.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-gray-500">
+            No documents yet. Add one to start your certification library.
+          </div>
+        ) : null}
+      </div>
 
-      <div className="mt-8 rounded-lg border border-[#d9e2ec] bg-[#f6f8fb] p-4">
-        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
-          <div>
-            <h4 className="text-sm font-semibold text-[#213343]">
-              Certifications & Credentials
-            </h4>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-gray-500">
-              These are company-level defaults. Future proposals can load them
-              automatically so you do not repeat this setup every time.
+      {selectedCredential ? (
+        <CredentialDocumentModal
+          credential={selectedCredential}
+          onClose={() => setSelectedCredentialId(null)}
+          onNameChange={(name) => updateCredentialName(selectedCredential.id, name)}
+        />
+      ) : null}
+    </SettingsSection>
+  );
+}
+
+function CredentialDocumentModal({
+  credential,
+  onClose,
+  onNameChange,
+}: {
+  credential: AppSettings["companyProfile"]["certifications"][number];
+  onClose: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  const isPdf = isPdfCredentialDocument(credential);
+  const isImage = credential.documentDataUrl?.startsWith("data:image/");
+  const pdfPreviewUrl = useMemo(
+    () => (isPdf ? createDocumentObjectUrl(credential.documentDataUrl, "application/pdf") : null),
+    [credential.documentDataUrl, isPdf]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (pdfPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(pdfPreviewUrl);
+    };
+  }, [pdfPreviewUrl]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-8 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex flex-col gap-4 border-b border-[#d9e2ec] px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <input
+              value={credential.name}
+              onChange={(event) => onNameChange(event.target.value)}
+              className="w-full rounded-md border border-transparent px-0 text-lg font-semibold text-[#213343] outline-none focus:border-[#d9e2ec] focus:px-2"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              {credential.documentName ? `Uploaded ${credential.uploadedAt ?? ""}` : "No document attached yet."}
             </p>
           </div>
-          <span className="w-fit rounded-md border border-[#d9e2ec] bg-white px-3 py-1 text-xs text-gray-500">
-            Company default
-          </span>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {profile.certifications.map((credential) => (
-            <div
-              key={credential.id}
-              className="rounded-md border border-[#d9e2ec] bg-white p-3 text-sm"
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-[#d9e2ec] px-3 py-2 text-sm font-semibold text-gray-600 transition hover:bg-[#f6f8fb]"
             >
-              <div className="flex items-center justify-between gap-4">
-                <label className="flex min-w-0 items-center gap-3 font-medium">
-                  <input
-                    type="checkbox"
-                    checked={credential.enabled}
-                    onChange={(event) =>
-                      setSettings((current) => ({
-                        ...current,
-                        companyProfile: {
-                          ...current.companyProfile,
-                          certifications: current.companyProfile.certifications.map(
-                            (item) =>
-                              item.id === credential.id
-                                ? { ...item, enabled: event.target.checked }
-                                : item
-                          ),
-                        },
-                      }))
-                    }
-                    className="h-4 w-4 flex-none accent-[#ff5c35]"
-                  />
-                  <span
-                    className={`truncate ${
-                      credential.enabled ? "text-[#213343]" : "text-gray-400"
-                    }`}
-                  >
-                    {credential.name}
-                  </span>
-                </label>
-                {credential.documentDataUrl ? (
-                  <span className="rounded-md bg-[#f6f8fb] px-2 py-1 text-xs text-gray-500">
-                    Uploaded
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="mt-3 rounded-md border border-dashed border-[#d9e2ec] bg-[#f6f8fb] p-3">
-                {credential.documentDataUrl ? (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[#213343]">
-                        {credential.documentName}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Uploaded {credential.uploadedAt}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <a
-                        href={credential.documentDataUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium transition hover:bg-[#f6f8fb]"
-                      >
-                        View
-                      </a>
-                      <button
-                        onClick={() => removeCredentialDocument(credential.id)}
-                        className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium transition hover:bg-[#f6f8fb]"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <label className="flex cursor-pointer items-center justify-between gap-3 text-xs text-gray-500 transition hover:text-[#213343]">
-                    <span>Upload PDF or image proof</span>
-                    <span className="rounded-md border border-[#d9e2ec] bg-white px-3 py-2 font-medium">
-                      Choose File
-                    </span>
-                    <input
-                      type="file"
-                      accept="application/pdf,image/*"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (file) uploadCredentialDocument(credential.id, file);
-                        event.target.value = "";
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-            </div>
-          ))}
+              Close
+            </button>
+          </div>
         </div>
 
-        <div className="mt-4 flex gap-2">
-          <input
-            value={newCredential}
-            onChange={(event) => setNewCredential(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") addCredential();
-            }}
-            placeholder="Add custom certification..."
-            className="min-w-0 flex-1 rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
-          />
-          <button
-            onClick={addCredential}
-            className="rounded-md border border-[#d9e2ec] bg-white px-4 py-3 text-sm font-medium transition hover:bg-[#f6f8fb]"
-          >
-            Add
-          </button>
+        <div className="p-5">
+          <div className="min-h-80 overflow-hidden rounded-lg border border-[#d9e2ec] bg-[#f6f8fb]">
+            {isPdf && pdfPreviewUrl ? (
+              <object data={pdfPreviewUrl} type="application/pdf" className="h-[68vh] w-full">
+                <iframe src={pdfPreviewUrl} title={credential.name} className="h-[68vh] w-full" />
+              </object>
+            ) : isImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={credential.documentDataUrl} alt={credential.name} className="h-[68vh] w-full object-contain p-4" />
+            ) : (
+              <div className="flex h-[68vh] min-h-80 flex-col items-center justify-center p-6 text-center text-sm text-gray-500">
+                <p className="font-medium text-[#213343]">No document attached</p>
+                <p className="mt-1 max-w-sm">Upload a PDF or image so this credential can be reviewed and reused.</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      </AdvancedFields>
-    </SettingsSection>
+    </div>
   );
 }
 
@@ -1334,7 +1368,7 @@ function ProposalSettingsSection({
   return (
     <SettingsSection
       title="Proposal defaults & client rules"
-      description="Company-wide options for new quotes and proposals. Trade-specific wording and tables are edited under Templates or in Quote Preview for that job."
+      description="Company-wide options for new proposals. Trade-specific wording and tables are edited under Templates or in Proposal Preview for that job."
       footer="Profit and margin should never appear on client-facing proposals by default. They are internal contractor values only."
     >
       <div className="grid gap-4 md:grid-cols-2">
@@ -1350,7 +1384,7 @@ function ProposalSettingsSection({
           label="Default Expiration Days"
           value={proposal.defaultExpirationDays}
           min={1}
-          helperText="How long a new quote stays valid before expiring."
+          helperText="How long a new proposal stays valid before expiring."
           tooltip="Proposals expire to protect you from clients accepting an old price after material or labor costs have changed. Industry standard: 14–30 days. Short expirations create urgency; long ones reduce friction. You can always extend per quote."
           onChange={(value) =>
             updateProposal(setSettings, "defaultExpirationDays", Math.max(1, value))
@@ -1522,7 +1556,7 @@ function ProposalSettingsSection({
           <TextField
             label="Good — materials / brand (default)"
             value={proposal.goodTierMaterialsSummary ?? ""}
-            tooltip="Short line shown on proposals for the Good tier, e.g. 'IKO Cambridge shingles' or 'Standard vinyl siding'. New quotes copy this into the quote so you can edit per job in Quote Preview."
+            tooltip="Short line shown on proposals for the Good tier, e.g. 'IKO Cambridge shingles' or 'Standard vinyl siding'. New proposals copy this so you can edit per job in Proposal Preview."
             onChange={(value) => updateProposal(setSettings, "goodTierMaterialsSummary", value)}
           />
           <TextField
@@ -1546,8 +1580,8 @@ function ProposalSettingsSection({
           Company-wide default rows for the <strong>Materials &amp; Specifications</strong> section for each Good / Better /
           Best tier. When a tier is selected on the proposal, we use, in order: overrides saved on that quote, then
           per-tier rows on that trade&apos;s proposal template (edit in{" "}
-          <Link href="/quotes" className="font-medium text-[#ff5c35] underline hover:text-[#e94820]">
-            Quotes → Preview → Edit template → Materials &amp; Specs
+          <Link href="/proposals" className="font-medium text-[#ff5c35] underline hover:text-[#e94820]">
+            Proposals → Preview → Edit template → Materials &amp; Specs
           </Link>
           ), then the tables here, then the template&apos;s shared materials list. Prefer the template for trade-specific
           specs (roofing vs siding, etc.); use this block when the same defaults should apply across trades.
@@ -1612,20 +1646,16 @@ function ProposalSettingsSection({
 function BrandingSection({ settings, setSettings }: SectionProps) {
   const branding = settings.branding;
   const profile = settings.companyProfile;
+  const uploadedLogoUrl = getUploadedCompanyLogoUrl(branding.logoUrl);
 
   return (
     <SettingsSection
       title="Logo, colors & proposal layout"
-      description="Visual defaults for printed and PDF proposals (also used when you open Quote Preview). Business name and license come from Company Profile."
-      footer="These fields live under Quotes & proposals so logo, layout, and document text are easy to find in one place."
+      description="Visual defaults for printed and PDF proposals (also used when you open Proposal Preview). Business name and license come from Company Profile."
+      footer="These fields live under Proposals so logo, layout, and document text are easy to find in one place."
     >
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <div className="grid gap-4 md:grid-cols-2">
-          <TextField
-            label="Logo URL"
-            value={branding.logoUrl}
-            onChange={(value) => updateBranding(setSettings, "logoUrl", value)}
-          />
           <SelectField
             label="Proposal Style"
             value={branding.proposalStyle}
@@ -1689,10 +1719,15 @@ function BrandingSection({ settings, setSettings }: SectionProps) {
           <div className="mt-5 rounded-lg border border-[#d9e2ec] bg-[#f6f8fb] p-5">
             <div className="flex items-center gap-3">
               <div
-                className="flex h-10 w-10 items-center justify-center rounded-md text-xs font-semibold text-white"
-                style={{ backgroundColor: branding.primaryColor }}
+                className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md text-xs font-semibold text-white"
+                style={{ backgroundColor: uploadedLogoUrl ? "#ffffff" : branding.primaryColor }}
               >
-                Logo
+                {uploadedLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={uploadedLogoUrl} alt="" className="h-full w-full object-contain p-1" />
+                ) : (
+                  "Logo"
+                )}
               </div>
               <div>
                 <p className="font-semibold tracking-tight">
@@ -2506,6 +2541,40 @@ function updateBranding<K extends keyof AppSettings["branding"]>(
   }));
 }
 
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("Invalid file data"));
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isPdfCredentialDocument(credential: AppSettings["companyProfile"]["certifications"][number]) {
+  const dataUrl = credential.documentDataUrl ?? "";
+  return (
+    dataUrl.startsWith("data:application/pdf") ||
+    credential.documentType === "application/pdf" ||
+    credential.documentName?.toLowerCase().endsWith(".pdf")
+  );
+}
+
+function createDocumentObjectUrl(dataUrl: string | undefined, fallbackType: string) {
+  if (!dataUrl?.startsWith("data:")) return null;
+
+  try {
+    const [meta = "", base64 = ""] = dataUrl.split(",");
+    const mime = meta.match(/^data:([^;]+)/)?.[1] || fallbackType;
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    return URL.createObjectURL(new Blob([bytes], { type: mime || fallbackType }));
+  } catch {
+    return dataUrl;
+  }
+}
+
 function updatePreference<K extends keyof AppSettings["appPreferences"]>(
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>,
   key: K,
@@ -2539,25 +2608,25 @@ function ProposalsSection({
       id: "templates",
       label: "Templates",
       description:
-        "Full multi-section proposal per trade. Edit here or from Quote Preview → Edit template; both save to the same library.",
+        "Full multi-section proposal per trade. Edit here or from Proposal Preview → Edit template; both save to the same library.",
     },
     {
       id: "content",
-      label: "Quote content",
+      label: "Proposal content",
       description:
-        "Suggested “included services” per trade and scope shortcuts for the quote builder — feeds Quote Preview, not the PDF layout.",
+        "Suggested “included services” per trade and scope shortcuts for the proposal builder — feeds Proposal Preview, not the PDF layout.",
     },
     {
       id: "settings",
       label: "Defaults & rules",
       description:
-        "Expiration, Good/Better/Best toggles, tier summaries, company-wide materials tables, and legal defaults for new quotes.",
+        "Expiration, Good/Better/Best toggles, tier summaries, company-wide materials tables, and legal defaults for new proposals.",
     },
     {
       id: "brand",
       label: "Logo & layout",
       description:
-        "Logo URL, colors, proposal style, and default cover layout. Per-quote photos and overrides still happen in Quote Preview.",
+        "Logo URL, colors, proposal style, and default cover layout. Per-proposal photos and overrides still happen in Proposal Preview.",
     },
   ];
 
@@ -2566,7 +2635,7 @@ function ProposalsSection({
       <div className="elevated-panel mb-6 rounded-xl border border-[#e8eef3] bg-[#fafcfd] px-4 py-3 text-sm text-gray-600 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-200">
         <p className="font-medium text-[#213343]">Client-facing documents — one hub</p>
         <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
-          Use the tabs below for everything that shapes quotes and proposals. Your{" "}
+          Use the tabs below for everything that shapes proposals. Your{" "}
           <button
             type="button"
             onClick={() => onNavigateToSection("Company Profile")}
@@ -3124,10 +3193,224 @@ function TemplatesSection() {
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Products section — assign Good / Better / Best products per trade
+───────────────────────────────────────────────────────────────── */
+const TIER_NAMES = ["Good", "Better", "Best"] as const;
+
+type TierProductDraft = Omit<TierProduct, "id"> & { id: string };
+
+function emptyProduct(trade: string, tier: string): TierProductDraft {
+  return {
+    id: crypto.randomUUID(),
+    trade: trade as TierProduct["trade"],
+    tier: tier as TierProduct["tier"],
+    productName: "",
+    productBrand: "",
+    productLine: "",
+    imageUrl: "",
+    warrantyYears: 0,
+    notes: "",
+  };
+}
+
+function ProductsSection({ supabase }: { supabase: ReturnType<typeof createSupabaseBrowserClient> }) {
+  const [products, setProducts] = useState<TierProductDraft[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    listTierProducts(supabase)
+      .then((rows) => setProducts(rows))
+      .catch(() => undefined)
+      .finally(() => setIsLoading(false));
+  }, [supabase]);
+
+  function getProduct(trade: string, tier: string): TierProductDraft {
+    return (
+      products.find((p) => p.trade === trade && p.tier === tier) ??
+      emptyProduct(trade, tier)
+    );
+  }
+
+  function patchProduct(trade: string, tier: string, patch: Partial<TierProductDraft>) {
+    setProducts((prev) => {
+      const existing = prev.find((p) => p.trade === trade && p.tier === tier);
+      if (existing) {
+        return prev.map((p) =>
+          p.trade === trade && p.tier === tier ? { ...p, ...patch } : p
+        );
+      }
+      return [...prev, { ...emptyProduct(trade, tier), ...patch }];
+    });
+  }
+
+  async function saveProduct(trade: string, tier: string) {
+    const key = `${trade}:${tier}`;
+    const draft = getProduct(trade, tier);
+    setSavingKey(key);
+    try {
+      await upsertTierProduct(supabase, draft);
+      setProducts((prev) =>
+        prev.some((p) => p.trade === trade && p.tier === tier)
+          ? prev
+          : [...prev, draft]
+      );
+    } catch {
+      // silent — user can retry
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  async function clearProduct(trade: string, tier: string) {
+    const existing = products.find((p) => p.trade === trade && p.tier === tier);
+    if (!existing) return;
+    await deleteTierProduct(supabase, existing.id).catch(() => undefined);
+    setProducts((prev) => prev.filter((p) => !(p.trade === trade && p.tier === tier)));
+  }
+
+  if (isLoading) {
+    return (
+      <SettingsSection title="Products" description="Loading…">
+        <div className="h-24" />
+      </SettingsSection>
+    );
+  }
+
+  return (
+    <SettingsSection
+      title="Products"
+      description="Assign specific products to Good, Better, and Best tiers for each trade. These appear in the calculator's tier breakdown and on proposals."
+    >
+      <div className="space-y-8">
+        {tradeOptions.map((trade) => (
+          <div key={trade}>
+            <p className="mb-3 text-sm font-semibold text-[#213343]">{trade}</p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              {TIER_NAMES.map((tier) => {
+                const p = getProduct(trade, tier);
+                const key = `${trade}:${tier}`;
+                const isSaving = savingKey === key;
+                return (
+                  <div key={tier} className="rounded-lg border border-[#d9e2ec] bg-white p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`inline-block rounded px-2 py-0.5 text-[11px] font-semibold ${
+                          tier === "Best"
+                            ? "bg-[#213343] text-white"
+                            : tier === "Better"
+                              ? "bg-[#f6f8fb] text-[#213343]"
+                              : "bg-[#f0f4f8] text-[#516f90]"
+                        }`}
+                      >
+                        {tier}
+                      </span>
+                      {p.productName && (
+                        <button
+                          type="button"
+                          onClick={() => void clearProduct(trade, tier)}
+                          className="text-[11px] text-gray-400 transition hover:text-red-500"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    <label className="block text-xs font-medium text-gray-500">
+                      Product Name
+                      <input
+                        type="text"
+                        value={p.productName}
+                        placeholder="e.g. Timberline HDZ"
+                        onChange={(e) => patchProduct(trade, tier, { productName: e.target.value })}
+                        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-2.5 py-2 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
+                      />
+                    </label>
+
+                    <label className="block text-xs font-medium text-gray-500">
+                      Brand
+                      <input
+                        type="text"
+                        value={p.productBrand}
+                        placeholder="e.g. GAF"
+                        onChange={(e) => patchProduct(trade, tier, { productBrand: e.target.value })}
+                        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-2.5 py-2 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
+                      />
+                    </label>
+
+                    <label className="block text-xs font-medium text-gray-500">
+                      Product Line / Series
+                      <input
+                        type="text"
+                        value={p.productLine}
+                        placeholder="e.g. Lifetime Shingle System"
+                        onChange={(e) => patchProduct(trade, tier, { productLine: e.target.value })}
+                        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-2.5 py-2 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
+                      />
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block text-xs font-medium text-gray-500">
+                        Warranty (yrs)
+                        <input
+                          type="number"
+                          min="0"
+                          max="99"
+                          value={p.warrantyYears || ""}
+                          placeholder="0"
+                          onChange={(e) => patchProduct(trade, tier, { warrantyYears: Number(e.target.value) || 0 })}
+                          className="mt-1 w-full rounded-md border border-[#d9e2ec] px-2.5 py-2 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium text-gray-500">
+                        Image URL
+                        <input
+                          type="url"
+                          value={p.imageUrl}
+                          placeholder="https://…"
+                          onChange={(e) => patchProduct(trade, tier, { imageUrl: e.target.value })}
+                          className="mt-1 w-full rounded-md border border-[#d9e2ec] px-2.5 py-2 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="block text-xs font-medium text-gray-500">
+                      Notes
+                      <input
+                        type="text"
+                        value={p.notes}
+                        placeholder="Optional note for the proposal"
+                        onChange={(e) => patchProduct(trade, tier, { notes: e.target.value })}
+                        className="mt-1 w-full rounded-md border border-[#d9e2ec] px-2.5 py-2 text-sm text-neutral-900 outline-none transition focus:border-[#111111]"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => void saveProduct(trade, tier)}
+                      className="w-full rounded-md bg-[#ff5c35] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#e94820] disabled:opacity-60"
+                    >
+                      {isSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </SettingsSection>
+  );
+}
+
 function DataSection({
+  onResetSettings,
   onExportSettings,
   onResetOnboarding,
 }: {
+  onResetSettings: () => void;
   onExportSettings: () => void;
   onResetOnboarding: () => Promise<void>;
 }) {
@@ -3160,6 +3443,21 @@ function DataSection({
             className="mt-4 rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
           >
             Download settings JSON
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-[#d9e2ec] p-5">
+          <p className="text-sm font-medium text-black">Reset settings</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Restores the default company settings for this account. Use this only when you want to rebuild the setup.
+          </p>
+          <button
+            type="button"
+            onClick={onResetSettings}
+            className="mt-4 inline-flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium transition hover:bg-[#f6f8fb]"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reset settings
           </button>
         </div>
 

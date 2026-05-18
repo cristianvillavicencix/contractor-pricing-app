@@ -92,10 +92,15 @@ function getSelectedResult(quote: Quote, option: PriceOptionName) {
 function normalizeProjectFromQuote(quote: Quote): Project {
   const option = quote.selectedOption ?? "Better";
   const selected = getSelectedResult(quote, option);
-  const projectId = quote.projectId ?? quote.id;
+  const projectId = crypto.randomUUID();
 
   return {
     id: projectId,
+    quoteId: quote.id,
+    proposalId: quote.id,
+    selectedOptionId: quote.id,
+    selectedTier: option,
+    approvedAmount: selected.salePrice,
     projectName: quote.projectName || "New Project",
     customerName: quote.customerName || "Customer",
     customerPhone: quote.customerPhone ?? "",
@@ -107,7 +112,7 @@ function normalizeProjectFromQuote(quote: Quote): Project {
     trade: isTrade(quote.trade) ? quote.trade : "Remodeling",
     projectSize: isProjectSize(quote.projectSize) ? quote.projectSize : "Medium",
     riskLevel: isRiskLevel(quote.riskLevel) ? quote.riskLevel : "Medium",
-    status: "Planned",
+    status: "not_started",
     notes: [
       `Created automatically from proposal ${quote.proposalNumber ?? quote.id}.`,
       `Selected option: ${option}.`,
@@ -130,21 +135,42 @@ function normalizeProjectFromQuote(quote: Quote): Project {
   };
 }
 
-export async function ensureProjectForAcceptedPaidQuote(params: {
+export async function convertAcceptedQuoteToProject(params: {
   admin: AdminClient;
   companyId: string;
   quoteId: string;
   quote: Quote;
 }) {
   const { admin, companyId, quoteId, quote } = params;
-  if (quote.status !== "Accepted" || quote.depositStatus !== "Paid") {
+  if (quote.status !== "Accepted" && quote.status !== "converted_to_project") {
     return { created: false, projectId: quote.projectId ?? null };
   }
-  if (quote.projectId) {
-    return { created: false, projectId: quote.projectId };
+  const { data: existingProject, error: existingError } = await admin
+    .from("projects")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("proposal_id", quoteId)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (existingProject?.id) {
+    if (!quote.projectId || quote.status !== "converted_to_project") {
+      const linkedQuote: Quote = {
+        ...quote,
+        projectId: existingProject.id as string,
+        projectCreatedAt: quote.projectCreatedAt ?? new Date().toISOString(),
+        projectCreatedFromProposalId: quoteId,
+        status: "converted_to_project",
+      };
+      const { error: updateQuoteError } = await admin
+        .from("quotes")
+        .update({ project_id: existingProject.id, data: linkedQuote })
+        .eq("id", quoteId);
+      if (updateQuoteError) throw new Error(updateQuoteError.message);
+    }
+    return { created: false, projectId: existingProject.id as string };
   }
 
-  const project = normalizeProjectFromQuote(quote);
+  const project = normalizeProjectFromQuote({ ...quote, id: quoteId });
   const nowIso = new Date().toISOString();
 
   const { error: insertProjectError } = await admin.from("projects").insert({
@@ -165,6 +191,11 @@ export async function ensureProjectForAcceptedPaidQuote(params: {
     project_size: project.projectSize,
     risk_level: project.riskLevel,
     contact_id: project.contactId ?? null,
+    quote_id: quoteId,
+    proposal_id: quoteId,
+    selected_option_id: quoteId,
+    selected_tier: project.selectedTier,
+    approved_amount: project.approvedAmount,
   });
 
   // If project already exists (idempotent key), continue linking quote.
@@ -177,6 +208,7 @@ export async function ensureProjectForAcceptedPaidQuote(params: {
     projectId: project.id,
     projectCreatedAt: nowIso,
     projectCreatedFromProposalId: quoteId,
+    status: "converted_to_project",
   };
 
   const { error: updateQuoteError } = await admin
@@ -187,3 +219,5 @@ export async function ensureProjectForAcceptedPaidQuote(params: {
 
   return { created: true, projectId: project.id };
 }
+
+export const ensureProjectForAcceptedPaidQuote = convertAcceptedQuoteToProject;

@@ -3,16 +3,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 type PagedFlow = { total?: number };
+type PagedChunker = { removePages: (fromIndex?: number) => void };
+type PagedPreviewer = {
+  preview: (content: HTMLElement, stylesheets: string[], renderTo: HTMLElement) => Promise<PagedFlow>;
+  chunker: PagedChunker;
+};
 type PagedWindow = Window & {
-  Paged?: {
-    Previewer: new () => {
-      preview: (
-        content: HTMLElement,
-        stylesheets: string[],
-        renderTo: HTMLElement
-      ) => Promise<PagedFlow>;
-    };
-  };
+  Paged?: { Previewer: new () => PagedPreviewer };
 };
 
 function useDebouncedRenderKey(key: string | number, debounceMs: number) {
@@ -54,6 +51,7 @@ export function PagedProposalPreview({
   const targetRef = useRef<HTMLDivElement>(null);
   const stagingRef = useRef<HTMLDivElement>(null);
   const renderIdRef = useRef(0);
+  const activePreviewerRef = useRef<PagedPreviewer | null>(null);
   const onRenderedRef = useRef(onRendered);
   useEffect(() => {
     onRenderedRef.current = onRendered;
@@ -123,8 +121,15 @@ export function PagedProposalPreview({
 
       if (cancelled || renderId !== renderIdRef.current) return;
 
+      // Disconnect ResizeObservers on the OLD pages before replacing them.
+      // page.destroy() (called by chunker.removePages) calls ro.disconnect(),
+      // preventing the "Cannot read properties of null (reading 'nextSibling')"
+      // crash that fires when paged.js's RAF loop runs on detached nodes.
+      activePreviewerRef.current?.chunker?.removePages?.();
+
       target.replaceChildren(...Array.from(stagingBuffer.childNodes));
       removeTrailingBlankPages(target);
+      activePreviewerRef.current = previewer;
 
       const pageCount = target.querySelectorAll(".pagedjs_page").length || flow.total || 0;
       onRenderedRef.current?.(pageCount);
@@ -183,7 +188,7 @@ function removeTrailingBlankPages(target: HTMLElement) {
   }
 }
 
-function loadPagedJs() {
+function loadPagedJs(): Promise<NonNullable<PagedWindow["Paged"]>> {
   const pagedWindow = window as PagedWindow;
   if (pagedWindow.Paged) return Promise.resolve(pagedWindow.Paged);
 

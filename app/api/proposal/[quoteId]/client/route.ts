@@ -36,7 +36,7 @@ async function withSignedMaterialImages(
 }
 
 function isProposalExpired(quote: Quote) {
-  if (!quote.expiresAt || quote.status === "Accepted") return false;
+  if (!quote.expiresAt || quote.status === "Accepted" || quote.status === "converted_to_project") return false;
   return new Date(quote.expiresAt) < new Date();
 }
 
@@ -193,6 +193,6 @@ export async function GET(
     existingPhotos,
     existingPhotoCaptions: quote.existingPhotoCaptions ?? [],
     expired: isProposalExpired(quote),
-    alreadyAccepted: quote.status === "Accepted",
+    alreadyAccepted: quote.status === "Accepted" || quote.status === "converted_to_project",
   });
 }

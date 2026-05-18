@@ -14,10 +14,14 @@ import {
   EyeOff,
   GripVertical,
   ImagePlus,
+  Minus,
   Plus,
   Printer,
+  Send,
   Trash2,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -192,6 +196,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     () => settings.branding.proposalCoverLayout
   );
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(100);
+  const [sectionClipMap, setSectionClipMap] = useState<Record<string, { top: number; height: number }>>({});
+  const activeSectionRef = useRef<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -422,23 +430,49 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       )
     : [];
 
-  useEffect(() => {
-    if (!activeProposalSection) return;
+  activeSectionRef.current = activeProposalSection;
 
-    const frame = window.requestAnimationFrame(() => {
-      const container = previewScrollRef.current;
-      const target = container?.querySelector<HTMLElement>(
-        `[data-proposal-section="${activeProposalSection}"]`
-      );
+  // Derive the active section's clip rect from the precomputed map
+  const previewClip = activeProposalSection ? (sectionClipMap[activeProposalSection] ?? null) : null;
 
-      target?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
+  function computeAllSectionClips() {
+    const container = previewScrollRef.current;
+    if (!container) return;
+    const outputEl = container.querySelector<HTMLElement>(".paged-proposal-output");
+    if (!outputEl) return;
+    const pages = outputEl.querySelectorAll<HTMLElement>(".pagedjs_page");
+    if (pages.length === 0) return;
+
+    const outputRect = outputEl.getBoundingClientRect();
+    const map: Record<string, { top: number; height: number }> = {};
+
+    pages.forEach((page) => {
+      const pageRect = page.getBoundingClientRect();
+      const relTop = pageRect.top - outputRect.top;
+      const relBottom = pageRect.bottom - outputRect.top;
+      page.querySelectorAll("[data-proposal-section]").forEach((el) => {
+        const id = el.getAttribute("data-proposal-section");
+        if (!id) return;
+        if (map[id]) {
+          const curBottom = map[id].top + map[id].height;
+          const newTop = Math.min(map[id].top, relTop);
+          const newBottom = Math.max(curBottom, relBottom);
+          map[id] = { top: newTop, height: newBottom - newTop };
+        } else {
+          map[id] = { top: relTop, height: relBottom - relTop };
+        }
       });
     });
 
+    setSectionClipMap(map);
+  }
+
+  // Recompute clip offsets whenever zoom changes (getBoundingClientRect is zoom-aware)
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(computeAllSectionClips);
     return () => window.cancelAnimationFrame(frame);
-  }, [activeProposalSection, sectionLayouts, sectionOverrides]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewZoom]);
 
   // Mark dirty whenever any proposal content changes (skip first render)
   useEffect(() => {
@@ -937,7 +971,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         <div className="text-center">
           <p className="text-lg font-semibold text-[#b42318]">Failed to load proposal</p>
           <p className="mt-2 text-sm text-gray-500">{loadError}</p>
-          <Link href="/quotes" className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]">
+          <Link href="/proposals" className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]">
             Back to Proposals
           </Link>
         </div>
@@ -956,7 +990,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa]">
         <div className="text-center">
           <p className="text-lg font-semibold">Proposal not found</p>
-          <Link href="/quotes" className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]">
+          <Link href="/proposals" className="mt-4 inline-flex items-center rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]">
             Back to Proposals
           </Link>
         </div>
@@ -973,35 +1007,32 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       {/* Toolbar */}
       <div className="print:hidden sticky top-0 z-10 border-b border-[#d9e2ec] bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4 px-5 py-3 sm:px-8">
-          <Link
-            href="/quotes"
-            className="flex items-center gap-2 text-sm font-semibold text-gray-500 transition hover:text-black"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Proposals
-          </Link>
-          <p className="hidden text-sm text-gray-500 sm:block">
-            {doc.proposalNumber} · {quote.customerName}
-          </p>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/proposals"
+              className="flex items-center gap-2 text-sm font-semibold text-gray-500 transition hover:text-black"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Proposals
+            </Link>
+            <span className="text-gray-300">|</span>
+            <span className="text-sm font-semibold text-[#213343]">{doc.proposalNumber}</span>
+          </div>
+          <div className="hidden items-center gap-3 sm:flex">
+            <div className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Good</span>
+              <span className="text-sm font-bold text-[#213343]">{formatMoney(quote.good.salePrice)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Better</span>
+              <span className="text-sm font-bold text-[#213343]">{formatMoney(quote.better.salePrice)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Best</span>
+              <span className="text-sm font-bold text-[#213343]">{formatMoney(quote.best.salePrice)}</span>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
-            <label className="inline-flex items-center gap-2 rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-semibold text-gray-600">
-              <span>Status</span>
-              <select
-                value={quote.status}
-                onChange={(event) => {
-                  const nextStatus = event.target.value as QuoteStatus;
-                  setQuote((current) => (current ? { ...current, status: nextStatus } : current));
-                  setIsDirty(true);
-                }}
-                className="rounded border border-[#d9e2ec] bg-white px-2 py-1 text-xs text-[#213343] outline-none focus:border-[var(--brand-accent)]"
-              >
-                {quoteStatusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               onClick={handleSave}
               className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${
@@ -1021,21 +1052,21 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               </span>
             </button>
             <button
-              onClick={handlePrint}
-              className="flex items-center gap-2 rounded-lg border border-[#d9e2ec] px-4 py-2 text-sm font-semibold transition hover:bg-[#f6f8fb]"
-            >
-              <Printer className="h-4 w-4" />
-              <span className="hidden sm:inline">Print</span>
-            </button>
-            <button
               onClick={handleDownload}
               disabled={isDownloading}
-              className="flex items-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)] disabled:opacity-60"
+              className="flex items-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-black shadow-sm transition hover:bg-[var(--brand-accent-hover)] disabled:opacity-60"
             >
               <Download className="h-4 w-4" />
               <span className="hidden sm:inline">
-                {isDownloading ? "Generating…" : "Download PDF"}
+                {isDownloading ? "Generating…" : "Download"}
               </span>
+            </button>
+            <button
+              onClick={() => setShowSendModal(true)}
+              className="flex items-center gap-2 rounded-lg border border-[#213343] bg-[#213343] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a2a38]"
+            >
+              <Send className="h-4 w-4" />
+              <span className="hidden sm:inline">Send</span>
             </button>
           </div>
         </div>
@@ -1062,20 +1093,7 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         {/* ── Editor sidebar ── */}
         <aside className={`print:hidden h-full shrink-0 overflow-y-auto pr-1 lg:block lg:w-90 xl:w-105 ${mobileTab === "edit" ? "block w-full" : "hidden"}`}>
           <div className="space-y-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Proposal Sections
-            </p>
-            <p className="mt-1 text-xs text-gray-400">
-              Open one section at a time, edit its content, and use the eye to control what the client sees.
-            </p>
-            <div className="mt-3 flex items-center justify-between rounded border border-[#d9e2ec] bg-white px-3 py-2 text-xs">
-              <span className="text-gray-400">Client-visible sections</span>
-              <span className="font-medium text-[#213343]">
-                {visibleSectionCount} / {sectionOrder.length}
-              </span>
-            </div>
-          </div>
+
           <input
             ref={fileInputRef}
             type="file"
@@ -1201,43 +1219,6 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                       )}
                       </SidebarSubsection>
 
-                      <SidebarSubsection
-                        title="Client / project"
-                        description="Shown on the cover and proposal metadata."
-                      >
-                        <div className="space-y-3">
-                          <CompactInput
-                            label="Customer name"
-                            value={customerName}
-                            onChange={setCustomerName}
-                            placeholder="Customer"
-                          />
-                          <CompactInput
-                            label="Customer address"
-                            value={customerAddress}
-                            onChange={setCustomerAddress}
-                            placeholder="123 Main St, City, ST 00000"
-                          />
-                          <CompactInput
-                            label="Customer phone"
-                            value={customerPhone}
-                            onChange={setCustomerPhone}
-                            placeholder="(555) 555-5555"
-                          />
-                          <CompactInput
-                            label="Customer email"
-                            value={customerEmail}
-                            onChange={setCustomerEmail}
-                            placeholder="name@example.com"
-                          />
-                          <CompactInput
-                            label="Project name"
-                            value={projectName}
-                            onChange={setProjectName}
-                            placeholder="Project"
-                          />
-                        </div>
-                      </SidebarSubsection>
 
                       <SidebarSubsection
                         title="Cover text"
@@ -2277,38 +2258,96 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
 
         {/* ── Document preview ── */}
         <div ref={previewScrollRef} className={`min-w-0 flex-1 overflow-y-auto pr-1 ${mobileTab === "edit" ? "hidden lg:block" : "block"}`}>
-          <div className="mx-auto max-w-260 space-y-6">
-            <div className="print:hidden rounded-xl border border-[#d9e2ec] bg-white px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Live A4 Proposal Preview
-              </p>
-              <p className="mt-1 text-sm text-gray-500">
-                Paginated preview refreshes shortly after you pause typing (same layout as print, PDF, and client portal). Each sheet is A4 with live page breaks.
-              </p>
+          <div className="mx-auto max-w-260 space-y-4">
+
+            {/* Zoom controls */}
+            <div className="print:hidden flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPreviewZoom((z) => Math.max(50, z - 10))}
+                className="flex h-7 w-7 items-center justify-center rounded border border-[#d9e2ec] bg-white text-gray-500 transition hover:bg-[#f6f8fb]"
+                title="Zoom out"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+              <span className="min-w-[3.5rem] text-center text-xs font-semibold text-gray-500">{previewZoom}%</span>
+              <button
+                type="button"
+                onClick={() => setPreviewZoom((z) => Math.min(150, z + 10))}
+                className="flex h-7 w-7 items-center justify-center rounded border border-[#d9e2ec] bg-white text-gray-500 transition hover:bg-[#f6f8fb]"
+                title="Zoom in"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewZoom(100)}
+                className="rounded border border-[#d9e2ec] bg-white px-2 py-1 text-[11px] font-semibold text-gray-400 transition hover:bg-[#f6f8fb]"
+                title="Reset zoom"
+              >
+                Reset
+              </button>
             </div>
+
+            {/* Placeholder — in-flow, shown only when no section is open */}
+            {!activeProposalSection && (
+              <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-gray-400 shadow-sm">
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-gray-400">Open a section to preview it</p>
+                <p className="text-xs text-gray-300">Each section shows its own page</p>
+              </div>
+            )}
+
+            {/*
+              Clip container: collapses to 0 when no section active (prevents invisible pages
+              from creating scroll space), clamps to the active section's page height when open.
+              overflow:hidden + transform clips without touching paged.js DOM — no display:none
+              on individual pages, so paged.js internal state is never broken.
+            */}
             <div
-              className={
-                coverLayout === "elegant"
-                  ? "rounded border border-[#d9e2ec] bg-[#e9eef4] px-1 py-2 shadow-inner"
-                  : "rounded border border-[#d9e2ec] bg-[#e9eef4] px-8 py-8 shadow-inner"
-              }
+              style={{
+                overflow: "hidden",
+                height: !activeProposalSection
+                  ? 0
+                  : previewClip
+                    ? previewClip.height
+                    : undefined,
+              }}
             >
-              <PagedProposalPreview debounceMs={380} renderKey={pagedRenderKey}>
-                <ProposalDocument
-                  template={proposalTemplate}
-                  quote={proposalQuote}
-                  settings={settings}
-                  photos={existingPhotos}
-                  photoCaptions={existingPhotoCaptions}
-                  coverPhotoUrl={coverImageUrl}
-                  coverLayout={coverLayout}
-                  proposalNumber={doc.proposalNumber}
-                  sectionOverrides={sectionOverrides}
-                  sectionLayouts={sectionLayouts}
-                  sectionOrder={sectionOrder}
-                  customSections={customSections}
-                />
-              </PagedProposalPreview>
+              {/* Shift wrapper: translates the full output up so the active section page sits at y=0 */}
+              <div
+                style={{
+                  transform: previewClip ? `translateY(${-previewClip.top}px)` : undefined,
+                }}
+              >
+                {/* Zoom wrapper — visibility:hidden when no section keeps paged.js rendering correctly */}
+                <div style={{ zoom: previewZoom / 100, visibility: activeProposalSection ? "visible" : "hidden" }}>
+                  <PagedProposalPreview
+                    debounceMs={380}
+                    renderKey={pagedRenderKey}
+                    onRendered={() => window.requestAnimationFrame(computeAllSectionClips)}
+                  >
+                    <ProposalDocument
+                      template={proposalTemplate}
+                      quote={proposalQuote}
+                      settings={settings}
+                      photos={existingPhotos}
+                      photoCaptions={existingPhotoCaptions}
+                      coverPhotoUrl={coverImageUrl}
+                      coverLayout={coverLayout}
+                      proposalNumber={doc.proposalNumber}
+                      sectionOverrides={sectionOverrides}
+                      sectionLayouts={sectionLayouts}
+                      sectionOrder={sectionOrder}
+                      customSections={customSections}
+                    />
+                  </PagedProposalPreview>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2365,6 +2404,21 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Send Modal ── */}
+      {showSendModal && quote && (
+        <SendProposalModal
+          quoteId={quote.id}
+          defaultTo={quote.customerEmail ?? ""}
+          defaultSubject={`Proposal – ${quote.projectName} – Requesting Your Signature`}
+          defaultMessage={`Hi ${quote.customerName || "there"},\n\nPlease find your proposal attached. You can review the details and sign it directly through the link below.\n\nLet me know if you have any questions!`}
+          onClose={() => setShowSendModal(false)}
+          onSent={() => {
+            setShowSendModal(false);
+            setQuote((q) => q ? { ...q, status: "Sent" } : q);
+          }}
+        />
       )}
 
       {/* ── Template Editor Panel ── */}
@@ -3016,6 +3070,157 @@ function EditTextarea({
         className="w-full resize-none rounded border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none transition focus:border-[#111111]"
       />
     </label>
+  );
+}
+
+function SendProposalModal({
+  quoteId,
+  defaultTo,
+  defaultSubject,
+  defaultMessage,
+  onClose,
+  onSent,
+}: {
+  quoteId: string;
+  defaultTo: string;
+  defaultSubject: string;
+  defaultMessage: string;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const [to, setTo] = useState(defaultTo);
+  const [ccInput, setCcInput] = useState("");
+  const [cc, setCc] = useState<string[]>([]);
+  const [subject, setSubject] = useState(defaultSubject);
+  const [message, setMessage] = useState(defaultMessage);
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function addCc() {
+    const val = ccInput.trim();
+    if (val && !cc.includes(val)) setCc((prev) => [...prev, val]);
+    setCcInput("");
+  }
+
+  async function handleSend() {
+    if (!to.trim()) { setError("Recipient email is required."); return; }
+    setError(null);
+    setIsSending(true);
+    try {
+      const res = await fetch(`/api/proposal/${quoteId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: to.trim(), cc, subject, message }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to send");
+      onSent();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send email.");
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#d9e2ec] px-6 py-4">
+          <h3 className="text-base font-bold text-[#213343]">Send Proposal</h3>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-md border border-[#d9e2ec] text-gray-400 hover:bg-[#f6f8fb]">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          {error && (
+            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{error}</div>
+          )}
+
+          <label className="block text-xs font-semibold text-gray-500">
+            To
+            <input
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="client@example.com"
+              className="mt-1 w-full rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm text-[#213343] outline-none transition focus:border-[#213343]"
+            />
+          </label>
+
+          <div className="block text-xs font-semibold text-gray-500">
+            <span>CC</span>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="email"
+                value={ccInput}
+                onChange={(e) => setCcInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addCc(); } }}
+                placeholder="cc@example.com — press Enter to add"
+                className="flex-1 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm text-[#213343] outline-none transition focus:border-[#213343]"
+              />
+              <button type="button" onClick={addCc} className="rounded-lg border border-[#d9e2ec] px-3 py-2 text-sm font-semibold text-gray-500 hover:bg-[#f6f8fb]">
+                Add
+              </button>
+            </div>
+            {cc.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {cc.map((email) => (
+                  <span key={email} className="inline-flex items-center gap-1 rounded-full bg-[#f6f8fb] px-2.5 py-1 text-xs font-medium text-[#213343]">
+                    {email}
+                    <button type="button" onClick={() => setCc((prev) => prev.filter((e) => e !== email))} className="text-gray-400 hover:text-red-500">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <label className="block text-xs font-semibold text-gray-500">
+            Subject
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm text-[#213343] outline-none transition focus:border-[#213343]"
+            />
+          </label>
+
+          <label className="block text-xs font-semibold text-gray-500">
+            Message
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={5}
+              className="mt-1 w-full resize-none rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm text-[#213343] outline-none transition focus:border-[#213343]"
+            />
+          </label>
+
+          <p className="text-xs text-gray-400">
+            The proposal PDF will be attached automatically. A link to the client portal for review &amp; signature will be included in the email body.
+          </p>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-[#d9e2ec] px-6 py-4">
+          <button type="button" onClick={onClose} className="rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm font-semibold text-gray-500 hover:bg-[#f6f8fb]">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSend()}
+            disabled={isSending}
+            className="flex items-center gap-2 rounded-lg bg-[#213343] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a2a38] disabled:opacity-60"
+          >
+            <Send className="h-4 w-4" />
+            {isSending ? "Sending…" : "Send Proposal"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

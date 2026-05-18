@@ -27,6 +27,7 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
 
   function handleSave() {
     onSave({ ...draft, lastModified: new Date().toISOString().slice(0, 10) });
+    onClose();
   }
 
   return (

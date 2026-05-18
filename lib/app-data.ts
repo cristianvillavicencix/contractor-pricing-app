@@ -18,7 +18,16 @@ export type ProjectStatus =
   | "In Progress"
   | "Completed"
   | "On Hold"
-  | "Cancelled";
+  | "Cancelled"
+  | "not_started"
+  | "scheduled"
+  | "in_progress"
+  | "on_hold"
+  | "completed"
+  | "invoiced"
+  | "paid"
+  | "closed"
+  | "cancelled";
 
 export type Trade =
   | "Roofing"
@@ -56,7 +65,8 @@ export type QuoteStatus =
   | "Viewed"
   | "Accepted"
   | "Declined"
-  | "Expired";
+  | "Expired"
+  | "converted_to_project";
 export type PaymentStatus = "Pending" | "Paid" | "Failed" | "Refunded";
 export type LeadStage =
   | "New"
@@ -97,6 +107,11 @@ export type CostBreakdown = {
 
 export type Project = {
   id: string;
+  quoteId?: string;
+  proposalId?: string;
+  selectedOptionId?: string;
+  selectedTier?: PriceOptionName;
+  approvedAmount?: number;
   projectName: string;
   customerName: string;
   customerPhone: string;
@@ -218,6 +233,10 @@ export type Quote = {
   jobZipCode?: string;
   projectSize?: ProjectSize;
   riskLevel?: RiskLevel;
+  /** TipTap proposal document (HTML string). Replaces ProposalDocument + paged.js when present. */
+  proposalDocument?: string;
+  /** TipTap proposal document (JSON). */
+  proposalDocumentJson?: object;
   /** Secret for client link: `/proposal/:id/accept?t=…` (stored in quote JSON). */
   clientPortalToken?: string;
   /** Supabase Storage paths (`proposal-photos`, company-prefixed). */
@@ -229,6 +248,28 @@ export type Quote = {
 
 /** One row of monthly overhead breakdown (Settings + onboarding). */
 export type OverheadLineItem = { id: string; label: string; amount: number };
+
+export type TierProduct = {
+  id: string;
+  trade: string;
+  tier: string;
+  productId?: string;
+  productName: string;
+  productType?: string;
+  description?: string;
+  productBrand: string;
+  productLine: string;
+  colorName?: string;
+  colorHex?: string;
+  imageUrl: string;
+  warrantyYears: number;
+  unitCost?: number;
+  laborCost?: number;
+  defaultMargin?: number;
+  defaultMarkup?: number;
+  isActive?: boolean;
+  notes: string;
+};
 
 export function sumOverheadLineItems(items: OverheadLineItem[]): number {
   return items.reduce((s, row) => s + Math.max(0, row.amount), 0);
@@ -261,6 +302,10 @@ export type AppSettings = {
     email: string;
     phone: string;
     website: string;
+    address: string;
+    city: string;
+    state: ProjectState;
+    zipCode: string;
     licenseNumber: string;
     insuranceProvider: string;
     mainTrade: SettingsTrade;
@@ -393,6 +438,8 @@ export type AppSettings = {
   onboardingCompletedAt?: string;
 };
 
+export const DEFAULT_COMPANY_LOGO_URL = "/branding/default-company-logo.png";
+
 export const storageKeys = {
   settings: "contractor-pricing-app:settings",
   projects: "contractor-pricing-app:projects",
@@ -478,23 +525,22 @@ export const companyLevelOptionsWithDesc: {
   desc: companyLevelDescriptions[value],
 }));
 export const statusOptions: ProjectStatus[] = [
-  "Draft",
-  "Pricing",
-  "Quoted",
-  "Planned",
-  "In Progress",
-  "Completed",
-  "On Hold",
-  "Cancelled",
-  "Won",
-  "Lost",
-  "Archived",
+  "not_started",
+  "scheduled",
+  "in_progress",
+  "on_hold",
+  "completed",
+  "invoiced",
+  "paid",
+  "closed",
+  "cancelled",
 ];
 export const quoteStatusOptions: QuoteStatus[] = [
   "Draft",
   "Sent",
   "Viewed",
   "Accepted",
+  "converted_to_project",
   "Declined",
   "Expired",
 ];
@@ -523,10 +569,14 @@ export const defaultSettings: AppSettings = {
     businessName: "Contractor Company",
     contactName: "",
     contactJobTitle: "",
-    contactPhotoUrl: "/branding/default-contact-photo.png",
+    contactPhotoUrl: "",
     email: "",
     phone: "",
     website: "",
+    address: "",
+    city: "",
+    state: "Connecticut",
+    zipCode: "",
     licenseNumber: "",
     insuranceProvider: "",
     mainTrade: "Roofing",
@@ -684,7 +734,7 @@ export const defaultSettings: AppSettings = {
     },
   },
   branding: {
-    logoUrl: "/branding/default-company-logo.png",
+    logoUrl: "",
     primaryColor: "#111111",
     accentColor: "#737373",
     tagline: "",
@@ -703,6 +753,12 @@ export const defaultSettings: AppSettings = {
     sidebarCollapsed: false,
   },
 };
+
+export function getUploadedCompanyLogoUrl(logoUrl: string | null | undefined) {
+  const trimmed = logoUrl?.trim() ?? "";
+  if (!trimmed || trimmed === DEFAULT_COMPANY_LOGO_URL) return "";
+  return trimmed;
+}
 
 export function mergeAppSettings(settings: AppSettings): AppSettings {
   return {

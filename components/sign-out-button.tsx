@@ -4,8 +4,9 @@ import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { clearCompanyIdCache } from "@/lib/supabase/data";
 
-type SignOutLayout = "sidebar" | "toolbar";
+type SignOutLayout = "sidebar" | "toolbar" | "menu";
 
 export function SignOutButton({
   layout = "sidebar",
@@ -22,6 +23,7 @@ export function SignOutButton({
   async function signOut() {
     setBusy(true);
     try {
+      clearCompanyIdCache();
       await supabase.auth.signOut();
       router.push("/login");
       router.refresh();
@@ -36,7 +38,21 @@ export function SignOutButton({
         type="button"
         onClick={() => void signOut()}
         disabled={busy}
-        className="inline-flex items-center gap-2 rounded-md border border-[#d9e2ec] px-4 py-3 text-sm font-medium text-[#516f90] transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-60"
+        className="inline-flex items-center gap-2 rounded-md border border-white/12 bg-white/8 px-4 py-3 text-sm font-medium text-white/75 transition hover:border-red-200/40 hover:bg-red-500/15 hover:text-white disabled:opacity-60"
+      >
+        <LogOut className="h-4 w-4" />
+        {busy ? "Cerrando…" : "Cerrar sesión"}
+      </button>
+    );
+  }
+
+  if (layout === "menu") {
+    return (
+      <button
+        type="button"
+        onClick={() => void signOut()}
+        disabled={busy}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-60"
       >
         <LogOut className="h-4 w-4" />
         {busy ? "Cerrando…" : "Cerrar sesión"}

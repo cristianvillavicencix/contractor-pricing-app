@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorPanel, PageSkeleton } from "@/components/ui/list-states";
 import { ProjectDetailPanel } from "@/components/projects/project-detail-panel";
@@ -99,10 +99,12 @@ function ProjectsPageClient() {
     Record<string, PricingResult[]>
   >({});
 
+  const realProjects = useMemo(() => projects.filter((project) => isRealProject(project)), [projects]);
+
   const filteredProjects = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return projects.filter((project) => {
+    return realProjects.filter((project) => {
       const matchesSearch =
         !query ||
         project.projectName.toLowerCase().includes(query) ||
@@ -115,7 +117,7 @@ function ProjectsPageClient() {
 
       return matchesSearch && matchesStatus && matchesTrade;
     });
-  }, [projects, search, statusFilter, tradeFilter]);
+  }, [realProjects, search, statusFilter, tradeFilter]);
 
   /** One pricing-engine run per project, only when data changes — not on every list re-render (e.g. opening the detail panel). */
   const tablePricingByProjectId = useMemo(() => {
@@ -123,7 +125,7 @@ function ProjectsPageClient() {
       string,
       { totalCost: number; betterSale: number; betterMargin: number }
     >();
-    for (const project of projects) {
+    for (const project of realProjects) {
       const pricing = calculateProjectPricing(project, settings);
       const better = pricing.find((r) => r.name === "Better");
       map.set(project.id, {
@@ -133,7 +135,7 @@ function ProjectsPageClient() {
       });
     }
     return map;
-  }, [projects, settings]);
+  }, [realProjects, settings]);
 
   const selectedProject = projects.find(
     (project) => project.id === selectedProjectId
@@ -240,7 +242,7 @@ function ProjectsPageClient() {
   async function removeProject(project: Project, opts: { deleteQuotes: boolean }) {
     const linkedQuotes = quotes.filter((q) => q.projectId === project.id);
     if (linkedQuotes.length > 0 && !opts.deleteQuotes) {
-      throw new Error("Confirm deletion of linked quotes to remove this project.");
+      throw new Error("Confirm deletion of linked proposals to remove this project.");
     }
     for (const q of linkedQuotes) {
       await deleteQuoteDb(supabase, q.id);
@@ -420,28 +422,15 @@ function ProjectsPageClient() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
-            <div>
-              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Projects</p>
-              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
-                Projects
-              </h2>
-              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
-                Manage job opportunities, costs, and pricing recommendations.
-              </p>
-            </div>
+          {projects.length !== realProjects.length ? (
+            <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {projects.length - realProjects.length} legacy draft/opportunity record
+              {projects.length - realProjects.length !== 1 ? "s are" : " is"} hidden here. Projects are now created only after a proposal is accepted.
+            </section>
+          ) : null}
 
-            <button
-              onClick={() => setIsFormOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
-            >
-              <Plus className="h-4 w-4" />
-              New Project
-            </button>
-          </header>
-
-          <section className="mt-8 elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 sm:p-6">
-            <div className="grid gap-4 lg:grid-cols-[1fr_180px_180px]">
+          <section className={`${projects.length !== realProjects.length ? "mt-4" : ""} elevated-panel rounded-xl border border-[#d9e2ec] bg-white dark:border-slate-600 p-5 sm:p-6`}>
+            <div className="grid gap-4 lg:grid-cols-[1fr_180px_180px_auto]">
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
@@ -481,6 +470,15 @@ function ProjectsPageClient() {
                   </option>
                 ))}
               </select>
+
+              <button
+                type="button"
+                onClick={() => router.push("/pricing")}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
+              >
+                New Proposal
+                <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
           </section>
 
@@ -534,20 +532,20 @@ function ProjectsPageClient() {
           ) : (
             <section className="mt-6 elevated-panel rounded-lg border border-[#d9e2ec] bg-white dark:border-slate-600 p-10 text-center">
               <p className="text-lg font-semibold tracking-tight">
-                {projects.length === 0 ? t("emptyProjects") : "No projects match filters"}
+                {realProjects.length === 0 ? "No approved projects yet" : "No projects match filters"}
               </p>
               <p className="mt-2 text-sm text-gray-500">
-                {projects.length === 0
-                  ? t("emptyProjectsHint")
+                {realProjects.length === 0
+                  ? "Create a quote, send a proposal, and accept it to open a real project."
                   : "Try a different search or filter."}
               </p>
-              {projects.length === 0 ? (
+              {realProjects.length === 0 ? (
                 <button
                   type="button"
-                  onClick={() => setIsFormOpen(true)}
+                  onClick={() => router.push("/pricing")}
                   className="mt-4 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--brand-accent-hover)]"
                 >
-                  New project
+                  Start pricing
                 </button>
               ) : null}
             </section>
@@ -581,7 +579,7 @@ function ProjectsPageClient() {
           onDuplicateProject={duplicateProject}
           onDeleteProject={removeProject}
           quotes={quotes.filter((q) => q.projectId === selectedProject.id)}
-          onPreviewQuote={(id) => router.push(`/quotes/preview?id=${id}`)}
+          onPreviewQuote={(id) => router.push(`/proposals/preview?id=${id}`)}
           onOpenContact={() => {
             const matchedContact =
               contacts.find((contact) => contact.id === selectedProject.contactId) ??
@@ -611,6 +609,23 @@ function getProjectTab(value: string | null): ProjectDetailTab {
   if (value === "quote" || value === "overview") return "costs";
 
   return "costs";
+}
+
+function isRealProject(project: Project) {
+  return (
+    Boolean(project.proposalId || project.quoteId || project.approvedAmount) ||
+    [
+      "not_started",
+      "scheduled",
+      "in_progress",
+      "on_hold",
+      "completed",
+      "invoiced",
+      "paid",
+      "closed",
+      "cancelled",
+    ].includes(project.status)
+  );
 }
 
 function sameText(left: string, right: string) {

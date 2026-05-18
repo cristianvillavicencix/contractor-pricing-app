@@ -608,6 +608,16 @@ function getWarnings({
   if (input.businessCosts.laborBurdenPercent === 0 && input.costs.labor > 0) {
     warnings.push("Labor burden is 0%. Payroll taxes, insurance, and benefits may be missing.");
   }
+  if (
+    input.businessCosts.overheadAllocationMethod === "Percentage" &&
+    input.businessCosts.overheadPercent > 0 &&
+    input.businessCosts.overheadPercent < 5 &&
+    baseCost > 0
+  ) {
+    warnings.push(
+      `Overhead at ${input.businessCosts.overheadPercent}% is very low — most contractors need 8–15% to cover all fixed costs.`
+    );
+  }
 
   return warnings;
 }

@@ -6,82 +6,120 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   BriefcaseBusiness,
-  Calculator,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
+  ChevronDown,
+  Menu,
+  Package,
+  Send,
   Settings,
   Users,
+  X,
+  Zap,
 } from "lucide-react";
-import { defaultSettings, mergeAppSettings, type AppSettings } from "@/lib/app-data";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { loadCompanySettings, saveCompanySettings } from "@/lib/supabase/data";
 import { SignOutButton } from "@/components/sign-out-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  defaultSettings,
+  getUploadedCompanyLogoUrl,
+  mergeAppSettings,
+  type AppSettings,
+} from "@/lib/app-data";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { loadCompanySettings } from "@/lib/supabase/data";
 
-const sidebarItems = [
+const navItems = [
   { name: "Dashboard", href: "/", icon: BarChart3 },
-  { name: "Calculator", href: "/pricing", icon: Calculator },
-  { name: "Contacts", href: "/contacts", icon: Users },
-  { name: "Proposals", href: "/quotes", icon: FileText },
+  { name: "Proposals", href: "/proposals", icon: Send },
   { name: "Projects", href: "/projects", icon: BriefcaseBusiness },
+  { name: "Contacts", href: "/contacts", icon: Users },
+  { name: "Products", href: "/products", icon: Package },
 ];
 
 const settingsItem = { name: "Settings", href: "/settings", icon: Settings };
-const allMobileItems = [...sidebarItems, settingsItem];
+const mobileItems = [
+  { name: "Dashboard", href: "/", icon: BarChart3 },
+  { name: "Proposals", href: "/proposals", icon: Send },
+  { name: "Projects", href: "/projects", icon: BriefcaseBusiness },
+  { name: "Contacts", href: "/contacts", icon: Users },
+  { name: "Products", href: "/products", icon: Package },
+  settingsItem,
+];
+
+type TopbarProfile = {
+  companyName: string;
+  contactName: string;
+  companyIconUrls: string[];
+};
+
+const defaultTopbarProfile: TopbarProfile = {
+  companyName: defaultSettings.companyProfile.businessName,
+  contactName: "",
+  companyIconUrls: [],
+};
+
+let cachedTopbarProfile: TopbarProfile | null = null;
+const failedCompanyIconUrls = new Set<string>();
+const TOPBAR_PROFILE_CACHE_KEY = "contractor-pricing-app:topbar-profile";
 
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [prefsLoaded, setPrefsLoaded] = useState(false);
   const prefetchedRoutesRef = useRef<Set<string>>(new Set());
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [topbarProfile, setTopbarProfile] = useState(
+    () => cachedTopbarProfile ?? defaultTopbarProfile
+  );
+  const [topbarProfileReady, setTopbarProfileReady] = useState(() => Boolean(cachedTopbarProfile));
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const raw = await loadCompanySettings<AppSettings | null>(supabase);
+
+    if (!cachedTopbarProfile) {
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        setTopbarProfile(getCachedTopbarProfile());
+        setTopbarProfileReady(true);
+      });
+    }
+
+    loadCompanySettings<AppSettings | null>(supabase)
+      .then((raw) => {
         if (cancelled) return;
         const merged = mergeAppSettings(raw ?? defaultSettings);
-        setIsCollapsed(Boolean(merged.appPreferences.sidebarCollapsed));
-      } catch {
-        /* unauthenticated or network */
-      } finally {
-        if (!cancelled) setPrefsLoaded(true);
-      }
-    })();
+        const nextCompanyName =
+          merged.companyProfile.businessName.trim() || defaultSettings.companyProfile.businessName;
+        const uploadedLogoUrl = getUploadedCompanyLogoUrl(merged.branding.logoUrl);
+        const nextProfile = {
+          companyName: nextCompanyName,
+          contactName: merged.companyProfile.contactName.trim(),
+          companyIconUrls: uniqueUrls([
+            uploadedLogoUrl,
+            ...getWebsiteFaviconUrls(merged.companyProfile.website),
+          ]),
+        };
+        cacheTopbarProfile(nextProfile);
+        setTopbarProfile(nextProfile);
+      })
+      .catch(() => undefined);
+
     return () => {
       cancelled = true;
     };
   }, [supabase]);
 
-  const persistCollapsed = useCallback(
-    async (next: boolean) => {
-      try {
-        const raw = await loadCompanySettings<AppSettings | null>(supabase);
-        const base = mergeAppSettings(raw ?? defaultSettings);
-        await saveCompanySettings(supabase, {
-          ...base,
-          appPreferences: { ...base.appPreferences, sidebarCollapsed: next },
-        });
-      } catch {
-        /* non-fatal */
-      }
-    },
-    [supabase]
-  );
-
-  function toggleCollapsed() {
-    setIsCollapsed((c) => {
-      const next = !c;
-      void persistCollapsed(next);
-      return next;
-    });
-  }
-
   function isActive(href: string) {
     return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  }
+
+  function isSalesActive() {
+    return pathname.startsWith("/pricing") || pathname.startsWith("/quotes") || pathname.startsWith("/proposals");
   }
 
   const prefetchRoute = useCallback(
@@ -93,127 +131,331 @@ export function AppSidebar() {
     [router]
   );
 
-  // Avoid layout jump: keep default expanded until prefs load (usually instant).
-  const collapsed = prefsLoaded ? isCollapsed : false;
-
   return (
-    <>
-      {/* ── Desktop sidebar (lg+) ── */}
-      <aside
-        data-app-sidebar
-        data-collapsed={collapsed ? "true" : "false"}
-        className={`hidden flex-none border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 lg:flex lg:h-screen lg:flex-col lg:overflow-hidden lg:sticky lg:top-0 ${
-          collapsed ? "lg:w-20 lg:p-4" : "lg:w-64 lg:p-6"
-        }`}
-      >
-        <div
-          className={`flex gap-3 ${
-            collapsed ? "flex-col items-center" : "items-center justify-between"
-          }`}
+    <header
+      data-app-topbar
+      className="fixed inset-x-0 top-0 z-50 border-b border-black/20 bg-[#1e1e1e] shadow-[0_12px_28px_rgba(15,23,42,0.16)]"
+    >
+      <div className="mx-auto flex h-18 max-w-[1720px] items-center gap-4 px-4 text-white sm:px-6">
+        <Link
+          href="/"
+          onMouseEnter={() => prefetchRoute("/")}
+          onFocus={() => prefetchRoute("/")}
+          onClick={() => {
+            prefetchRoute("/");
+            setMobileOpen(false);
+          }}
+          className="flex min-w-0 items-center gap-3"
+          aria-label="Contractor Pricing dashboard"
         >
-          <Link
-            href="/"
-            onMouseEnter={() => prefetchRoute("/")}
-            onFocus={() => prefetchRoute("/")}
-            onClick={() => prefetchRoute("/")}
-            className={`flex min-w-0 items-center gap-3 ${
-              collapsed ? "flex-col justify-center gap-0" : ""
-            }`}
-            aria-label="Pricing App dashboard"
-          >
-            <div className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-[#ff5c35] text-sm font-semibold text-white">
-              PA
-            </div>
-            <div className={`min-w-0 ${collapsed ? "hidden" : ""}`}>
-              <h1 className="truncate text-lg font-semibold tracking-tight text-sidebar-foreground">
-                Pricing App
-              </h1>
-              <p className="mt-1 truncate text-xs text-muted-foreground">
-                Retail pricing intelligence
-              </p>
-            </div>
-          </Link>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12 text-[#ffd400] ring-1 ring-white/15">
+            <Zap className="h-6 w-6 fill-[#ffd400]" />
+          </div>
+          <div className="hidden leading-none sm:block">
+            <p className="text-[0.8rem] font-black uppercase tracking-[0.28em] text-white">
+              Contractor
+            </p>
+            <p className="mt-1 text-[0.72rem] font-black uppercase tracking-[0.36em] text-[#ffd400]">
+              Studio
+            </p>
+          </div>
+        </Link>
 
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className={`flex flex-none items-center justify-center border border-sidebar-border text-muted-foreground transition hover:bg-muted hover:text-foreground ${
-              collapsed ? "mt-3 h-8 w-8 rounded-md" : "h-9 w-9 rounded-md"
-            }`}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </button>
+        <nav className="ml-4 hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex">
+          {navItems.map((item) => (
+            <TopNavLink
+              key={item.name}
+              item={item}
+              active={item.name === "Proposals" ? isSalesActive() : isActive(item.href)}
+              onPrefetch={prefetchRoute}
+            />
+          ))}
+        </nav>
+
+        <div className="ml-auto hidden items-center gap-3 xl:flex">
+          <AdminMenu
+            active={isActive(settingsItem.href)}
+            companyName={topbarProfile.companyName}
+            contactName={topbarProfile.contactName}
+            companyIconUrls={topbarProfile.companyIconUrls}
+            ready={topbarProfileReady}
+            onPrefetch={prefetchRoute}
+          />
         </div>
 
-        <nav
-          className={`mt-8 flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden gap-1 ${
-            collapsed ? "mt-10 gap-3" : ""
-          }`}
+        <button
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-white/8 text-white transition hover:bg-white/14 xl:hidden"
+          aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
         >
-          <div className="space-y-1">
-            {sidebarItems.map((item) => (
-              <DesktopLink
+          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </div>
+
+      {mobileOpen ? (
+        <div className="border-t border-white/10 bg-[#1e1e1e] p-3 text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)] xl:hidden">
+          <div className="grid gap-1 sm:grid-cols-2">
+            {mobileItems.map((item) => (
+              <MobileNavLink
                 key={item.name}
                 item={item}
                 active={isActive(item.href)}
-                collapsed={collapsed}
                 onPrefetch={prefetchRoute}
+                onClose={() => setMobileOpen(false)}
               />
             ))}
           </div>
-          <div className="mt-auto space-y-1 border-t border-sidebar-border pt-3">
-            <DesktopLink
-              item={settingsItem}
-              active={isActive(settingsItem.href)}
-              collapsed={collapsed}
-              onPrefetch={prefetchRoute}
-            />
-            <SignOutButton collapsed={collapsed} />
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <SignOutButton layout="menu" />
           </div>
-        </nav>
-      </aside>
-
-      {/* ── Mobile bottom nav (<lg) ── */}
-      <nav className="fixed bottom-0 inset-x-0 z-50 flex border-t border-sidebar-border bg-sidebar text-sidebar-foreground lg:hidden">
-        {allMobileItems.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onMouseEnter={() => prefetchRoute(item.href)}
-              onFocus={() => prefetchRoute(item.href)}
-              onClick={() => prefetchRoute(item.href)}
-              className={`flex flex-1 flex-col items-center justify-center py-2 gap-0.5 transition-colors ${
-                active ? "text-[#ff5c35]" : "text-muted-foreground"
-              }`}
-            >
-              <Icon className="h-5 w-5" />
-              <span className="text-[9px] font-medium leading-none">{item.name}</span>
-            </Link>
-          );
-        })}
-      </nav>
-    </>
+        </div>
+      ) : null}
+    </header>
   );
 }
 
-function DesktopLink({
+function TopNavLink({
   item,
   active,
-  collapsed,
   onPrefetch,
+}: {
+  item: {
+    name: string;
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+    children?: Array<{ name: string; href: string; icon: React.ComponentType<{ className?: string }> }>;
+  };
+  active: boolean;
+  onPrefetch: (href: string) => void;
+}) {
+  const Icon = item.icon;
+
+  if (item.children?.length) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            onMouseEnter={() => {
+              onPrefetch(item.href);
+              item.children?.forEach((child) => onPrefetch(child.href));
+            }}
+            onFocus={() => onPrefetch(item.href)}
+            className={`relative inline-flex h-18 items-center gap-2 px-4 text-sm font-semibold transition after:absolute after:bottom-0 after:left-4 after:right-4 after:h-0.5 after:rounded-full after:bg-[#ffd400] after:transition ${
+              active
+                ? "text-white after:opacity-100"
+                : "text-white/68 after:opacity-0 hover:text-white hover:after:opacity-100"
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            <span>{item.name}</span>
+            <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-48 rounded-xl border border-black/10 bg-white p-2 text-[#111111] shadow-xl">
+          {item.children.map((child) => {
+            const ChildIcon = child.icon;
+            return (
+              <DropdownMenuItem key={child.href} asChild className="cursor-pointer px-2 py-2.5">
+                <Link href={child.href} onClick={() => onPrefetch(child.href)}>
+                  <ChildIcon className="h-4 w-4" />
+                  {child.name}
+                </Link>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <Link
+      href={item.href}
+      onMouseEnter={() => onPrefetch(item.href)}
+      onFocus={() => onPrefetch(item.href)}
+      onClick={() => onPrefetch(item.href)}
+      className={`relative inline-flex h-18 items-center gap-2 px-4 text-sm font-semibold transition after:absolute after:bottom-0 after:left-4 after:right-4 after:h-0.5 after:rounded-full after:bg-[#ffd400] after:transition ${
+        active
+          ? "text-white after:opacity-100"
+          : "text-white/68 after:opacity-0 hover:text-white hover:after:opacity-100"
+      }`}
+    >
+      <Icon className="h-4 w-4" />
+      <span>{item.name}</span>
+    </Link>
+  );
+}
+
+function AdminMenu({
+  active,
+  companyName,
+  contactName,
+  companyIconUrls,
+  ready,
+  onPrefetch,
+}: {
+  active: boolean;
+  companyName: string;
+  contactName: string;
+  companyIconUrls: string[];
+  ready: boolean;
+  onPrefetch: (href: string) => void;
+}) {
+  const displayName = contactName.trim() || companyName;
+  const initials = getInitials(companyName);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onMouseEnter={() => onPrefetch(settingsItem.href)}
+          onFocus={() => onPrefetch(settingsItem.href)}
+          className={`flex items-center gap-3 rounded-full py-1 pl-1 pr-0 text-white transition hover:text-white ${
+            ready ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <CompanyAvatar imageUrls={companyIconUrls} initials={initials} />
+          <div className="min-w-0 leading-tight">
+            <p className="max-w-42 truncate text-sm font-semibold">{displayName}</p>
+            <p className="max-w-42 truncate text-xs text-white/58">{companyName}</p>
+          </div>
+          <span
+            className={`flex h-8 w-8 items-center justify-center rounded-full transition ${
+              active ? "bg-[#ffd400] text-black" : "bg-white/12 text-white/65 hover:bg-white/18 hover:text-white"
+            }`}
+          >
+            <ChevronDown className="h-4 w-4" />
+          </span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56 rounded-xl border border-black/10 bg-white p-2 text-[#111111] shadow-xl">
+        <DropdownMenuLabel className="px-2 py-2">
+          <span className="block truncate text-sm font-semibold text-[#111111]">{displayName}</span>
+          <span className="block truncate text-xs font-normal text-gray-500">{companyName}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="cursor-pointer px-2 py-2.5">
+          <Link href={settingsItem.href} onClick={() => onPrefetch(settingsItem.href)}>
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <SignOutButton layout="menu" />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function CompanyAvatar({ imageUrls, initials }: { imageUrls: string[]; initials: string }) {
+  const [failedImageUrls, setFailedImageUrls] = useState(() => Array.from(failedCompanyIconUrls));
+  const imageUrl = imageUrls.find((url) => url && !failedImageUrls.includes(url));
+
+  if (imageUrl) {
+    return (
+      <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-black text-black ring-1 ring-white/20">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imageUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => {
+            failedCompanyIconUrls.add(imageUrl);
+            setFailedImageUrls(Array.from(failedCompanyIconUrls));
+          }}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,#fff,#8d949f)] text-sm font-black text-black">
+      {initials}
+    </span>
+  );
+}
+
+function getInitials(value: string) {
+  const words = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 0) return "CP";
+  return words
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+}
+
+function getWebsiteFaviconUrls(website: string) {
+  const trimmed = website.trim();
+  if (!trimmed) return [];
+
+  try {
+    const url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    return [
+      `${url.origin}/favicon.ico`,
+      `${url.origin}/favicon.png`,
+      `${url.origin}/apple-touch-icon.png`,
+      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url.hostname)}&sz=64`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function uniqueUrls(urls: string[]) {
+  return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
+}
+
+function getCachedTopbarProfile() {
+  if (cachedTopbarProfile) return cachedTopbarProfile;
+  if (typeof window === "undefined") return defaultTopbarProfile;
+
+  try {
+    const raw = window.localStorage.getItem(TOPBAR_PROFILE_CACHE_KEY);
+    if (!raw) return defaultTopbarProfile;
+    const parsed = JSON.parse(raw) as Partial<TopbarProfile>;
+    const profile = {
+      companyName: parsed.companyName?.trim() || defaultTopbarProfile.companyName,
+      contactName: parsed.contactName?.trim() || "",
+      companyIconUrls: parsed.companyIconUrls?.length
+        ? uniqueUrls(parsed.companyIconUrls)
+        : defaultTopbarProfile.companyIconUrls,
+    };
+    cachedTopbarProfile = profile;
+    return profile;
+  } catch {
+    return defaultTopbarProfile;
+  }
+}
+
+function cacheTopbarProfile(profile: TopbarProfile) {
+  cachedTopbarProfile = profile;
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(TOPBAR_PROFILE_CACHE_KEY, JSON.stringify(profile));
+  } catch {
+    /* ignore unavailable storage */
+  }
+}
+
+function MobileNavLink({
+  item,
+  active,
+  onPrefetch,
+  onClose,
 }: {
   item: { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
   active: boolean;
-  collapsed: boolean;
   onPrefetch: (href: string) => void;
+  onClose: () => void;
 }) {
   const Icon = item.icon;
   return (
@@ -221,18 +463,16 @@ function DesktopLink({
       href={item.href}
       onMouseEnter={() => onPrefetch(item.href)}
       onFocus={() => onPrefetch(item.href)}
-      onClick={() => onPrefetch(item.href)}
-      title={collapsed ? item.name : undefined}
-      className={`flex w-full items-center rounded-md text-sm transition ${
-        collapsed ? "justify-center px-0 py-3" : "gap-3 px-4 py-3"
-      } ${
-        active
-          ? "bg-accent font-medium text-[#ff5c35]"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+      onClick={() => {
+        onPrefetch(item.href);
+        onClose();
+      }}
+      className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
+        active ? "bg-[#ffd400] text-black" : "text-white/70 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <Icon className="h-4 w-4 flex-none" />
-      {!collapsed && <span>{item.name}</span>}
+      <Icon className="h-4 w-4" />
+      <span>{item.name}</span>
     </Link>
   );
 }

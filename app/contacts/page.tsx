@@ -203,39 +203,28 @@ export default function ContactsPage() {
 
       <main className="min-w-0 flex-1 overflow-auto p-5 pb-24 sm:p-8 sm:pb-24 lg:p-10">
         <div className="w-full">
-          <header className="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
-            <div>
-              <p className="page-kicker text-xs font-semibold uppercase tracking-[0.14em]">Contacts</p>
-              <h2 className="page-title mt-2 text-[2rem] font-semibold tracking-tight sm:text-[2.4rem]">
-                Contacts
-              </h2>
-              <p className="page-description mt-3 max-w-3xl text-sm leading-6">
-                Store basic customer information before connecting projects and
-                proposals to a full CRM later.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setForm(emptyContact);
-                setError("");
-                setShowCreateDrawer(true);
-              }}
-              className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
-            >
-              <Plus className="h-4 w-4" />
-              Create Contact
-            </button>
-          </header>
-
-          <div className="mt-8">
+          <div>
             <section>
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search contacts"
-                className="w-full rounded-lg border border-[#d9e2ec] px-4 py-3.5 text-sm outline-none transition focus:border-[#ff5c35]"
-              />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search contacts"
+                  className="min-w-0 flex-1 rounded-lg border border-[#d9e2ec] px-4 py-3.5 text-sm outline-none transition focus:border-[#ff5c35]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm(emptyContact);
+                    setError("");
+                    setShowCreateDrawer(true);
+                  }}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-accent-hover)]"
+                >
+                  <Plus className="h-4 w-4" />
+                  Create Contact
+                </button>
+              </div>
 
               {/* Mobile cards */}
               <div className="mt-4 space-y-2 sm:hidden">
@@ -469,7 +458,7 @@ export default function ContactsPage() {
           onOpenProject={(projectId) =>
             router.push(`/projects?projectId=${projectId}&projectTab=costs`)
           }
-          onOpenQuote={(quoteId) => router.push(`/quotes/preview?id=${quoteId}`)}
+          onOpenQuote={(quoteId) => router.push(`/proposals/preview?id=${quoteId}`)}
         />
       ) : null}
     </div>
@@ -505,7 +494,7 @@ function ContactDetailPanel({
   function saveEdit() {
     if (!draft.name.trim()) return;
     onUpdate(draft);
-    setIsEditing(false);
+    onClose();
   }
 
   return (
