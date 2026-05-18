@@ -6,21 +6,20 @@ import { Eye, EyeOff, GripVertical } from "lucide-react";
 export type SidebarSection = {
   id: string;
   label: string;
-  icon: string;
   visible: boolean;
 };
 
 export const DEFAULT_SECTIONS: SidebarSection[] = [
-  { id: "cover",                label: "Cover",                  icon: "🏠", visible: true },
-  { id: "executiveSummary",     label: "Executive Summary",      icon: "📋", visible: true },
-  { id: "existingConditions",   label: "Existing Conditions",    icon: "🔍", visible: true },
-  { id: "scopeOfWork",          label: "Scope of Work",          icon: "🔧", visible: true },
-  { id: "materialsSpecs",       label: "Materials & Specs",      icon: "📦", visible: true },
-  { id: "timeline",             label: "Timeline",               icon: "📅", visible: true },
-  { id: "pricing",              label: "Investment Options",     icon: "💰", visible: true },
-  { id: "warranty",             label: "Warranty",               icon: "🛡️", visible: true },
-  { id: "terms",                label: "Terms & Conditions",     icon: "📄", visible: true },
-  { id: "acceptance",           label: "Acceptance",             icon: "✍️", visible: true },
+  { id: "cover",              label: "Cover",              visible: true },
+  { id: "executiveSummary",   label: "Executive Summary",  visible: true },
+  { id: "existingConditions", label: "Existing Conditions",visible: true },
+  { id: "scopeOfWork",        label: "Scope of Work",      visible: true },
+  { id: "materialsSpecs",     label: "Materials & Specs",  visible: true },
+  { id: "timeline",           label: "Timeline",           visible: true },
+  { id: "pricing",            label: "Investment Options", visible: true },
+  { id: "warranty",           label: "Warranty",           visible: true },
+  { id: "terms",              label: "Terms & Conditions", visible: true },
+  { id: "acceptance",         label: "Acceptance",         visible: true },
 ];
 
 type Props = {
@@ -148,7 +147,6 @@ export function SectionsSidebar({ documentRef, sections, onToggleVisible, onReor
                   ${!sec.visible ? "opacity-40 line-through" : ""}
                 `}
               >
-                <span className="text-[13px]">{sec.icon}</span>
                 <span className="leading-tight">{sec.label}</span>
               </button>
 
