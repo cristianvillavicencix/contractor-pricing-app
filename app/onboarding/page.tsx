@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Check, ChevronLeft, Info, Minus, Plus, X } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Info, Minus, Plus, X } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   companyLevelOptionsWithDesc,
   defaultSettings,
@@ -23,6 +24,8 @@ type WizardState = {
   contactName: string;
   phone: string;
   email: string;
+  address: string;
+  website: string;
   trade: SettingsTrade;
   state: ProjectState;
   companyLevel: CompanyLevel;
@@ -75,7 +78,7 @@ function computeEstimate(s: WizardState): number {
 }
 
 const INITIAL: WizardState = {
-  businessName: "", contactName: "", phone: "", email: "",
+  businessName: "", contactName: "", phone: "", email: "", address: "", website: "",
   trade: "Roofing", state: "Connecticut", companyLevel: "Small Crew",
   overheadMode: "manual",
   monthlyOverhead: 0,
@@ -410,8 +413,8 @@ function OnboardingPageInner() {
   }
 
   function validate(): string {
-    if (step === 1 && !data.businessName.trim()) return "Please enter your business name.";
-    if (step === 3) {
+    if (step === 0 && !data.businessName.trim()) return "Please enter your business name.";
+    if (step === 4) {
       if (data.goodMargin >= data.betterMargin) return "Better margin must be higher than Good.";
       if (data.betterMargin >= data.bestMargin) return "Best margin must be higher than Better.";
       if (data.minimumSafeMargin >= data.goodMargin) return "Minimum safe margin should be below Good margin.";
@@ -431,6 +434,18 @@ function OnboardingPageInner() {
     setStep((s) => Math.max(0, s - 1));
   }
 
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "Enter" && step < 5) next();
+      if (e.key === "Escape" && step > 0) back();
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, data]);
+
   async function complete() {
     try {
       const raw = await loadCompanySettings<AppSettings | null>(supabase);
@@ -444,6 +459,8 @@ function OnboardingPageInner() {
           contactName: data.contactName.trim(),
           email: data.email.trim(),
           phone: data.phone.trim(),
+          address: data.address.trim(),
+          website: data.website.trim(),
           mainTrade: data.trade,
           companyLevel: data.companyLevel,
         },
@@ -476,91 +493,113 @@ function OnboardingPageInner() {
     }
   }
 
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#f5f8fa] p-4">
-      <div className="w-full max-w-lg">
-        {previewMode ? (
-          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-950">
-            Preview: <code className="rounded bg-white px-1">?preview=1</code> skips the redirect if you already
-            finished onboarding while signed in. To test from scratch: Settings → Re-run onboarding.
-          </p>
-        ) : null}
-        <div className="mb-6 text-center">
-          <p className="text-xl font-bold tracking-tight text-[#213343]">ContractorPricing</p>
-        </div>
+  const STEP_LABELS = ["NAME", "CONTACT", "PROFILE", "COSTS", "MARGINS"];
 
-        <div className="rounded-2xl border border-[#d9e2ec] bg-white p-8 shadow-sm">
-          {step === 0 && <StepWelcome onNext={() => setStep(1)} />}
-          {step === 1 && <StepBusiness data={data} set={set} error={error} onNext={next} onBack={back} />}
-          {step === 2 && <StepOverhead data={data} set={set} patch={patchWizard} onNext={next} onBack={back} />}
-          {step === 3 && (
-            <StepMargins data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />
-          )}
-          {step === 4 && <StepDone data={data} onComplete={complete} />}
-        </div>
-
-        {step > 0 && step < 4 && (
-          <div className="mt-5 flex justify-center gap-2">
-            {[1, 2, 3].map((s) => (
-              <div
-                key={s}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  s < step ? "w-8 bg-[#ff5c35]" : s === step ? "w-8 bg-[#ff5c35]" : "w-8 bg-[#d9e2ec]"
-                }`}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StepWelcome({ onNext }: { onNext: () => void }) {
-  return (
-    <div className="text-center">
-      <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#fff1ea]">
-        <span className="text-2xl">🏗️</span>
-      </div>
-      <h1 className="text-2xl font-bold tracking-tight text-[#213343]">
-        Welcome to ContractorPricing
-      </h1>
-      <p className="mt-3 text-[#6B7280]">
-        Let&apos;s set up your account in about 3 minutes. You&apos;ll be pricing jobs right after.
-      </p>
-
-      <div className="mt-6 space-y-3 rounded-xl bg-[#f6f8fb] p-5 text-left">
-        {[
-          { label: "Your business info", desc: "Name, trade, and location" },
-          {
-            label: "Monthly overhead",
-            desc: "Your fixed costs per month — or a short guided checklist if you’re not sure",
-          },
-          { label: "Your target margins", desc: "We start with proven industry defaults" },
-        ].map((item, i) => (
-          <div key={i} className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ff5c35] text-[10px] font-bold text-white">
-              {i + 1}
-            </div>
-            <div>
-              <p className="text-sm font-medium text-[#213343]">{item.label}</p>
-              <p className="text-xs text-[#9CA3AF]">{item.desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <button
-        onClick={onNext}
-        className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#ff5c35] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
+  /* ── Step 5: full-page centered Done screen ── */
+  if (step === 5) {
+    return (
+      <motion.div
+        className="flex min-h-screen flex-col bg-[#FAFAF6]"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
       >
-        Get Started
-        <ArrowRight className="h-4 w-4" />
-      </button>
-      <p className="mt-3 text-xs text-[#9CA3AF]">You can change everything later in Settings</p>
+        {/* Top bar */}
+        <div className="border-b border-[#E8E3D6] px-8 py-5">
+          <span className="text-lg font-bold tracking-tight text-[#213343]">
+            Bid<span className="text-[#ff5c35]">wise</span>
+          </span>
+        </div>
+        {/* Centered content */}
+        <div className="flex flex-1 items-center justify-center px-6 py-16">
+          <StepDone data={data} onComplete={complete} onRestart={() => setStep(0)} error={error} />
+        </div>
+      </motion.div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen bg-[#FAFAF6]">
+      {/* ── Left visual panel ── */}
+      <div className="relative hidden overflow-hidden bg-[#213343] lg:flex lg:w-[44%] lg:flex-col">
+        <div className="absolute left-8 top-8 z-10">
+          <span className="text-lg font-bold tracking-tight text-white">
+            Bid<span className="text-[#ff5c35]">wise</span>
+          </span>
+        </div>
+        {/* Grid */}
+        <div className="pointer-events-none absolute inset-0"
+          style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.06) 1px,transparent 1px)", backgroundSize: "40px 40px" }}
+        />
+        <div className="relative flex-1">
+          <AnimatePresence mode="wait">
+            <StepHero key={step} step={step} data={data} />
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* ── Right form panel ── */}
+      <div className="flex flex-1 flex-col bg-[#FAFAF6]">
+        {/* Mobile brand */}
+        <div className="flex items-center justify-between border-b border-[#E8E3D6] px-6 py-4 lg:hidden">
+          <span className="text-base font-bold tracking-tight text-[#213343]">
+            Bid<span className="text-[#ff5c35]">wise</span>
+          </span>
+        </div>
+
+        <div className="flex flex-1 items-center justify-center overflow-y-auto">
+          <div className="w-full max-w-lg px-6 py-10 lg:px-12 lg:py-14">
+            {previewMode && (
+              <p className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-950">
+                Preview mode
+              </p>
+            )}
+
+            {/* Step indicator + progress */}
+            <div className="mb-10">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">
+                  Step {step + 1} / 5
+                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">
+                  {STEP_LABELS[step]}
+                </span>
+              </div>
+              <div className="mt-2 flex gap-1">
+                {[0, 1, 2, 3, 4].map((s) => (
+                  <div
+                    key={s}
+                    className={`h-0.5 flex-1 rounded-full transition-all duration-500 ${
+                      s <= step ? "bg-[#ff5c35]" : "bg-[#DDD8CE]"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={step}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                {step === 0 && <StepName data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />}
+                {step === 1 && <StepContact data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />}
+                {step === 2 && <StepProfile data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />}
+                {step === 3 && <StepCosts data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />}
+                {step === 4 && <StepMargins data={data} set={set} patch={patchWizard} error={error} onNext={next} onBack={back} />}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type StepProps = {
   data: WizardState;
@@ -571,698 +610,776 @@ type StepProps = {
   onBack: () => void;
 };
 
-function StepBusiness({ data, set, error, onNext, onBack }: StepProps) {
+type PlaceSuggestion = { place_id: string; name: string; address: string; rating: number | null; total_ratings: number };
+
+// ─── Heroes (light, geometric) ───────────────────────────────────────────────
+
+function Stars({ rating }: { rating: number }) {
+  return (
+    <span className="flex items-center">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <svg key={i} className="h-3 w-3" viewBox="0 0 20 20" fill={i <= Math.round(rating) ? "#f59e0b" : "#e5e7eb"}>
+          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+        </svg>
+      ))}
+      <span className="ml-1 text-[11px] font-medium text-[#f59e0b]">{rating.toFixed(1)}</span>
+    </span>
+  );
+}
+
+function HeroName({ data }: { data: WizardState }) {
+  const name = data.businessName.trim() || "Your Company";
+  return (
+    <div className="flex h-full w-full items-center justify-center p-12">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="relative"
+      >
+        {/* Concentric rings */}
+        {[120, 180, 240].map((size, i) => (
+          <motion.div
+            key={size}
+            className="absolute rounded-full border border-white"
+            style={{ width: size, height: size, top: "50%", left: "50%", x: "-50%", y: "-50%", opacity: 0.08 + i * 0.06 }}
+            animate={{ rotate: i % 2 === 0 ? 360 : -360 }}
+            transition={{ duration: 30 + i * 10, repeat: Infinity, ease: "linear" }}
+          />
+        ))}
+        {/* Proposal card */}
+        <motion.div
+          className="relative z-10 w-56 rounded-2xl border border-[#E8E3D6] bg-white px-6 py-5 shadow-lg"
+          animate={{ y: [0, -6, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Proposal · Cover</p>
+          <p className="mt-2 text-base font-bold text-[#213343] leading-tight">{name}</p>
+          <div className="mt-3 border-t border-[#F0EDE6] pt-2 flex items-center justify-between">
+            <p className="text-[10px] text-[#9CA3AF]">Est. 2024</p>
+            <p className="text-[10px] text-[#9CA3AF]">Bid #001</p>
+          </div>
+        </motion.div>
+        {/* Checkmark badge */}
+        <motion.div
+          className="absolute -right-3 -top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-[#ff5c35] shadow"
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ delay: 0.3, type: "spring" }}
+        >
+          <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+        </motion.div>
+      </motion.div>
+    </div>
+  );
+}
+
+function BlinkingCursor() {
+  return (
+    <motion.span
+      className="ml-0.5 inline-block h-5 w-[2px] rounded-full bg-[#ff5c35] align-middle"
+      animate={{ opacity: [1, 0, 1] }}
+      transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+    />
+  );
+}
+
+function HeroContact({ data }: { data: WizardState }) {
+  const phone = data.phone;
+  const address = data.address;
+  return (
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
+
+      {/* Ripple rings — large, expand from dot and fade out */}
+      {[0, 1, 2].map((i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-full border border-white"
+          style={{ width: 48, height: 48 }}
+          animate={{ width: [48, 340], height: [48, 340], opacity: [0.55, 0] }}
+          transition={{ duration: 3, delay: i * 1, repeat: Infinity, ease: "easeOut" }}
+        />
+      ))}
+
+      {/* Center bullseye */}
+      <div className="absolute z-10 flex h-11 w-11 items-center justify-center rounded-full border-2 border-white/30">
+        <div className="h-5 w-5 rounded-full bg-[#ff5c35] shadow-[0_0_14px_rgba(255,92,53,0.6)]" />
+      </div>
+
+      {/* Phone card — left, inside the rings */}
+      <motion.div
+        className="absolute left-6 top-[30%] z-20 rounded-xl border border-[#E8E3D6] bg-white px-5 py-3 shadow-lg"
+        style={{ rotate: -6 }}
+        animate={{ y: [0, -7, 0] }}
+        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <p className="text-[9px] font-semibold uppercase tracking-widest text-[#ff5c35]">Phone</p>
+        <div className="mt-1.5 flex items-center">
+          <motion.p
+            key={phone}
+            initial={{ opacity: 0.5, x: 3 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.12 }}
+            className={`font-mono text-sm font-semibold ${phone ? "text-[#213343]" : "text-[#C0BAB0]"}`}
+          >
+            {phone || "(···) ···-····"}
+          </motion.p>
+          {phone && <BlinkingCursor />}
+        </div>
+      </motion.div>
+
+      {/* Address card — right, inside the rings */}
+      <motion.div
+        className="absolute bottom-[28%] right-6 z-20 rounded-xl border border-[#E8E3D6] bg-white px-5 py-3 shadow-lg"
+        style={{ rotate: 5 }}
+        animate={{ y: [0, 7, 0] }}
+        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
+      >
+        <p className="text-[9px] font-semibold uppercase tracking-widest text-[#ff5c35]">Address</p>
+        <div className="mt-1.5 flex items-center">
+          <motion.p
+            key={address}
+            initial={{ opacity: 0.5, x: 3 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.12 }}
+            className={`text-sm font-semibold ${address ? "text-[#213343]" : "text-[#C0BAB0]"}`}
+          >
+            {address || "Street, City, ST"}
+          </motion.p>
+          {address && <BlinkingCursor />}
+        </div>
+      </motion.div>
+
+    </div>
+  );
+}
+
+function HeroProfile({ data }: { data: WizardState }) {
+  const sizes = { "Solo Owner": 1, "Small Crew": 3, "Established Company": 5, "Premium Company": 7 };
+  const count = sizes[data.companyLevel] ?? 3;
+  const dots = Array.from({ length: Math.min(count, 7) });
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-6 p-12">
+      <div className="flex flex-wrap items-end justify-center gap-3">
+        {dots.map((_, i) => (
+          <motion.div
+            key={i}
+            className="rounded-full bg-white"
+            style={{ width: 18 + i * 4, height: 18 + i * 4, opacity: 0.2 + i * 0.12 }}
+            animate={{ y: [0, -8, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: i * 0.2 }}
+          />
+        ))}
+      </div>
+      <div className="rounded-full border border-[#E8E3D6] bg-white px-4 py-1.5 shadow-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">
+          {data.trade} · {data.companyLevel}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function HeroCosts({ data }: { data: WizardState }) {
+  const bars = [0.4, 0.65, 0.5, 0.85, 0.6];
+  const overhead = data.monthlyOverhead;
+  return (
+    <div className="relative flex h-full w-full flex-col items-center justify-center gap-6 p-12">
+      {/* Bars + falling dots in same container */}
+      <div className="relative flex items-end gap-2">
+        {/* Falling dots — positioned relative to the bar group */}
+        {[
+          { size: 9,  left: "8%",  delay: 0,   dur: 2.6, startY: -60 },
+          { size: 13, left: "78%", delay: 0.5, dur: 3.2, startY: -80 },
+          { size: 7,  left: "42%", delay: 1.0, dur: 2.3, startY: -50 },
+          { size: 11, left: "62%", delay: 0.2, dur: 2.9, startY: -70 },
+          { size: 6,  left: "25%", delay: 1.6, dur: 2.1, startY: -45 },
+        ].map((d, i) => (
+          <motion.div
+            key={i}
+            className="absolute rounded-full bg-white"
+            style={{ width: d.size, height: d.size, left: d.left, bottom: "100%" }}
+            animate={{ y: [d.startY, 30], opacity: [0, 0.75, 0] }}
+            transition={{ duration: d.dur, delay: d.delay, repeat: Infinity, repeatDelay: 1.0, ease: "easeIn" }}
+          />
+        ))}
+        {bars.map((h, i) => (
+          <motion.div
+            key={i}
+            className="w-9 rounded-t-lg border border-[#ff5c35] bg-[#ff5c35]"
+            style={{ opacity: 0.2 + h * 0.6 }}
+            initial={{ height: 0 }}
+            animate={{ height: `${h * 100}px` }}
+            transition={{ duration: 0.7, delay: i * 0.1, ease: "easeOut", repeat: Infinity, repeatType: "reverse", repeatDelay: 3 }}
+          />
+        ))}
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="rounded-full border border-[#E8E3D6] bg-white px-3 py-1 shadow-sm">
+          <p className="text-[10px] font-semibold text-[#9CA3AF]">
+            Overhead <span className="text-[#213343]">${overhead > 0 ? overhead.toLocaleString() : "—"}</span>
+          </p>
+        </div>
+        <div className="rounded-full border border-[#E8E3D6] bg-white px-3 py-1 shadow-sm">
+          <p className="text-[10px] font-semibold text-[#9CA3AF]">
+            Burden <span className="text-[#213343]">{data.laborBurdenPercent}%</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeroMargins({ data }: { data: WizardState }) {
+  const margin = data.betterMargin;
+  const profit = Math.round(10000 * margin / 100);
+  const cost = 10000 - profit;
+  const pct = margin / 100;
+  const r = 40;
+  const circ = 2 * Math.PI * r;
+  return (
+    <div className="flex h-full w-full items-center justify-center p-10">
+      {/* Wrapper: donut + floating pills positioned around it */}
+      <div className="relative">
+        {/* Donut */}
+        <svg className="h-60 w-60" viewBox="0 0 100 100">
+          {/* Track */}
+          <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="8" />
+          {/* Fill */}
+          <motion.circle
+            cx="50" cy="50" r={r} fill="none" stroke="#ff5c35" strokeWidth="8"
+            strokeLinecap="round"
+            transform="rotate(-90 50 50)"
+            animate={{ strokeDasharray: `${pct * circ} ${circ}` }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+          />
+        </svg>
+
+        {/* Center text */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <motion.p
+            key={margin}
+            initial={{ opacity: 0.5, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.2 }}
+            className="text-5xl font-bold leading-none text-white"
+          >
+            {margin}<span className="text-2xl font-medium">%</span>
+          </motion.p>
+          <p className="mt-1 text-[9px] font-semibold uppercase tracking-widest text-white/50">Target margin</p>
+          <p className="mt-1.5 text-[11px] font-medium text-[#ff5c35]">${profit.toLocaleString()} on a $10k job</p>
+        </div>
+
+        {/* Cost pill — top right */}
+        <motion.div
+          className="absolute -right-20 top-6 rounded-xl border border-[#E8E3D6] bg-white px-4 py-2.5 shadow-lg"
+          animate={{ y: [0, -4, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Cost</p>
+          <p className="mt-0.5 text-sm font-bold text-[#213343]">${cost.toLocaleString()}</p>
+        </motion.div>
+
+        {/* Profit pill — bottom left */}
+        <motion.div
+          className="absolute -bottom-2 -left-20 rounded-xl border border-[#E8E3D6] bg-white px-4 py-2.5 shadow-lg"
+          animate={{ y: [0, 4, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", delay: 0.8 }}
+        >
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Profit</p>
+          <p className="mt-0.5 text-sm font-bold text-[#ff5c35]">${profit.toLocaleString()}</p>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+function HeroDone() {
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-full bg-[#ff5c35]"
+          style={{ width: 6 + i * 3, height: 6 + i * 3 }}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: [0, 1, 0], opacity: [0, 0.8, 0], x: Math.cos((i / 8) * Math.PI * 2) * 90, y: Math.sin((i / 8) * Math.PI * 2) * 90 }}
+          transition={{ duration: 1.8, delay: i * 0.1, repeat: Infinity, repeatDelay: 2.5 }}
+        />
+      ))}
+      <motion.div
+        className="flex h-20 w-20 items-center justify-center rounded-full bg-[#ff5c35] shadow-xl"
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ type: "spring", stiffness: 280, damping: 18 }}
+      >
+        <Check className="h-10 w-10 text-white" strokeWidth={2.5} />
+      </motion.div>
+    </div>
+  );
+}
+
+function StepHero({ step, data }: { step: number; data: WizardState }) {
+  return (
+    <motion.div key={step} className="h-full w-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.35 }}>
+      {step === 0 && <HeroName data={data} />}
+      {step === 1 && <HeroContact data={data} />}
+      {step === 2 && <HeroProfile data={data} />}
+      {step === 3 && <HeroCosts data={data} />}
+      {step === 4 && <HeroMargins data={data} />}
+      {step === 5 && <HeroDone />}
+    </motion.div>
+  );
+}
+
+// ─── Step components ──────────────────────────────────────────────────────────
+
+function StepName({ data, set, patch, error, onNext, onBack }: StepProps) {
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setShowSuggestions(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  function handleChange(value: string) {
+    set("businessName", value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length < 3) { setSuggestions([]); setShowSuggestions(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/places/search?q=${encodeURIComponent(value)}`);
+        const json = await res.json() as { suggestions?: PlaceSuggestion[] };
+        setSuggestions(json.suggestions ?? []);
+        setShowSuggestions((json.suggestions ?? []).length > 0);
+      } catch { setSuggestions([]); }
+    }, 400);
+  }
+
+  async function selectSuggestion(s: PlaceSuggestion) {
+    patch?.({ businessName: s.name, address: s.address });
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setLoadingDetails(true);
+    try {
+      const res = await fetch(`/api/places/details?place_id=${s.place_id}`);
+      const json = await res.json() as { name?: string; phone?: string; state?: string; address?: string; website?: string };
+      const updates: Partial<WizardState> = {};
+      if (json.name) updates.businessName = json.name;
+      if (json.phone) {
+        const digits = json.phone.replace(/\D/g, "").slice(-10);
+        updates.phone = digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : json.phone;
+      }
+      if (json.address) updates.address = json.address;
+      if (json.website) updates.website = json.website;
+      if (json.state) {
+        const match = stateOptions.find((st) => st === json.state);
+        if (match) updates.state = match;
+      }
+      patch?.(updates);
+    } catch { /* keep values */ } finally { setLoadingDetails(false); }
+  }
+
   return (
     <div>
-      <StepHeader step={1} title="Your Business" desc="Basic info that goes on your proposals." />
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">Let&apos;s begin</p>
+      <h1 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-[#213343] lg:text-4xl">
+        What&apos;s your business called?
+      </h1>
+      <p className="mt-2 text-sm text-[#9CA3AF]">This shows on every proposal you&apos;ll send. You can edit it later.</p>
 
-      <div className="mt-6 space-y-4">
-        <Field label="Business Name" required>
+      <div className="mt-8" ref={wrapperRef}>
+        <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-[#213343]">
+          Business name <span className="text-[#ff5c35]">*</span>
+        </label>
+        <div className="relative">
           <input
             type="text"
             value={data.businessName}
-            placeholder="GA Castro Construction LLC"
-            onChange={(e) => set("businessName", e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+            placeholder="Apex Roofing LLC"
+            autoComplete="off"
+            autoFocus
+            onChange={(e) => handleChange(e.target.value)}
+            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onNext(); } }}
+            className="w-full rounded-xl border border-[#DDD8CE] bg-white px-4 py-4 text-base text-[#213343] outline-none transition placeholder:text-[#C0BAB0] focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/10"
           />
-        </Field>
+          {loadingDetails && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[#9CA3AF]">Loading…</span>}
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="absolute z-50 mt-1.5 w-full overflow-hidden rounded-xl border border-[#DDD8CE] bg-white shadow-xl">
+              {suggestions.map((s) => (
+                <li key={s.place_id} className="border-b border-[#F5F3EF] last:border-0">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); selectSuggestion(s); }}
+                    className="flex w-full flex-col px-4 py-3 text-left transition hover:bg-[#FFF8F5]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-[#213343]">{s.name}</span>
+                      {s.rating !== null && <Stars rating={s.rating} />}
+                    </div>
+                    <span className="mt-0.5 text-xs text-[#9CA3AF]">{s.address}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Your Name">
+      {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+      <NavButtons onNext={onNext} onBack={onBack} showBack={false} disabled={!data.businessName.trim()} />
+    </div>
+  );
+}
+
+function StepContact({ data, set, error, onNext, onBack }: StepProps) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">Quick contact</p>
+      <h2 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-[#213343]">
+        How can clients reach you?
+      </h2>
+      <p className="mt-2 text-sm text-[#9CA3AF]">Your name and contact details will appear in the proposal footer.</p>
+
+      <div className="mt-8 space-y-5">
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Your name" hint="optional">
             <input
-              type="text"
-              value={data.contactName}
-              placeholder="Cristian"
+              type="text" value={data.contactName} placeholder="Alex Johnson"
               onChange={(e) => set("contactName", e.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+              className="w-full rounded-xl border border-[#DDD8CE] bg-white px-4 py-3 text-sm text-[#213343] outline-none transition placeholder:text-[#C0BAB0] focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/10"
             />
-          </Field>
-          <Field label="Phone">
+          </FormField>
+          <FormField label="Phone" hint="optional">
             <input
-              type="tel"
-              value={data.phone}
-              placeholder="(555) 000-0000"
-              onChange={(e) => set("phone", e.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
+              type="tel" value={data.phone} placeholder="(555) 000-0000"
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                let f = digits;
+                if (digits.length > 6) f = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+                else if (digits.length > 3) f = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
+                else if (digits.length > 0) f = `(${digits}`;
+                set("phone", f);
+              }}
+              className="w-full rounded-xl border border-[#DDD8CE] bg-white px-4 py-3 text-sm text-[#213343] outline-none transition placeholder:text-[#C0BAB0] focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/10"
             />
-          </Field>
+          </FormField>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Main Trade">
-            <select
-              value={data.trade}
-              onChange={(e) => set("trade", e.target.value as SettingsTrade)}
-              className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
-            >
-              {onboardingTradeOptions.map((t) => (
-                <option key={t.value} value={t.value}>{t.value}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="State">
-            <select
-              value={data.state}
-              onChange={(e) => set("state", e.target.value as ProjectState)}
-              className="mt-1.5 w-full rounded-lg border border-[#d9e2ec] bg-white px-4 py-3 text-sm outline-none transition focus:border-[#ff5c35]"
-            >
-              {stateOptions.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        <FormField label="Business address" hint="used on proposals">
+          <input
+            type="text" value={data.address} placeholder="449 W Main St, Stamford, CT 06902"
+            onChange={(e) => set("address", e.target.value)}
+            className="w-full rounded-xl border border-[#DDD8CE] bg-white px-4 py-3 text-sm text-[#213343] outline-none transition placeholder:text-[#C0BAB0] focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/10"
+          />
+        </FormField>
 
-        <Field label="Company Size">
-          <div className="mt-2 grid grid-cols-2 gap-2">
+        <FormField label="Website" hint="optional">
+          <input
+            type="url" value={data.website} placeholder="yourbusiness.com"
+            onChange={(e) => set("website", e.target.value)}
+            className="w-full rounded-xl border border-[#DDD8CE] bg-white px-4 py-3 text-sm text-[#213343] outline-none transition placeholder:text-[#C0BAB0] focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/10"
+          />
+        </FormField>
+      </div>
+
+      {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+      <div className="mt-10 flex items-center justify-between">
+        <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm text-[#9CA3AF] transition hover:text-[#213343]">
+          <ChevronLeft className="h-4 w-4" /> Back
+        </button>
+        <button type="button" onClick={onNext} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#213343] transition hover:text-[#ff5c35]">
+          Continue <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StepProfile({ data, set, error, onNext, onBack }: StepProps) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">Your operation</p>
+      <h2 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-[#213343]">
+        What do you do, and how big is the crew?
+      </h2>
+      <p className="mt-2 text-sm text-[#9CA3AF]">This helps us suggest the right margins for your business profile.</p>
+
+      <div className="mt-8 space-y-6">
+        <FormField label="Main trade">
+          <select
+            value={data.trade}
+            onChange={(e) => set("trade", e.target.value as SettingsTrade)}
+            className="w-full rounded-xl border border-[#DDD8CE] bg-white px-4 py-3 text-sm text-[#213343] outline-none transition focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/10 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23213343%22 stroke-width=%222%22%3E%3Cpath d=%22M6 9l6 6 6-6%22/%3E%3C/svg%3E')] bg-position-[right_12px_center] bg-no-repeat pr-10"
+          >
+            {onboardingTradeOptions.map((t) => (
+              <option key={t.value} value={t.value}>{t.value}</option>
+            ))}
+          </select>
+        </FormField>
+
+        <div>
+          <p className="mb-3 text-sm font-medium text-[#213343]">Company size</p>
+          <div className="grid grid-cols-2 gap-3">
             {companyLevelOptionsWithDesc.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => set("companyLevel", opt.value)}
-                className={`rounded-lg border p-3 text-left text-sm transition ${
+                className={`relative rounded-xl border p-4 text-left transition ${
                   data.companyLevel === opt.value
-                    ? "border-[#ff5c35] bg-[#fff1ea] font-medium text-[#213343]"
-                    : "border-[#d9e2ec] text-[#6B7280] hover:border-[#b7c7d6]"
+                    ? "border-[#ff5c35] bg-[#FFF8F5]"
+                    : "border-[#DDD8CE] bg-white hover:border-[#C0BAB0]"
                 }`}
               >
-                <p className="font-medium text-[#213343]">{opt.value}</p>
-                <p className="mt-0.5 text-[11px] text-[#9CA3AF]">{opt.desc}</p>
+                {data.companyLevel === opt.value && (
+                  <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-[#ff5c35]">
+                    <Check className="h-3 w-3 text-white" strokeWidth={3} />
+                  </span>
+                )}
+                <p className="text-sm font-semibold text-[#213343]">{opt.value}</p>
+                <p className="mt-0.5 text-xs text-[#9CA3AF]">{opt.desc}</p>
               </button>
             ))}
           </div>
-        </Field>
+        </div>
       </div>
 
-      {error && <p className="mt-4 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
       <NavButtons onNext={onNext} onBack={onBack} showBack />
     </div>
   );
 }
 
-function OverheadDetailModal({
-  open,
-  draft,
-  onChangeDraft,
-  onApply,
-  onClose,
-}: {
-  open: boolean;
-  draft: OverheadLine[];
-  onChangeDraft: (lines: OverheadLine[]) => void;
-  onApply: () => void;
-  onClose: () => void;
-}) {
-  if (!open) return null;
-  const total = sumOverheadLines(draft);
+const OVERHEAD_CATEGORIES = [
+  { id: "rent",       label: "Office or shop rent",    desc: "Rent / mortgage / storage" },
+  { id: "insurance",  label: "Insurance",              desc: "GL, workers comp, vehicle" },
+  { id: "vehicles",   label: "Vehicles & fuel",        desc: "Truck payments, gas, repairs" },
+  { id: "phone",      label: "Phone & internet",       desc: "Cell plans, office internet" },
+  { id: "software",   label: "Software & tools",       desc: "CRM, accounting, Bidwise" },
+  { id: "marketing",  label: "Marketing & ads",        desc: "Website, Google ads, signs" },
+  { id: "supplies",   label: "Office & supplies",      desc: "Snacks, water, paper, coffee" },
+  { id: "banking",    label: "Bank & processing fees", desc: "Card fees, bank, accountant" },
+];
 
-  function addRow() {
-    onChangeDraft([...draft, { id: crypto.randomUUID(), label: "", amount: 0 }]);
-  }
+function StepCosts({ data, set, patch, error, onNext, onBack }: StepProps) {
+  const isDetailed = data.manualOverheadStyle === "lineItems";
+  const total = isDetailed ? sumOverheadLines(data.overheadLineItems) : data.monthlyOverhead;
 
-  function addSuggestedCategories() {
-    const taken = new Set(draft.map((r) => r.label.trim().toLowerCase()).filter(Boolean));
-    const toAdd: OverheadLine[] = [];
-    for (const label of OVERHEAD_BREAKDOWN_SUGGESTIONS) {
-      const key = label.toLowerCase();
-      if (!taken.has(key)) {
-        toAdd.push({ id: crypto.randomUUID(), label, amount: 0 });
-        taken.add(key);
-      }
-    }
-    if (toAdd.length === 0) return;
-    onChangeDraft([...draft, ...toAdd]);
-  }
-
-  function updateRow(id: string, patch: Partial<Pick<OverheadLine, "label" | "amount">>) {
-    onChangeDraft(draft.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  }
-
-  function removeRow(id: string) {
-    onChangeDraft(draft.filter((r) => r.id !== id));
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl border border-[#d9e2ec] bg-white shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="overhead-detail-title"
-      >
-        <div className="flex items-start justify-between border-b border-[#d9e2ec] px-5 py-4">
-          <div>
-            <h3 id="overhead-detail-title" className="text-lg font-bold text-[#213343]">
-              Monthly overhead — line by line
-            </h3>
-            <p className="mt-1 text-xs text-[#6B7280]">
-              Add every fixed monthly cost. The total updates as you go — include rent, vehicles, insurance,
-              software, admin payroll, marketing, and anything else you pay every month whether you work or not.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[#9CA3AF] transition hover:bg-[#f6f8fb] hover:text-[#213343]"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="max-h-[min(60vh,420px)] overflow-y-auto px-5 py-4">
-          <div className="space-y-3">
-            {draft.map((row) => (
-              <div key={row.id} className="flex gap-2 rounded-xl border border-[#d9e2ec] bg-[#f9fafb] p-3">
-                <div className="min-w-0 flex-1">
-                  <label className="sr-only">Description</label>
-                  <input
-                    type="text"
-                    value={row.label}
-                    placeholder="e.g. Shop rent"
-                    onChange={(e) => updateRow(row.id, { label: e.target.value })}
-                    className="w-full rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
-                  />
-                </div>
-                <div className="flex w-28 shrink-0 flex-col">
-                  <label className="sr-only">Amount per month</label>
-                  <div className="flex items-center rounded-lg border border-[#d9e2ec] bg-white px-2">
-                    <span className="text-xs text-[#9CA3AF]">$</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={row.amount || ""}
-                      onChange={(e) =>
-                        updateRow(row.id, { amount: Math.max(0, Number(e.target.value) || 0) })
-                      }
-                      className="w-full min-w-0 border-0 bg-transparent py-2 pl-1 text-sm outline-none"
-                    />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeRow(row.id)}
-                  className="self-center rounded-lg p-2 text-[#9CA3AF] transition hover:bg-red-50 hover:text-red-600"
-                  aria-label="Remove line"
-                >
-                  <Minus className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={addRow}
-              className="inline-flex items-center gap-1 rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-xs font-medium text-[#213343] transition hover:border-[#ff5c35]"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add line
-            </button>
-            <button
-              type="button"
-              onClick={addSuggestedCategories}
-              className="rounded-lg border border-dashed border-[#b7c7d6] bg-white px-3 py-2 text-xs font-medium text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#213343]"
-            >
-              Add common categories
-            </button>
-          </div>
-        </div>
-
-        <div className="border-t border-[#d9e2ec] bg-[#f6f8fb] px-5 py-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-sm font-medium text-[#213343]">Total (this month)</span>
-            <span className="text-lg font-bold text-[#213343]">${total.toLocaleString()}</span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 rounded-lg border border-[#d9e2ec] bg-white py-2.5 text-sm font-medium text-[#6B7280] transition hover:bg-[#f9fafb]"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={onApply}
-              className="flex-1 rounded-lg bg-[#ff5c35] py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
-            >
-              Apply total
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OverheadGuidedSectionTitle({ label }: { label: string }) {
-  return (
-    <p className="mt-4 border-t border-[#e8eef3] pt-3 text-[10px] font-bold uppercase tracking-wider text-[#516f90] first:mt-0 first:border-t-0 first:pt-0">
-      {label}
-    </p>
-  );
-}
-
-function StepOverhead({ data, set, patch, onNext, onBack }: StepProps) {
-  const estimated = computeEstimate(data);
-  const guided = data.overheadMode === "estimate";
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailDraft, setDetailDraft] = useState<OverheadLine[]>([]);
-  const effective = getEffectiveMonthlyOverhead(data);
-
-  function enterGuidedMode() {
-    set("overheadMode", "estimate");
-  }
-
-  function exitGuidedMode() {
-    set("overheadMode", "manual");
-  }
-
-  function openDetailModal() {
-    const lines =
-      data.overheadLineItems.length > 0
-        ? data.overheadLineItems.map((l) => ({ ...l }))
-        : data.monthlyOverhead > 0
-          ? [{ id: crypto.randomUUID(), label: "Monthly overhead", amount: data.monthlyOverhead }]
-          : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
-    if (data.manualOverheadStyle !== "lineItems") {
-      patch?.({
-        manualOverheadStyle: "lineItems",
-        overheadLineItems: lines,
-        monthlyOverhead: sumOverheadLines(lines),
-      });
-    }
-    setDetailDraft(lines.map((l) => ({ ...l })));
-    setDetailOpen(true);
-  }
-
-  function applyDetail() {
-    const lines = detailDraft.length
-      ? detailDraft
-      : [{ id: crypto.randomUUID(), label: "", amount: 0 }];
+  function switchToDetailed() {
     patch?.({
-      overheadMode: "manual",
       manualOverheadStyle: "lineItems",
-      overheadLineItems: lines,
-      monthlyOverhead: sumOverheadLines(lines),
+      overheadLineItems: OVERHEAD_CATEGORIES.map((c) => ({ id: c.id, label: c.label, amount: 0 })),
     });
-    setDetailOpen(false);
   }
 
-  const hasLineBreakdown =
-    data.manualOverheadStyle === "lineItems" && data.overheadLineItems.length > 0;
-  const manualTotalDisplay = hasLineBreakdown ? effective : data.monthlyOverhead;
-  const totalInputLocked = guided || hasLineBreakdown;
+  function switchToSimple() {
+    set("manualOverheadStyle", "total");
+  }
+
+  function updateItem(id: string, amount: number) {
+    const items = data.overheadLineItems.map((item) =>
+      item.id === id ? { ...item, amount: Math.max(0, amount) } : item
+    );
+    patch?.({ overheadLineItems: items });
+  }
+
+  function updateItemLabel(id: string, label: string) {
+    const items = data.overheadLineItems.map((item) =>
+      item.id === id ? { ...item, label } : item
+    );
+    patch?.({ overheadLineItems: items });
+  }
+
+  function addCustom() {
+    patch?.({ overheadLineItems: [...data.overheadLineItems, { id: crypto.randomUUID(), label: "", amount: 0 }] });
+  }
+
+  function removeItem(id: string) {
+    patch?.({ overheadLineItems: data.overheadLineItems.filter((r) => r.id !== id) });
+  }
+
+  const filledCount = data.overheadLineItems.filter((r) => r.amount > 0).length;
 
   return (
     <div>
-      <StepHeader
-        step={2}
-        title="Monthly fixed overhead"
-        desc="These are recurring business expenses: rent, insurance, work vehicles, office, and similar costs. They are not job materials or field crew wages — those belong on each project."
-      />
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">Running costs</p>
+      <h2 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-[#213343]">
+        Your fixed monthly costs
+      </h2>
+      <p className="mt-2 text-sm text-[#9CA3AF]">Just the recurring stuff — rent, trucks, insurance.</p>
 
-      <div className="mt-6 space-y-5">
-        <div
-          className={`rounded-2xl border-2 px-4 py-8 text-center transition sm:px-8 ${
-            totalInputLocked
-              ? "border-dashed border-[#b7c7d6] bg-[#f9fafb]"
-              : "border-[#d9e2ec] bg-white shadow-sm focus-within:border-[#ff5c35]"
-          }`}
-        >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
-            {guided ? "Total from guided estimate" : "Total fixed overhead"}
-          </p>
-          <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-[#6B7280]">
-            {guided
-              ? "This amount is the sum of the answers below. To type your own number, choose I already have my total."
-              : hasLineBreakdown
-                ? "This total is the sum of your line items. Edit it in Edit line items or remove lines in the editor to return to a single amount."
-                : "A typical month in US dollars. If you already have this in accounting or Excel, enter it here."}
-          </p>
-          <div className="mt-5 flex flex-wrap items-baseline justify-center gap-x-1 gap-y-0">
-            <span className="text-3xl font-medium tabular-nums text-[#6B7280] sm:text-4xl">$</span>
-            <input
-              type="number"
-              min={0}
-              disabled={totalInputLocked}
-              value={guided ? estimated : manualTotalDisplay || ""}
-              placeholder="0"
-              onChange={(e) => {
-                if (totalInputLocked) return;
-                set("monthlyOverhead", Math.max(0, Number(e.target.value) || 0));
-              }}
-              className="min-w-0 max-w-[11rem] border-0 bg-transparent text-center text-3xl font-bold tabular-nums text-[#213343] outline-none placeholder:text-[#d1d5db] disabled:cursor-not-allowed sm:max-w-[14rem] sm:text-4xl"
-            />
-            <span className="text-sm font-medium text-[#9CA3AF] sm:text-base">/ month</span>
-          </div>
-        </div>
+      {/* Profile badge */}
+      <div className="mt-5 flex items-center gap-2">
+        <span className="h-2 w-2 flex-shrink-0 rounded-full bg-[#ff5c35]" />
+        <p className="text-xs text-[#9CA3AF]">
+          Pre-filled from{" "}
+          <span className="font-semibold text-[#213343]">{data.trade} · {data.companyLevel}</span>
+          {" "}— typical for your profile
+        </p>
+      </div>
 
-        {!guided ? (
-          <button
-            type="button"
-            onClick={enterGuidedMode}
-            className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl border border-[#ff5c35]/35 bg-[#fff8f5] py-3.5 text-sm font-semibold text-[#ff5c35] transition hover:bg-[#fff1ea] sm:flex-row sm:gap-2"
-          >
-            <span>I don't have the number handy</span>
-            <span className="text-xs font-normal text-[#c2410c] sm:text-sm sm:font-semibold">
-              — build an estimate with the guide
-            </span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={exitGuidedMode}
-            className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl border border-[#d9e2ec] bg-white py-3.5 text-sm font-medium text-[#213343] transition hover:bg-[#f6f8fb] sm:flex-row sm:gap-2"
-          >
-            <span>I already have my total</span>
-            <span className="text-xs font-normal text-[#6B7280] sm:text-sm">
-              — enter only the monthly total
-            </span>
-          </button>
-        )}
-
-        {guided ? (
-          <div className="overflow-hidden rounded-xl border border-[#d9e2ec] bg-[#fafcfd]">
-            <div className="border-b border-[#e8eef3] bg-white px-4 py-3 text-left">
-              <p className="text-sm font-medium text-[#213343]">Quick guide to fixed overhead</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#6B7280]">
-                Answer with what you pay <strong>every month</strong> even when you have no jobs. Amounts marked with ~ are
-                ballpark references for US contractors; adjust to your situation.
-              </p>
-            </div>
-            <div className="max-h-[min(58vh,520px)] overflow-y-auto overscroll-contain px-3 py-3">
-              <div className="space-y-3 pb-2">
-                <OverheadGuidedSectionTitle label="Facility and site services" />
-                <EstimatorRow
-                  label="Shop, office, or yard rent"
-                  hint="What you pay each month for fixed business space (not trailers or storage tied to a single job). Skip if not applicable."
-                >
-                  <div className="flex min-w-[10rem] flex-col items-stretch gap-2 sm:items-end">
-                    <label className="flex cursor-pointer items-center justify-end gap-2 sm:justify-start">
-                      <input
-                        type="checkbox"
-                        checked={data.hasOffice}
-                        onChange={(e) => set("hasOffice", e.target.checked)}
-                        className="h-4 w-4 accent-[#ff5c35]"
-                      />
-                      <span className="text-sm text-[#6B7280]">Yes, I pay rent</span>
-                    </label>
-                    {data.hasOffice && (
-                      <input
-                        type="number"
-                        value={data.officeRent || ""}
-                        min={0}
-                        placeholder="e.g. 1200"
-                        onChange={(e) => set("officeRent", Number(e.target.value) || 0)}
-                        className="w-full rounded-lg border border-[#d9e2ec] bg-white px-3 py-2 text-sm outline-none focus:border-[#ff5c35]"
-                      />
-                    )}
-                  </div>
-                </EstimatorRow>
-                <EstimatorRow
-                  label="Utilities for the shop or office"
-                  hint="Only if not included in rent. Typical monthly amount for the building or yard."
-                >
-                  <DollarInput
-                    value={data.utilitiesMonthly}
-                    onChange={(v) => set("utilitiesMonthly", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Vehicles and heavy equipment" />
-                <EstimatorRow
-                  label="Work vehicles (vans, trucks)"
-                  hint="How many units you dedicate to the business. ~$700/month each is a rough order of magnitude (payment, insurance, average fuel)."
-                >
-                  <Stepper value={data.vehicles} min={0} max={15} onChange={(v) => set("vehicles", v)} />
-                </EstimatorRow>
-                <EstimatorRow
-                  label="Equipment or tool leases"
-                  hint="Lifts, compressors, equipment trailers, and similar: what you pay per month to lease (not one-off purchases)."
-                >
-                  <DollarInput
-                    value={data.equipmentLeaseMonthly}
-                    onChange={(v) => set("equipmentLeaseMonthly", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Staff and outside professionals" />
-                <EstimatorRow
-                  label="Staff not assigned to jobs"
-                  hint="Office, admin, or dedicated estimator. ~$3,500/month per person is a reference; use 0 if not applicable."
-                >
-                  <Stepper value={data.nonJobStaff} min={0} max={8} onChange={(v) => set("nonJobStaff", v)} />
-                </EstimatorRow>
-                <EstimatorRow
-                  label="Accountant, attorney, or other professionals"
-                  hint="Monthly fees or annual ÷ 12 (taxes, contracts, compliance)."
-                >
-                  <DollarInput
-                    value={data.professionalFeesMonthly}
-                    onChange={(v) => set("professionalFeesMonthly", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Insurance" />
-                <EstimatorRow
-                  label="Business insurance (GL, commercial vehicles, etc.)"
-                  hint="Monthly premium. If you pay annually, divide by 12. Workers comp is sometimes separate; include it here if it is a fixed monthly cost."
-                >
-                  <DollarInput value={data.insurance} onChange={(v) => set("insurance", v)} placeholder="0" />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Technology and communications" />
-                <EstimatorRow
-                  label="Phone, internet, and software"
-                  hint="Business lines, shop Wi‑Fi, QuickBooks, CRM, cloud storage, and similar."
-                >
-                  <DollarInput value={data.phonesInternet} onChange={(v) => set("phonesInternet", v)} placeholder="0" />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Marketing and sales" />
-                <EstimatorRow
-                  label="Advertising and marketing"
-                  hint="Google Ads, social, flyers, yard signs, agency fees, portfolio photos: what you spend each month on a recurring basis."
-                >
-                  <DollarInput
-                    value={data.marketingAdvertising}
-                    onChange={(v) => set("marketingAdvertising", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Licenses, memberships, and lead platforms" />
-                <EstimatorRow
-                  label="Licenses, renewals, and trade subscriptions"
-                  hint="Business registration, state/local licenses, HomeAdvisor/Angi, Thumbtack, chamber of commerce, union dues: monthly total or annual ÷ 12."
-                >
-                  <DollarInput
-                    value={data.licensesMembershipsMonthly}
-                    onChange={(v) => set("licensesMembershipsMonthly", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Debt and fixed business payments" />
-                <EstimatorRow
-                  label="Business loan or line-of-credit payments"
-                  hint="Monthly payment for equipment financing, commercial vehicle loans, or a LOC (only what you pay even when sales are slow)."
-                >
-                  <DollarInput
-                    value={data.businessDebtPaymentsMonthly}
-                    onChange={(v) => set("businessDebtPaymentsMonthly", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Training and compliance" />
-                <EstimatorRow
-                  label="Training, certifications, and safety"
-                  hint="OSHA, EPA, renewals, courses: use a monthly average (annual ÷ 12) if you do not pay every month."
-                >
-                  <DollarInput
-                    value={data.trainingCertsMonthly}
-                    onChange={(v) => set("trainingCertsMonthly", v)}
-                    placeholder="0"
-                  />
-                </EstimatorRow>
-
-                <OverheadGuidedSectionTitle label="Everything else (fixed each month)" />
-                <EstimatorRow
-                  label="Other fixed expenses"
-                  hint="Anything not covered above that you still pay every month: security, janitorial, recurring donations, and similar."
-                >
-                  <DollarInput value={data.otherCosts} onChange={(v) => set("otherCosts", v)} placeholder="0" />
-                </EstimatorRow>
-                <p className="pb-1 pt-2 text-center text-[11px] leading-relaxed text-[#9CA3AF]">
-                  The large total above sums all of these categories; leave 0 where something does not apply.
-                </p>
+      <div className="mt-6 space-y-6">
+        {/* ── Simple mode ── */}
+        {!isDetailed && (
+          <>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-sm font-medium text-[#213343]">Total monthly overhead</label>
+                <span className="text-[11px] text-[#9CA3AF]">If you know it</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-[#DDD8CE] bg-white px-4 py-3 transition focus-within:border-[#ff5c35] focus-within:ring-2 focus-within:ring-[#ff5c35]/10">
+                <span className="text-xl font-medium text-[#9CA3AF]">$</span>
+                <input
+                  type="number" min={0}
+                  value={data.monthlyOverhead || ""}
+                  placeholder="0"
+                  onChange={(e) => set("monthlyOverhead", Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full border-0 bg-transparent text-2xl font-bold tabular-nums text-[#213343] outline-none placeholder:text-[#DDD8CE]"
+                />
+                <span className="whitespace-nowrap text-sm text-[#9CA3AF]">/ month</span>
               </div>
             </div>
-          </div>
-        ) : null}
 
-        {!guided && data.manualOverheadStyle === "lineItems" && data.overheadLineItems.length > 0 ? (
-          <div className="rounded-xl border border-[#d9e2ec] bg-[#f9fafb] px-4 py-3">
-            <p className="text-xs text-[#6B7280]">
-              You have {data.overheadLineItems.length} lines · total{" "}
-              <strong>${effective.toLocaleString()}/month</strong>
-            </p>
             <button
               type="button"
-              onClick={openDetailModal}
-              className="mt-2 text-sm font-medium text-[#ff5c35] hover:underline"
+              onClick={switchToDetailed}
+              className="flex items-center gap-1 text-sm font-medium text-[#ff5c35] hover:text-[#e94820]"
             >
-              Edit line items
+              <ChevronRight className="h-4 w-4" />
+              Don&apos;t know the total? Build it up by category
             </button>
-          </div>
-        ) : null}
+          </>
+        )}
 
-        <div className="border-t border-[#d9e2ec] pt-5">
-          <Field
-            label="Labor burden %"
-            hint="Costs on top of base field wages: payroll taxes, workers comp, and similar. Typical 18–25% in the US. If unsure, use 20% or ask payroll or your accountant."
-          >
-            <div className="mt-1.5 flex flex-wrap items-center gap-3">
-              <input
-                type="number"
-                value={data.laborBurdenPercent}
-                min={0}
-                max={50}
-                onChange={(e) => set("laborBurdenPercent", Math.max(0, Number(e.target.value) || 0))}
-                className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none focus:border-[#ff5c35]"
-              />
-              <span className="text-sm text-[#9CA3AF]">% — 20% is a reasonable starting point</span>
+        {/* ── Detailed mode ── */}
+        {isDetailed && (
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium text-[#213343]">Total monthly overhead</p>
+              <button type="button" onClick={switchToSimple} className="flex items-center gap-0.5 text-xs text-[#ff5c35] hover:text-[#e94820]">
+                <ChevronRight className="h-3 w-3 rotate-180" /> Use simple input
+              </button>
             </div>
-          </Field>
-          <p className="mt-4 text-center text-[11px] leading-relaxed text-[#9CA3AF]">
-            You can manage overhead line-by-line (like a spreadsheet) later in{" "}
-            <strong className="font-medium text-[#6B7280]">Settings</strong>. For this step, the total above or the
-            guided estimate is enough.
-          </p>
+            <p className="mb-3 text-xs text-[#9CA3AF]">Detailed mode — fill what applies, skip the rest</p>
+
+            <div className="overflow-hidden rounded-xl border border-[#DDD8CE] bg-white">
+              {data.overheadLineItems.map((item) => {
+                const cat = OVERHEAD_CATEGORIES.find((c) => c.id === item.id);
+                return (
+                  <div key={item.id} className="flex items-center gap-3 border-b border-[#F0EDE6] px-4 py-3 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      {cat ? (
+                        <>
+                          <p className="text-sm font-medium text-[#213343]">{item.label}</p>
+                          <p className="text-xs text-[#9CA3AF]">{cat.desc}</p>
+                        </>
+                      ) : (
+                        <input
+                          type="text"
+                          value={item.label}
+                          placeholder="Category name"
+                          onChange={(e) => updateItemLabel(item.id, e.target.value)}
+                          className="w-full text-sm font-medium text-[#213343] outline-none placeholder:text-[#C0BAB0]"
+                        />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <span className="text-sm text-[#9CA3AF]">$</span>
+                      <input
+                        type="number" min={0}
+                        value={item.amount || ""}
+                        placeholder="0"
+                        onChange={(e) => updateItem(item.id, Number(e.target.value) || 0)}
+                        className="w-20 text-right text-sm font-semibold tabular-nums text-[#213343] outline-none placeholder:text-[#DDD8CE]"
+                      />
+                    </div>
+                    {!cat && (
+                      <button type="button" onClick={() => removeItem(item.id)} className="flex-shrink-0 text-[#C0BAB0] hover:text-red-400">
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={addCustom}
+                className="flex w-full items-center justify-center gap-2 py-3 text-sm text-[#9CA3AF] hover:text-[#ff5c35]"
+              >
+                <Plus className="h-4 w-4" /> Add custom category
+              </button>
+            </div>
+
+            {/* Monthly total */}
+            <div className="mt-4 flex items-end justify-between border-t border-[#E8E3D6] pt-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Monthly total</p>
+                <p className="text-xs text-[#9CA3AF]">{filledCount} {filledCount === 1 ? "category" : "categories"} · Items add up automatically</p>
+              </div>
+              <p className="text-2xl font-bold text-[#213343]">${total.toLocaleString()}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Labor burden — always visible */}
+        <div>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-[#213343]">Labor burden</p>
+            <span className="text-sm font-bold text-[#ff5c35]">{data.laborBurdenPercent}%</span>
+          </div>
+          <input
+            type="range" min={10} max={40} step={1}
+            value={data.laborBurdenPercent}
+            onChange={(e) => set("laborBurdenPercent", Number(e.target.value))}
+            className="mt-2 w-full accent-[#ff5c35]"
+          />
+          <div className="mt-1 flex justify-between text-[10px] text-[#C0BAB0]">
+            <span>10%</span><span>20%</span><span>30%</span><span>40%</span>
+          </div>
+          <p className="mt-2 text-xs text-[#9CA3AF]">Payroll taxes, workers comp, and similar. Typical 18–25% in the US.</p>
         </div>
       </div>
 
-      <OverheadDetailModal
-        open={detailOpen}
-        draft={detailDraft}
-        onChangeDraft={setDetailDraft}
-        onApply={applyDetail}
-        onClose={() => setDetailOpen(false)}
-      />
-
+      {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
       <NavButtons onNext={onNext} onBack={onBack} showBack />
-    </div>
-  );
-}
-
-function MarginsInfoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#d9e2ec] bg-white p-6 shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="margins-info-title"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <h3 id="margins-info-title" className="text-lg font-bold text-[#213343]">
-            How to think about margins
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[#9CA3AF] transition hover:bg-[#f6f8fb]"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="mt-4 space-y-3 text-sm text-[#6B7280]">
-          <p>
-            <span className="font-medium text-[#213343]">Good / Better / Best</span> are three price tiers you can
-            offer on proposals. Customers pick a package; each tier should still clear your true cost plus the profit
-            you need.
-          </p>
-          <p>
-            <span className="font-medium text-[#213343]">Margin</span> here means:{" "}
-            <span className="font-mono text-xs text-[#213343]">(Price − full job cost) ÷ Price × 100</span>. Full job
-            cost includes materials, field labor, burden, equipment, and a fair share of monthly overhead spread across
-            your work.
-          </p>
-          <p>
-            <span className="font-medium text-[#213343]">What to factor in:</span> callbacks and punch-list time,
-            warranty reserves, financing or card fees, slow months (overhead still runs), sales commissions, and
-            taxes. If overhead or labor burden is high, you usually need higher margins to stay safe.
-          </p>
-          <p>
-            <span className="font-medium text-[#213343]">Minimum safe margin</span> is your floor — the lowest margin
-            you&apos;re willing to accept before walking away. Keep it below &quot;Good&quot; so you still have room
-            for standard tiers.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-6 w-full rounded-lg bg-[#213343] py-2.5 text-sm font-semibold text-white transition hover:bg-[#2d4a5e]"
-        >
-          Got it
-        </button>
-      </div>
     </div>
   );
 }
 
 function StepMargins({ data, set, patch, error, onNext, onBack }: StepProps) {
-  const [infoOpen, setInfoOpen] = useState(false);
   const suggestion = useMemo(() => suggestMarginsFromWizard(data), [data]);
 
   function applySuggestion() {
-    const s = suggestMarginsFromWizard(data);
-    patch?.({
-      goodMargin: s.goodMargin,
-      betterMargin: s.betterMargin,
-      bestMargin: s.bestMargin,
-      minimumSafeMargin: s.minimumSafeMargin,
-    });
+    patch?.({ goodMargin: suggestion.goodMargin, betterMargin: suggestion.betterMargin, bestMargin: suggestion.bestMargin, minimumSafeMargin: suggestion.minimumSafeMargin });
   }
 
   return (
     <div>
-      <div className="relative pr-12">
-        <StepHeader
-          step={3}
-          title="Your Target Margins"
-          desc="Margin is what you keep after all costs. We've pre-filled industry averages — you can leave these as-is."
-        />
-        <button
-          type="button"
-          onClick={() => setInfoOpen(true)}
-          className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full border border-[#d9e2ec] text-[#6B7280] transition hover:border-[#ff5c35] hover:text-[#ff5c35]"
-          aria-label="How margins work"
-        >
-          <Info className="h-4 w-4" />
-        </button>
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">Final step</p>
+      <h2 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-[#213343]">
+        What&apos;s your target profit margin?
+      </h2>
+      <p className="mt-2 text-sm text-[#9CA3AF]">
+        Margin is what you keep after all costs. We&apos;ve pre-filled industry averages — adjust if you like.
+      </p>
+
+      <div className="mt-6 rounded-xl border border-[#DDD8CE] bg-[#F5F3EF] px-4 py-3">
+        <code className="text-xs text-[#213343]">Margin % = (Price − Cost) ÷ Price × 100</code>
       </div>
 
-      <div className="mt-5 rounded-xl bg-[#f6f8fb] px-4 py-3 text-xs text-[#6B7280]">
-        Formula: <span className="font-mono font-semibold text-[#213343]">Margin % = (Price − Cost) ÷ Price × 100</span>
-        <span className="ml-2 text-[#9CA3AF]">— 35% on a $10k job = $3,500 profit</span>
-      </div>
-
-      <div className="mt-4 rounded-xl border border-[#e8edf2] bg-white px-4 py-3">
-        <p className="text-xs text-[#6B7280]">{suggestion.summary}</p>
-        <button
-          type="button"
-          onClick={applySuggestion}
-          className="mt-2 text-sm font-semibold text-[#ff5c35] transition hover:text-[#e94820]"
-        >
+      <div className="mt-4 rounded-xl border border-[#DDD8CE] bg-white px-4 py-3">
+        <p className="text-xs text-[#9CA3AF]">{suggestion.summary}</p>
+        <button type="button" onClick={applySuggestion} className="mt-1.5 text-xs font-semibold text-[#ff5c35] hover:text-[#e94820]">
           Use suggested margins
         </button>
       </div>
@@ -1270,245 +1387,174 @@ function StepMargins({ data, set, patch, error, onNext, onBack }: StepProps) {
       <div className="mt-5 grid grid-cols-3 gap-3">
         {(["good", "better", "best"] as const).map((tier) => {
           const labels = { good: "Good", better: "Better", best: "Best" };
-          const descs = { good: "Budget option", better: "Most popular", best: "Premium" };
+          const descs  = { good: "Budget pricing", better: "Most popular", best: "Premium pricing" };
           const key = `${tier}Margin` as "goodMargin" | "betterMargin" | "bestMargin";
+          const isBetter = tier === "better";
           return (
             <div
               key={tier}
-              className={`rounded-xl border p-4 text-center ${
-                tier === "better" ? "border-[#213343] bg-[#f9fafb]" : "border-[#d9e2ec]"
+              className={`relative rounded-xl border p-4 text-center ${
+                isBetter ? "border-[#ff5c35] bg-[#FFF8F5]" : "border-[#DDD8CE] bg-white"
               }`}
             >
-              {tier === "better" && (
-                <span className="mb-2 inline-block rounded bg-[#213343] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+              {isBetter && (
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#213343] px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
                   Recommended
                 </span>
               )}
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#9CA3AF]">{labels[tier]}</p>
-              <input
-                type="number"
-                value={data[key]}
-                min={1}
-                max={80}
-                onChange={(e) => set(key, Math.max(1, Math.min(80, Number(e.target.value) || 1)))}
-                className="mt-2 w-full rounded-lg border border-[#d9e2ec] px-2 py-2 text-center text-lg font-bold outline-none focus:border-[#ff5c35]"
-              />
-              <p className="mt-1 text-[10px] text-[#9CA3AF]">% — {descs[tier]}</p>
+              <p className={`text-[10px] font-bold uppercase tracking-widest ${isBetter ? "text-[#ff5c35]" : "text-[#9CA3AF]"}`}>
+                {labels[tier]}
+              </p>
+              <div className="mt-2 flex items-end justify-center gap-0.5">
+                <input
+                  type="number" min={1} max={80}
+                  value={data[key]}
+                  onChange={(e) => set(key, Math.max(1, Math.min(80, Number(e.target.value) || 1)))}
+                  className="w-14 border-0 bg-transparent text-center text-2xl font-bold text-[#213343] outline-none"
+                />
+                <span className="mb-1 text-sm font-bold text-[#9CA3AF]">%</span>
+              </div>
+              <p className="mt-0.5 text-[10px] text-[#9CA3AF]">{descs[tier]}</p>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-4">
-        <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-[#213343]">Minimum safe margin %</label>
-          <button
-            type="button"
-            onClick={() => setInfoOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-[#d9e2ec] text-[#9CA3AF] transition hover:border-[#ff5c35] hover:text-[#ff5c35]"
-            aria-label="About minimum safe margin"
-          >
-            <Info className="h-3.5 w-3.5" />
-          </button>
+      <div className="mt-6">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-[#213343]">Minimum safe margin</p>
+          <span className="text-sm font-bold text-[#ff5c35]">{data.minimumSafeMargin}%</span>
         </div>
-        <p className="mt-0.5 text-xs text-[#9CA3AF]">
-          Never price below this, even to win a job. At 20% on a $10k job = $2,000 minimum profit.
-        </p>
-        <div className="mt-1.5 flex items-center gap-3">
-          <input
-            type="number"
-            value={data.minimumSafeMargin}
-            min={1}
-            max={50}
-            onChange={(e) => set("minimumSafeMargin", Math.max(1, Number(e.target.value) || 1))}
-            className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-2.5 text-sm outline-none focus:border-[#ff5c35]"
-          />
-          <span className="text-sm text-[#9CA3AF]">% floor — leave at 20% if unsure</span>
+        <input
+          type="range" min={10} max={40} step={1}
+          value={data.minimumSafeMargin}
+          onChange={(e) => set("minimumSafeMargin", Number(e.target.value))}
+          className="mt-2 w-full accent-[#ff5c35]"
+        />
+        <div className="mt-1 flex justify-between text-[10px] text-[#C0BAB0]">
+          <span>10%</span><span>20%</span><span>30%</span><span>40%</span>
         </div>
+        <p className="mt-1.5 text-xs text-[#9CA3AF]">Never price below this floor, even to win a job.</p>
       </div>
 
-      <MarginsInfoModal open={infoOpen} onClose={() => setInfoOpen(false)} />
-
-      {error && <p className="mt-4 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
-      <NavButtons onNext={onNext} onBack={onBack} showBack nextLabel="Finish Setup" />
+      {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+      <NavButtons onNext={onNext} onBack={onBack} showBack nextLabel="Finish setup" primary />
     </div>
   );
 }
 
-function StepDone({ data, onComplete }: { data: WizardState; onComplete: () => void }) {
+function StepDone({ data, onComplete, onRestart, error }: { data: WizardState; onComplete: () => void; onRestart: () => void; error?: string }) {
+  const rows: [string, string, boolean?][] = [
+    ["Business",         data.businessName || "—",                                    false],
+    ["Trade · Size",     `${data.trade} · ${data.companyLevel}`,                      false],
+    ["Monthly overhead", `$${getEffectiveMonthlyOverhead(data).toLocaleString()}`,     false],
+    ["Labor burden",     `${data.laborBurdenPercent}%`,                               false],
+    ["Target margin",    `${data.betterMargin}%`,                                      true],
+    ["Minimum margin",   `${data.minimumSafeMargin}%`,                                false],
+  ];
+
   return (
-    <div className="text-center">
-      <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#dcfce7]">
-        <Check className="h-7 w-7 text-[#16a34a]" />
-      </div>
-      <h2 className="text-2xl font-bold tracking-tight text-[#213343]">You&apos;re all set!</h2>
-      <p className="mt-2 text-[#6B7280]">Here&apos;s what we configured for you.</p>
-
-      <div className="mt-6 rounded-xl bg-[#f6f8fb] p-5 text-left space-y-3">
-        <SummaryRow label="Business" value={data.businessName || "—"} />
-        <SummaryRow label="Main Trade" value={data.trade} />
-        <SummaryRow label="State" value={data.state} />
-        <SummaryRow
-          label="Monthly Overhead"
-          value={`$${getEffectiveMonthlyOverhead(data).toLocaleString()}/mo`}
-        />
-        <SummaryRow label="Labor Burden" value={`${data.laborBurdenPercent}%`} />
-        <SummaryRow
-          label="Margins (G/B/B)"
-          value={`${data.goodMargin}% / ${data.betterMargin}% / ${data.bestMargin}%`}
-        />
-      </div>
-
-      <button
-        onClick={onComplete}
-        className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#ff5c35] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
+    <div className="flex w-full max-w-sm flex-col items-center text-center">
+      {/* Check circle */}
+      <motion.div
+        className="flex h-20 w-20 items-center justify-center rounded-full bg-[#ff5c35] shadow-xl"
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ type: "spring", stiffness: 280, damping: 18 }}
       >
-        Start Pricing
-        <ArrowRight className="h-4 w-4" />
-      </button>
-      <p className="mt-3 text-xs text-[#9CA3AF]">
-        Everything can be adjusted anytime in Settings
-      </p>
-    </div>
-  );
-}
+        <Check className="h-10 w-10 text-white" strokeWidth={2.5} />
+      </motion.div>
 
-function StepHeader({ step, title, desc }: { step: number; title: string; desc: string }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-widest text-[#ff5c35]">
-        Step {step} of 3
-      </p>
-      <h2 className="mt-1.5 text-xl font-bold tracking-tight text-[#213343]">{title}</h2>
-      <p className="mt-1 text-sm text-[#6B7280]">{desc}</p>
-    </div>
-  );
-}
+      <p className="mt-8 text-[11px] font-semibold uppercase tracking-widest text-[#ff5c35]">Wizard complete</p>
+      <h2 className="mt-2 text-5xl font-bold tracking-tight text-[#213343]">All done!</h2>
+      <p className="mt-3 text-sm text-[#9CA3AF]">Setup complete. Time to make your first bid.</p>
 
-function NavButtons({
-  onNext,
-  onBack,
-  showBack = false,
-  nextLabel = "Continue",
-}: {
-  onNext: () => void;
-  onBack: () => void;
-  showBack?: boolean;
-  nextLabel?: string;
-}) {
-  return (
-    <div className={`mt-8 flex gap-3 ${showBack ? "justify-between" : "justify-end"}`}>
-      {showBack && (
+      {/* Summary card */}
+      <div className="mt-10 w-full overflow-hidden rounded-2xl border border-[#E8E3D6] bg-white shadow-sm">
+        <div className="border-b border-[#F0EDE6] px-6 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Your setup · Summary</p>
+        </div>
+        {rows.map(([label, value, highlight]) => (
+          <div key={label} className="flex items-center justify-between border-b border-[#F0EDE6] px-6 py-3.5 last:border-0">
+            <p className="text-sm text-[#9CA3AF]">{label}</p>
+            <p className={`text-sm font-semibold ${highlight ? "text-[#ff5c35]" : "text-[#213343]"}`}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+
+      {/* Actions */}
+      <div className="mt-8 flex items-center gap-5">
+        <button
+          onClick={onComplete}
+          className="inline-flex items-center gap-2 rounded-xl bg-[#213343] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#2e4a60]"
+        >
+          Open dashboard <ArrowRight className="h-4 w-4" />
+        </button>
         <button
           type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm font-medium text-[#6B7280] transition hover:bg-[#f6f8fb]"
+          onClick={onRestart}
+          className="text-sm text-[#9CA3AF] transition hover:text-[#213343]"
         >
-          <ChevronLeft className="h-4 w-4" />
-          Back
+          Restart wizard
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+
+function NavButtons({ onNext, onBack, showBack = false, nextLabel = "Continue", disabled = false, primary = false }: {
+  onNext: () => void; onBack: () => void; showBack?: boolean; nextLabel?: string; disabled?: boolean; primary?: boolean;
+}) {
+  return (
+    <div className={`mt-10 flex items-center ${showBack ? "justify-between" : "justify-end"}`}>
+      {showBack && (
+        <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm text-[#9CA3AF] transition hover:text-[#213343]">
+          <ChevronLeft className="h-4 w-4" /> Back
         </button>
       )}
-      <button
-        type="button"
-        onClick={onNext}
-        className="inline-flex items-center gap-2 rounded-lg bg-[#ff5c35] px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820]"
-      >
-        {nextLabel}
-        <ArrowRight className="h-4 w-4" />
-      </button>
+      {primary ? (
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={disabled}
+          className={`inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold transition ${
+            disabled
+              ? "cursor-not-allowed bg-[#DDD8CE] text-white"
+              : "bg-[#213343] text-white hover:bg-[#2e4a60]"
+          }`}
+        >
+          {nextLabel} <ArrowRight className="h-4 w-4" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={disabled}
+          className={`inline-flex items-center gap-1.5 text-sm font-semibold transition ${
+            disabled
+              ? "cursor-not-allowed text-[#C0BAB0]"
+              : "text-[#213343] hover:text-[#ff5c35]"
+          }`}
+        >
+          {nextLabel} <ArrowRight className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
 
-function Field({
-  label,
-  hint,
-  required,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
+function FormField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-[#213343]">
-        {label}
-        {required && <span className="ml-1 text-[#ff5c35]">*</span>}
-      </label>
-      {hint && <p className="mt-0.5 text-xs text-[#9CA3AF]">{hint}</p>}
-      {children}
-    </div>
-  );
-}
-
-function EstimatorRow({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 rounded-xl border border-[#d9e2ec] px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-[#213343]">{label}</p>
-        <p className="mt-0.5 text-xs text-[#9CA3AF]">{hint}</p>
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="text-sm font-medium text-[#213343]">{label}</label>
+        {hint && <span className="text-[11px] text-[#9CA3AF]">{hint}</span>}
       </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function Stepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(min, value - 1))}
-        disabled={value <= min}
-        className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#d9e2ec] text-[#6B7280] transition hover:bg-[#f6f8fb] disabled:opacity-30"
-      >
-        <Minus className="h-3 w-3" />
-      </button>
-      <span className="w-6 text-center text-sm font-semibold text-[#213343]">{value}</span>
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(max, value + 1))}
-        disabled={value >= max}
-        className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#d9e2ec] text-[#6B7280] transition hover:bg-[#f6f8fb] disabled:opacity-30"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
-
-function DollarInput({ value, onChange, placeholder }: { value: number; onChange: (v: number) => void; placeholder?: string }) {
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-sm text-[#9CA3AF]">$</span>
-      <input
-        type="number"
-        value={value || ""}
-        min={0}
-        placeholder={placeholder}
-        onChange={(e) => onChange(Number(e.target.value) || 0)}
-        className="w-24 rounded-lg border border-[#d9e2ec] px-3 py-1.5 text-sm outline-none focus:border-[#ff5c35]"
-      />
-      <span className="text-xs text-[#9CA3AF]">/mo</span>
-    </div>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <p className="text-sm text-[#6B7280]">{label}</p>
-      <p className="text-sm font-semibold text-[#213343]">{value}</p>
+      {children}
     </div>
   );
 }

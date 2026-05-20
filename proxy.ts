@@ -38,8 +38,9 @@ export async function proxy(request: NextRequest) {
   const isPublicProposalClientPage = /^\/proposal\/[^/]+\/(accept|payment)$/.test(path);
   const isPublicProposalClientApi =
     /^\/api\/proposal\/[^/]+\/client(\/accept)?$/.test(path);
+  const isPublicPlacesApi = path.startsWith("/api/places/");
 
-  if (!session && !isAuthRoute && !isPublicProposalClientPage && !isPublicProposalClientApi) {
+  if (!session && !isAuthRoute && !isPublicProposalClientPage && !isPublicProposalClientApi && !isPublicPlacesApi) {
     url.pathname = "/login";
     url.searchParams.set("next", path + (request.nextUrl.search ?? ""));
     return NextResponse.redirect(url);

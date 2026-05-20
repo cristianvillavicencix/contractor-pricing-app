@@ -26,7 +26,8 @@ export function FloatingCalculatorButton() {
     pathname.startsWith("/login") ||
     pathname.startsWith("/signup") ||
     pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/auth");
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/onboarding");
 
   useEffect(() => {
     if (!isOpen) return;

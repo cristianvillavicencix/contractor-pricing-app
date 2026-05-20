@@ -2,6 +2,17 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Remove native number input spinners everywhere */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+}
+input[type="number"] {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -152,6 +163,7 @@
   * {
     @apply border-border outline-ring/50;
   }
+
 
   html {
     font-family: var(--font-inter), sans-serif;
