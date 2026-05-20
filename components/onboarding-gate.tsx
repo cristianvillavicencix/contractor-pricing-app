@@ -21,6 +21,7 @@ const SKIP_PREFIXES = [
   "/forgot-password",
   AUTH_PREFIX,
   "/proposal/",
+  "/v2",
 ];
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
