@@ -168,6 +168,8 @@ export async function listProjects(supabase: SupabaseClient): Promise<Project[]>
       costs: (r.costs ?? {}) as Project["costs"],
       createdAt: r.created_at as string,
       contactId: (r.contact_id as string | undefined) ?? undefined,
+      startDate: (r.start_date as string | undefined) ?? undefined,
+      endDate: (r.end_date as string | undefined) ?? undefined,
     } as Project;
   });
 }
@@ -197,6 +199,8 @@ export async function upsertProject(supabase: SupabaseClient, project: Project) 
     selected_option_id: project.selectedOptionId ?? null,
     selected_tier: project.selectedTier ?? null,
     approved_amount: project.approvedAmount ?? null,
+    start_date: project.startDate ?? null,
+    end_date: project.endDate ?? null,
   });
   if (error) throw error;
 }
@@ -376,9 +380,10 @@ export async function listProposalTemplates(supabase: SupabaseClient): Promise<P
 
 export async function upsertProposalTemplate(supabase: SupabaseClient, template: ProposalTemplate) {
   const companyId = await requireCompanyId(supabase);
+  const storageKey = template.builderVersion === "blocks" ? template.id : template.trade;
   const { error } = await supabase.from("proposal_templates").upsert({
     company_id: companyId,
-    trade: template.trade,
+    trade: storageKey,
     name: template.name,
     last_modified: template.lastModified,
     data: template,
@@ -465,18 +470,11 @@ export async function listTierProducts(supabase: SupabaseClient): Promise<TierPr
       productType: (r.product_type as string) ?? "",
       productBrand: (r.product_brand as string) ?? "",
       productLine: (r.product_line as string) ?? "",
-      colorName: (r.color_name as string) ?? "",
-      colorHex: (r.color_hex as string) ?? "",
       imageUrl: (r.image_url as string) ?? "",
       warrantyYears: (r.warranty_years as number) ?? 0,
       productId: (r.product_id as string) ?? undefined,
       description: (r.description as string) ?? "",
-      unitCost: (r.unit_cost as number) ?? 0,
-      laborCost: (r.labor_cost as number) ?? 0,
-      defaultMargin: (r.default_margin as number) ?? 0,
-      defaultMarkup: (r.default_markup as number) ?? 0,
       isActive: (r.is_active as boolean) ?? true,
-      notes: (r.notes as string) ?? "",
     } as TierProduct;
   });
   return mergeTierProductsWithDefaults(products);
@@ -495,32 +493,19 @@ export async function upsertTierProduct(supabase: SupabaseClient, product: TierP
     description: product.description ?? "",
     product_brand: product.productBrand,
     product_line: product.productLine,
-    color_name: product.colorName ?? "",
-    color_hex: product.colorHex ?? "",
     image_url: product.imageUrl,
     warranty_years: product.warrantyYears,
-    unit_cost: product.unitCost ?? 0,
-    labor_cost: product.laborCost ?? 0,
-    default_margin: product.defaultMargin ?? 0,
-    default_markup: product.defaultMarkup ?? 0,
     is_active: product.isActive ?? true,
-    notes: product.notes,
   };
   const { error } = await supabase.from("company_tier_products").upsert(row);
   if (isMissingOptionalTableError(error)) return;
   if (isMissingColumnError(error)) {
     const legacyRow: Partial<typeof row> = { ...row };
     for (const key of [
-      "color_hex",
-      "color_name",
-      "default_margin",
-      "default_markup",
       "description",
       "is_active",
-      "labor_cost",
       "product_id",
       "product_type",
-      "unit_cost",
     ] as const) {
       delete legacyRow[key];
     }
@@ -541,6 +526,136 @@ export async function deleteTierProduct(supabase: SupabaseClient, id: string) {
   if (isMissingOptionalTableError(error)) return;
   if (error) throw error;
 }
+
+// ─── Contact Notes ────────────────────────────────────────────────────────────
+
+export type ContactNote = {
+  id: string;
+  contactId: string;
+  kind: "note" | "task";
+  body: string;
+  done: boolean;
+  createdAt: string;
+};
+
+export async function listContactNotes(supabase: SupabaseClient, contactId: string): Promise<ContactNote[]> {
+  const companyId = await requireCompanyId(supabase);
+  const { data, error } = await supabase
+    .from("contact_notes")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingOptionalTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    contactId: r.contact_id as string,
+    kind: (r.kind as "note" | "task") ?? "note",
+    body: (r.body as string) ?? "",
+    done: (r.done as boolean) ?? false,
+    createdAt: r.created_at as string,
+  }));
+}
+
+export async function upsertContactNote(supabase: SupabaseClient, note: ContactNote): Promise<void> {
+  const companyId = await requireCompanyId(supabase);
+  const { error } = await supabase.from("contact_notes").upsert({
+    id: note.id,
+    company_id: companyId,
+    contact_id: note.contactId,
+    kind: note.kind,
+    body: note.body,
+    done: note.done,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export async function deleteContactNote(supabase: SupabaseClient, noteId: string): Promise<void> {
+  const { error } = await supabase.from("contact_notes").delete().eq("id", noteId);
+  if (error) throw error;
+}
+
+// ─── Contact Files ─────────────────────────────────────────────────────────────
+
+export type ContactFile = {
+  id: string;
+  contactId: string;
+  name: string;
+  ext: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl?: string;
+  createdAt: string;
+};
+
+export async function listContactFiles(supabase: SupabaseClient, contactId: string): Promise<ContactFile[]> {
+  const companyId = await requireCompanyId(supabase);
+  const { data, error } = await supabase
+    .from("contact_files")
+    .select("id, contact_id, name, ext, mime_type, size_bytes, created_at")
+    .eq("company_id", companyId)
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingOptionalTableError(error)) return [];
+    throw error;
+  }
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    contactId: r.contact_id as string,
+    name: r.name as string,
+    ext: (r.ext as string) ?? "",
+    mimeType: (r.mime_type as string) ?? "",
+    sizeBytes: (r.size_bytes as number) ?? 0,
+    createdAt: r.created_at as string,
+  }));
+}
+
+export async function getContactFileWithData(supabase: SupabaseClient, fileId: string): Promise<ContactFile | null> {
+  const { data, error } = await supabase
+    .from("contact_files")
+    .select("*")
+    .eq("id", fileId)
+    .single();
+  if (error) return null;
+  const r = data as Record<string, unknown>;
+  return {
+    id: r.id as string,
+    contactId: r.contact_id as string,
+    name: r.name as string,
+    ext: (r.ext as string) ?? "",
+    mimeType: (r.mime_type as string) ?? "",
+    sizeBytes: (r.size_bytes as number) ?? 0,
+    dataUrl: (r.data_url as string | undefined) ?? undefined,
+    createdAt: r.created_at as string,
+  };
+}
+
+export async function upsertContactFile(supabase: SupabaseClient, file: ContactFile): Promise<void> {
+  const companyId = await requireCompanyId(supabase);
+  const { error } = await supabase.from("contact_files").upsert({
+    id: file.id,
+    company_id: companyId,
+    contact_id: file.contactId,
+    name: file.name,
+    ext: file.ext,
+    mime_type: file.mimeType,
+    size_bytes: file.sizeBytes,
+    data_url: file.dataUrl ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function deleteContactFile(supabase: SupabaseClient, fileId: string): Promise<void> {
+  const { error } = await supabase.from("contact_files").delete().eq("id", fileId);
+  if (error) throw error;
+}
+
+// ─── Storage ──────────────────────────────────────────────────────────────────
 
 export async function getSignedUrlViaApi(args: {
   bucket: "proposal-photos" | "branding";

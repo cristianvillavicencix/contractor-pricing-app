@@ -123,12 +123,18 @@ export async function POST(
     return NextResponse.json({ error: insertAcceptError.message }, { status: 500 });
   }
 
-  await ensureProjectForAcceptedPaidQuote({
-    admin,
-    companyId,
-    quoteId,
-    quote: nextQuote,
-  });
+  // Non-critical: project creation may fail if schema columns are missing.
+  // The quote is already marked Accepted above — don't 500 on project creation.
+  try {
+    await ensureProjectForAcceptedPaidQuote({
+      admin,
+      companyId,
+      quoteId,
+      quote: nextQuote,
+    });
+  } catch (e) {
+    console.error("[client/accept] project creation failed (non-fatal):", e);
+  }
 
   return NextResponse.json({ ok: true, signedAt });
 }

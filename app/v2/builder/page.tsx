@@ -1,10 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  computeNextProposalNumber,
+  defaultSettings,
+  mergeAppSettings,
+  type AppSettings,
+  type PriceOptionName,
+  type PricingResult,
+  type ProjectSize,
+  type ProjectState,
+  type RiskLevel,
+  type Trade as AppTrade,
+} from "@/lib/app-data";
+import { calculatePricingEngine, type PricingEngineInput, type PricingEngineOption } from "@/lib/pricing-engine";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { upsertQuote } from "@/lib/supabase/data";
 import { V2Shell } from "../_shared/Shell";
 import { Icon, type IconName } from "../_shared/icons";
 import { fmt$ } from "../_shared/data";
+import { useV2LiveData } from "../_shared/live-data";
 
 const TRADES = ["Roofing", "Plumbing", "HVAC", "Electrical", "Painting", "Flooring", "Remodeling"] as const;
 const SIZES = ["Small", "Medium", "Large", "XL"] as const;
@@ -32,11 +49,20 @@ const EMPTY_COSTS: Costs = {
 };
 
 export default function ProposalBuilderV2() {
+  const router = useRouter();
+  const proposalsHref = "/proposals";
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const { contacts, settings: rawSettings, proposals } = useV2LiveData();
+  const settings = mergeAppSettings(rawSettings ?? defaultSettings);
   const [trade, setTrade] = useState<Trade>("Roofing");
   const [size, setSize] = useState<Size>("Medium");
   const [risk, setRisk] = useState<(typeof RISKS)[number]>("Medium");
   const [costs, setCosts] = useState<Costs>(EMPTY_COSTS);
   const [protOpen, setProtOpen] = useState(false);
+  const [projectName, setProjectName] = useState("New project");
+  const [customerName, setCustomerName] = useState(contacts[0]?.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const setCost = (k: keyof Costs, v: string) => {
     setCosts((c) => ({ ...c, [k]: v === "" ? "" : Number(v) }));
@@ -55,25 +81,45 @@ export default function ProposalBuilderV2() {
 
   const directCost = materials + wasteAmt + ownLabor + dumpster + permits + equipment + subcontractor + misc;
 
-  const laborBurden = ownLabor * 0.22;
-  const miscBuffer = misc * 0.1;
-  const taxOnBetter = 0;
-  const overhead = directCost > 0 ? Math.round(directCost * 0.1) : 0;
-  const permitBuffer = permits > 0 ? Math.round(permits * 0.05) : 0;
-  const totalProt = Math.round(laborBurden + miscBuffer + taxOnBetter + overhead + permitBuffer);
+  const engineInput = useMemo(
+    () => createEngineInput(settings, {
+      trade,
+      size,
+      risk,
+      materials: materials + wasteAmt,
+      ownLabor,
+      dumpster,
+      permits,
+      equipment,
+      subcontractor,
+      misc,
+    }),
+    [dumpster, equipment, materials, misc, ownLabor, permits, risk, settings, size, subcontractor, trade, wasteAmt]
+  );
+  const engineResult = useMemo(() => calculatePricingEngine(engineInput), [engineInput]);
+  const optionByName = Object.fromEntries(engineResult.options.map((option) => [option.name, option])) as Record<PriceOptionName, PricingEngineOption>;
+  const goodOption = optionByName.Good;
+  const betterOption = optionByName.Better;
+  const bestOption = optionByName.Best;
 
-  const baseCost = Math.round(directCost);
-  const breakeven = Math.round(baseCost + overhead);
-  const minMargin = 20;
-  const minSafePrice = Math.round(breakeven / (1 - minMargin / 100));
+  const laborBurden = engineResult.laborBurdenCost;
+  const miscBuffer = engineResult.bufferCost;
+  const taxOnBetter = betterOption?.taxCost ?? 0;
+  const overhead = engineResult.overheadCost;
+  const permitBuffer = engineResult.permitBufferCost;
+  const totalProt = Math.round(engineResult.businessCostTotal);
 
-  const gMargin = 30;
-  const bMargin = 37;
-  const bestMargin = 44;
-  const protectedCost = baseCost + totalProt;
-  const good = directCost > 0 ? Math.round(protectedCost / (1 - gMargin / 100)) : 0;
-  const better = directCost > 0 ? Math.round(protectedCost / (1 - bMargin / 100)) : 0;
-  const best = directCost > 0 ? Math.round(protectedCost / (1 - bestMargin / 100)) : 0;
+  const baseCost = Math.round(engineResult.baseCost);
+  const breakeven = Math.round(engineResult.breakevenPrice);
+  const minMargin = Math.round(engineResult.minimumSafeMargin * 100);
+  const minSafePrice = Math.round(engineResult.minimumSafePrice);
+
+  const gMargin = Math.round((goodOption?.margin ?? 0) * 100);
+  const bMargin = Math.round((betterOption?.margin ?? 0) * 100);
+  const bestMargin = Math.round((bestOption?.margin ?? 0) * 100);
+  const good = directCost > 0 ? Math.round(goodOption?.salePrice ?? 0) : 0;
+  const better = directCost > 0 ? Math.round(betterOption?.salePrice ?? 0) : 0;
+  const best = directCost > 0 ? Math.round(bestOption?.salePrice ?? 0) : 0;
 
   const tightness = (price: number): "safe" | "tight" | "loose" => {
     if (price <= 0) return "safe";
@@ -112,6 +158,64 @@ export default function ProposalBuilderV2() {
   }
 
   const hasData = directCost > 0;
+  const selectedContact = contacts.find((contact) => contact.name === customerName) ?? contacts[0];
+
+  async function createProposal() {
+    if (!hasData || !goodOption || !betterOption || !bestOption) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const now = new Date();
+      const expiresAt = new Date(now);
+      expiresAt.setDate(now.getDate() + settings.proposalSettings.defaultExpirationDays);
+      const quoteId = crypto.randomUUID();
+      const legacyQuotes = proposals.map((proposal) => ({
+        id: proposal.id,
+        projectName: proposal.title,
+        customerName: selectedContact?.name ?? (customerName || "Customer"),
+        good: toPricingResult(goodOption, settings, "Good"),
+        better: toPricingResult(betterOption, settings, "Better"),
+        best: toPricingResult(bestOption, settings, "Best"),
+        selectedOption: "Better" as const,
+        status: "Draft" as const,
+        createdAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      }));
+      await upsertQuote(supabase, {
+        id: quoteId,
+        contactId: selectedContact?.id,
+        projectName: projectName.trim() || `${trade} project`,
+        customerName: selectedContact?.name ?? (customerName || "Customer"),
+        customerPhone: selectedContact?.phone,
+        customerEmail: selectedContact?.email,
+        customerAddress: selectedContact?.addr,
+        trade,
+        proposalTitle: settings.proposalSettings.defaultProposalTitle,
+        proposalNumber: computeNextProposalNumber(legacyQuotes),
+        scopeSummary: `${trade} proposal created from Contractor Studio v2 builder.`,
+        warrantyText: settings.proposalSettings.defaultWarrantyText,
+        termsText: settings.proposalSettings.defaultTerms,
+        includedServices: settings.proposalSettings.defaultIncludedServices,
+        certifications: settings.companyProfile.certifications.filter((c) => c.enabled).map((c) => c.name),
+        good: toPricingResult(goodOption, settings, "Good"),
+        better: toPricingResult(betterOption, settings, "Better"),
+        best: toPricingResult(bestOption, settings, "Best"),
+        selectedOption: "Better",
+        status: "Draft",
+        createdAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        projectSize: mapSize(size),
+        riskLevel: risk,
+        jobState: settings.marketLocation.defaultState,
+        clientPortalToken: crypto.randomUUID(),
+      });
+      router.push(`/quotes/editor?id=${quoteId}`);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Could not create proposal.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const segments = [
     { k: "materials",     l: "Materials",  v: materials,      c: "var(--blue)" },
@@ -129,16 +233,27 @@ export default function ProposalBuilderV2() {
       <div className="builder-page view">
         <div className="builder-head">
           <div className="ctx">
-            <Link href="/v2/proposals" className="back-btn" title="Back to proposals">
+            <Link href={proposalsHref} className="back-btn" title="Back to proposals">
               <Icon name="chevron-l" size={16} />
             </Link>
             <div>
               <div className="id">DRAFT · P-1043</div>
-              <h1>New proposal</h1>
+              <input
+                aria-label="Project name"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                style={{ border: "none", background: "transparent", font: "inherit", fontSize: 30, fontWeight: 800, letterSpacing: "-.04em", color: "var(--ink)", padding: 0, outline: "none", width: "100%" }}
+              />
               <div className="customer">
                 <Icon name="users" size={12} />
-                <span><b>Marisol Rivera</b> · Rivera &amp; Co. · Stamford, CT</span>
-                <button style={{ background: "none", border: "none", color: "var(--gold-deep)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Change</button>
+                {contacts.length > 0 ? (
+                  <select value={customerName || contacts[0]?.name} onChange={(e) => setCustomerName(e.target.value)} style={{ border: "none", background: "transparent", color: "var(--ink)", fontWeight: 700, outline: "none" }}>
+                    {contacts.map((contact) => <option key={contact.id}>{contact.name}</option>)}
+                  </select>
+                ) : (
+                  <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer name" style={{ border: "none", background: "transparent", outline: "none", fontWeight: 700 }} />
+                )}
+                <span>· {selectedContact?.biz || "Customer"} · {selectedContact?.addr || settings.marketLocation.defaultCity || "Service area"}</span>
               </div>
             </div>
           </div>
@@ -147,9 +262,10 @@ export default function ProposalBuilderV2() {
             <button className="btn ghost">Save session</button>
             <button className="btn ghost">Business rules</button>
             <button className="btn dark"><Icon name="eye" size={13} /> Preview</button>
-            <button className="btn primary" disabled={!hasData}><Icon name="check" size={13} /> Create Proposal</button>
+            <button className="btn primary" disabled={!hasData || saving} onClick={createProposal}><Icon name="check" size={13} /> {saving ? "Creating..." : "Create Proposal"}</button>
           </div>
         </div>
+        {saveError ? <div className="auth-alert error">{saveError}</div> : null}
 
         <div className="builder-grid">
           <div className="input-col">
@@ -394,4 +510,139 @@ function labelFor(k: CostKey): string {
     case "misc": return "Miscellaneous";
     case "materials": return "Materials";
   }
+}
+
+function createEngineInput(
+  settings: AppSettings,
+  values: {
+    trade: Trade;
+    size: Size;
+    risk: RiskLevel;
+    materials: number;
+    ownLabor: number;
+    dumpster: number;
+    permits: number;
+    equipment: number;
+    subcontractor: number;
+    misc: number;
+  }
+): PricingEngineInput {
+  const mappedTrade = mapTrade(values.trade);
+  const mappedSize = mapSize(values.size);
+  return {
+    costs: {
+      material: values.materials,
+      labor: values.ownLabor,
+      dumpster: values.dumpster,
+      permits: values.permits,
+      equipment: values.equipment,
+      subcontractor: values.subcontractor,
+      miscellaneous: values.misc,
+    },
+    businessCosts: {
+      overheadPercent: settings.costRules.includeOverhead ? settings.costRules.defaultOverheadPercent : 0,
+      overheadAllocationMethod: settings.costRules.includeOverhead ? settings.costRules.overheadAllocationMethod : "Ignore For Now",
+      monthlyOverhead: settings.costRules.monthlyOverhead,
+      flatOverheadPerProject: settings.costRules.flatOverheadPerProject,
+      monthlyBillableDays: settings.costRules.monthlyBillableDays,
+      projectDurationDays: settings.costRules.defaultProjectDurationDays,
+      laborBurdenPercent: settings.costRules.laborBurdenPercent,
+      minimumJobPrice: settings.costRules.minimumJobPrice,
+      miscellaneousBufferPercent: settings.costRules.miscellaneousBufferPercent,
+      permitBuffer: settings.costRules.permitBuffer,
+      creditCardFeePercent: settings.costRules.creditCardFeePercent,
+      financingFeePercent: settings.costRules.financingFeePercent,
+      taxPercent: settings.costRules.taxPercent,
+      includeCreditCardFee: settings.costRules.includeCreditCardFee,
+      includeFinancingFee: settings.costRules.includeFinancingFee,
+      includeTax: settings.costRules.includeTax,
+      includeMiscellaneousBuffer: settings.costRules.includeMiscellaneousBuffer,
+    },
+    commission: {
+      includeCommission: false,
+      commissionType: "Percentage",
+      commissionPercentage: 0,
+      commissionFlatAmount: 0,
+    },
+    setup: {
+      trade: mappedTrade,
+      state: settings.marketLocation.defaultState,
+      companyLevel: settings.companyProfile.companyLevel,
+      projectSize: mappedSize,
+      riskLevel: values.risk,
+      strategy: settings.pricingDefaults.defaultStrategy,
+    },
+    pricingRules: {
+      baseMargins: {
+        Good: settings.pricingDefaults.goodMargin / 100,
+        Better: settings.pricingDefaults.betterMargin / 100,
+        Best: settings.pricingDefaults.bestMargin / 100,
+      },
+      minimumSafeMargin: settings.pricingDefaults.minimumSafeMargin / 100,
+      stateAdjustments: Object.fromEntries(
+        Object.entries(settings.marketLocation.stateAdjustments).map(([state, value]) => [state, (value ?? 0) / 100])
+      ) as Partial<Record<ProjectState, number>>,
+      tradeAdjustments: Object.fromEntries(
+        Object.entries(settings.pricingDefaults.tradeAdjustments).map(([tradeKey, value]) => [tradeKey, value / 100])
+      ) as Partial<Record<AppTrade, number>>,
+      sizeAdjustments: Object.fromEntries(
+        Object.entries(settings.pricingDefaults.sizeAdjustments).map(([sizeKey, value]) => [sizeKey, value / 100])
+      ) as Partial<Record<ProjectSize, number>>,
+      riskAdjustments: Object.fromEntries(
+        Object.entries(settings.pricingDefaults.riskAdjustments).map(([riskKey, value]) => [riskKey, value / 100])
+      ) as Partial<Record<RiskLevel, number>>,
+      strategyAdjustments: Object.fromEntries(
+        Object.entries(settings.pricingDefaults.strategyAdjustments).map(([strategyKey, value]) => [strategyKey, value / 100])
+      ) as NonNullable<PricingEngineInput["pricingRules"]>["strategyAdjustments"],
+      companyAdjustments: Object.fromEntries(
+        Object.entries(settings.pricingDefaults.companyAdjustments).map(([companyKey, value]) => [companyKey, value / 100])
+      ) as NonNullable<PricingEngineInput["pricingRules"]>["companyAdjustments"],
+      thresholds: {
+        riskyMargin: settings.pricingThresholds.riskyMarginPercent / 100,
+        tightMargin: settings.pricingThresholds.tightMarginPercent / 100,
+        safePriceCushion: 1 + settings.pricingThresholds.safePriceCushionPercent / 100,
+        warningMarginLow: settings.pricingThresholds.warningMarginLowPercent / 100,
+        warningMarginHigh: settings.pricingThresholds.warningMarginHighPercent / 100,
+        warningCommission: settings.pricingThresholds.warningCommissionPercent / 100,
+        warningFeeProfit: settings.pricingThresholds.warningFeeProfitPercent / 100,
+        safeMarginRiskBonus: settings.pricingThresholds.safeMarginRiskBonusPercent / 100,
+        safeMarginSmallBonus: settings.pricingThresholds.safeMarginSmallBonusPercent / 100,
+        marginClampMin: settings.pricingThresholds.marginClampMinPercent / 100,
+        marginClampMax: settings.pricingThresholds.marginClampMaxPercent / 100,
+      },
+    },
+  };
+}
+
+function mapTrade(trade: Trade): AppTrade {
+  if (trade === "Roofing" || trade === "Painting" || trade === "Remodeling") return trade;
+  return "Remodeling";
+}
+
+function mapSize(size: Size): ProjectSize {
+  if (size === "Small") return "Small";
+  if (size === "Large" || size === "XL") return "Large";
+  return "Medium";
+}
+
+function toPricingResult(
+  option: PricingEngineOption,
+  settings: AppSettings,
+  name: PriceOptionName
+): PricingResult {
+  const descriptions = {
+    Good: settings.proposalSettings.goodDescription,
+    Better: settings.proposalSettings.betterDescription,
+    Best: settings.proposalSettings.bestDescription,
+  };
+  return {
+    name,
+    salePrice: Math.round(option.salePrice),
+    profit: Math.round(option.netProfit),
+    margin: option.margin,
+    markup: option.markup,
+    description: descriptions[name],
+    useCase: name === "Good" ? "Budget" : name === "Better" ? "Recommended" : "Premium",
+    recommended: name === "Better",
+  };
 }

@@ -6,7 +6,7 @@ export type IconName =
   | "arrow-r" | "arrow-up" | "arrow-dn" | "more" | "phone" | "mail" | "map"
   | "image" | "calculator" | "check" | "chevron-l" | "chevron-r" | "chevron-d"
   | "sparkle" | "clock" | "building" | "dollar" | "trending" | "shield"
-  | "edit" | "eye" | "copy" | "x" | "flag" | "home";
+  | "edit" | "eye" | "copy" | "x" | "flag" | "home" | "lock";
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const p = {
@@ -54,6 +54,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     case "x":          return <svg {...p}><path d="M6 6l12 12M18 6L6 18"/></svg>;
     case "flag":       return <svg {...p}><path d="M4 22V4l9 3-9 3M4 4l16 4-16 4"/></svg>;
     case "home":       return <svg {...p}><path d="M3 11l9-8 9 8v9a2 2 0 01-2 2h-4v-7H9v7H5a2 2 0 01-2-2v-9z"/></svg>;
+    case "lock":       return <svg {...p}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>;
     default:           return <svg {...p}><circle cx="12" cy="12" r="9"/></svg>;
   }
 }

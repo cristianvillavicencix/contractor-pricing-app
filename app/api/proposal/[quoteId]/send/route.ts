@@ -70,20 +70,57 @@ export async function POST(
     const settings = mergeAppSettings((settingsRow?.data ?? defaultSettings) as AppSettings);
     const company = settings.companyProfile;
 
-    // Generate PDF
+    // Determine which PDF path to use
+    const isBlocks = quote.builderVersion === "blocks";
+
     const origin = new URL(request.url).origin;
     const cookies = request.cookies.getAll();
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 
-    console.log("[send] generating PDF for", quoteId);
-    const pdfResponse = await fetch(`${origin}/api/proposals/pdf`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookieHeader,
-      },
-      body: JSON.stringify({ quoteId }),
-    });
+    let pdfResponse: Response;
+
+    if (isBlocks) {
+      // ── Block Builder PDF ─────────────────────────────────────────────────
+      // Validate blocks are present before hitting the endpoint
+      const rawBlocks = quote.proposalBlocks;
+      if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "This proposal uses the Block Builder but has no saved blocks. " +
+              "Open it in the Block Builder, review, and save before sending.",
+          },
+          { status: 400 }
+        );
+      }
+
+      console.log(
+        "[send] Using block proposal PDF for",
+        quoteId,
+        `(${rawBlocks.length} blocks)`
+      );
+
+      // pdf-blocks uses the admin client internally (no cookies required),
+      // but we forward them for consistency.
+      pdfResponse = await fetch(
+        `${origin}/api/proposals/pdf-blocks?quoteId=${quoteId}`,
+        {
+          headers: { Cookie: cookieHeader },
+        }
+      );
+    } else {
+      // ── Legacy PDF (paged.js) ─────────────────────────────────────────────
+      console.log("[send] Using legacy proposal PDF for", quoteId);
+
+      pdfResponse = await fetch(`${origin}/api/proposals/pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookieHeader,
+        },
+        body: JSON.stringify({ quoteId }),
+      });
+    }
 
     if (!pdfResponse.ok) {
       const pdfErr = await pdfResponse.text().catch(() => "(no body)");

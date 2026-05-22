@@ -5,10 +5,11 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 type Body = {
-  bucket: "proposal-photos" | "branding";
+  bucket: "proposal-assets" | "proposal-photos" | "branding";
   path: string; // filename only (server will prefix companyId)
   contentType: string;
   dataUrl: string;
+  alreadyPrefixed?: boolean;
 };
 
 function dataUrlToBytes(dataUrl: string) {
@@ -44,7 +45,14 @@ export async function POST(request: NextRequest) {
   }
 
   const bytes = dataUrlToBytes(body.dataUrl);
-  const objectPath = `${company.id}/${body.path.replace(/^\/+/, "")}`;
+  const cleanPath = body.path.replace(/^\/+/, "");
+  const objectPath = body.alreadyPrefixed
+    ? cleanPath
+    : `${company.id}/${cleanPath}`;
+
+  if (!objectPath.startsWith(`${company.id}/`)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { error: uploadError } = await admin.storage
     .from(body.bucket)
@@ -58,4 +66,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ path: objectPath });
 }
-

@@ -19,6 +19,11 @@ import { CLIENT_CONTRACT_CHECKLIST } from "@/lib/proposal-client-portal";
 import { ProposalDocument } from "@/components/proposals/proposal-document";
 import { PagedProposalPreview } from "@/components/proposals/paged-proposal-preview";
 import type { CoverLayout } from "@/lib/pdf-generator";
+import {
+  buildBlocksPrintHtml,
+  normalizeProposalBlocks,
+} from "@/lib/proposal-blocks";
+import type { ProposalBlock } from "@/types/proposal-blocks";
 
 type LoadState =
   | { kind: "loading" }
@@ -148,6 +153,18 @@ function AcceptPageInner() {
     return mergeAppSettings(load.settings);
   }, [load]);
 
+  // Pre-render block HTML read-only for builderVersion === "blocks" proposals.
+  // Called before early returns because hooks must not be conditional.
+  const blocksHtml = useMemo(() => {
+    if (load.kind !== "ready") return "";
+    const { quote } = load;
+    if (quote.builderVersion !== "blocks") return "";
+    const blocks = normalizeProposalBlocks(
+      (quote.proposalBlocks ?? []) as ProposalBlock[]
+    );
+    return buildBlocksPrintHtml(blocks, quote, mergedSettings);
+  }, [load, mergedSettings]);
+
   // ── Loading / error screens ──────────────────────────────────────────────
   if (load.kind === "loading") {
     return (
@@ -181,6 +198,7 @@ function AcceptPageInner() {
   }
 
   const { quote, template, coverPhotoUrl, coverLayout, existingPhotos, existingPhotoCaptions, expired, alreadyAccepted } = load;
+  const isBlocks = quote.builderVersion === "blocks";
 
   if (alreadyAccepted) {
     return (
@@ -403,30 +421,50 @@ function AcceptPageInner() {
             </button>
           </div>
 
-          <div
-            className={
-              coverLayout === "elegant"
-                ? "rounded-xl border border-[#d9e2ec] bg-[#e9eef4] px-1 py-2 shadow-inner"
-                : "rounded-xl border border-[#d9e2ec] bg-[#e9eef4] px-6 py-8 shadow-inner"
-            }
-          >
-            <PagedProposalPreview renderKey={pagedRenderKey}>
-              <ProposalDocument
-                template={template}
-                quote={{ ...quote, selectedOption: effectiveOption }}
-                settings={mergedSettings}
-                coverPhotoUrl={coverPhotoUrl}
-                coverLayout={coverLayout}
-                photos={existingPhotos}
-                photoCaptions={existingPhotoCaptions}
-                proposalNumber={quote.proposalNumber}
-                sectionOverrides={quote.sectionOverrides}
-                sectionLayouts={quote.sectionLayouts}
-                sectionOrder={quote.sectionOrder}
-                customSections={quote.customSections}
+          {isBlocks ? (
+            /* ── Block Builder proposal: read-only iframe, no editor UI ── */
+            <div className="rounded-xl border border-[#d9e2ec] bg-[#e9eef4] p-3 shadow-inner">
+              <iframe
+                srcDoc={blocksHtml}
+                title="Proposal document"
+                sandbox="allow-same-origin"
+                style={{
+                  width: "100%",
+                  minHeight: 900,
+                  border: "none",
+                  borderRadius: 8,
+                  display: "block",
+                  background: "#ffffff",
+                }}
               />
-            </PagedProposalPreview>
-          </div>
+            </div>
+          ) : (
+            /* ── Legacy Tiptap proposal: existing render path unchanged ── */
+            <div
+              className={
+                coverLayout === "elegant"
+                  ? "rounded-xl border border-[#d9e2ec] bg-[#e9eef4] px-1 py-2 shadow-inner"
+                  : "rounded-xl border border-[#d9e2ec] bg-[#e9eef4] px-6 py-8 shadow-inner"
+              }
+            >
+              <PagedProposalPreview renderKey={pagedRenderKey}>
+                <ProposalDocument
+                  template={template}
+                  quote={{ ...quote, selectedOption: effectiveOption }}
+                  settings={mergedSettings}
+                  coverPhotoUrl={coverPhotoUrl}
+                  coverLayout={coverLayout}
+                  photos={existingPhotos}
+                  photoCaptions={existingPhotoCaptions}
+                  proposalNumber={quote.proposalNumber}
+                  sectionOverrides={quote.sectionOverrides}
+                  sectionLayouts={quote.sectionLayouts}
+                  sectionOrder={quote.sectionOrder}
+                  customSections={quote.customSections}
+                />
+              </PagedProposalPreview>
+            </div>
+          )}
 
           {!expired && (
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-between">

@@ -39,8 +39,11 @@ export async function proxy(request: NextRequest) {
   const isPublicProposalClientApi =
     /^\/api\/proposal\/[^/]+\/client(\/accept)?$/.test(path);
   const isPublicPlacesApi = path.startsWith("/api/places/");
+  // Static assets in /public/ (CSS, fonts, images) should be accessible
+  // without a session. paged-proposal-a4.css is needed by the client portal.
+  const isPublicStaticAsset = /\.(css|woff2?|ttf|otf|png|jpe?g|gif|svg|ico|webp)$/.test(path);
 
-  if (!session && !isAuthRoute && !isPublicProposalClientPage && !isPublicProposalClientApi && !isPublicPlacesApi) {
+  if (!session && !isAuthRoute && !isPublicProposalClientPage && !isPublicProposalClientApi && !isPublicPlacesApi && !isPublicStaticAsset) {
     url.pathname = "/login";
     url.searchParams.set("next", path + (request.nextUrl.search ?? ""));
     return NextResponse.redirect(url);

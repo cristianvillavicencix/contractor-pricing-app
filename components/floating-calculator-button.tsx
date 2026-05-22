@@ -22,6 +22,7 @@ export function FloatingCalculatorButton() {
 
   const shouldHide =
     pathname.startsWith("/quotes/preview") ||
+    pathname.startsWith("/quotes/editor") ||
     pathname.startsWith("/proposals/preview") ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/signup") ||

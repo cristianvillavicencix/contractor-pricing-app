@@ -1,6 +1,7 @@
 import { getMoneyFormatPrefs } from "./money-format-prefs";
 import { calculatePricingEngine } from "./pricing-engine";
 import type { MaterialItem, ProposalTemplate } from "./proposal-templates";
+import type { ProposalDocumentSettings } from "@/types/proposal-blocks";
 import {
   defaultRoofingBestTierMaterialsTable,
   defaultRoofingBetterTierMaterialsTable,
@@ -128,6 +129,8 @@ export type Project = {
   costs: CostBreakdown;
   createdAt: string;
   contactId?: string;
+  startDate?: string;
+  endDate?: string;
 };
 
 export type ScopeTemplate = {
@@ -244,6 +247,20 @@ export type Quote = {
   existingPhotoPaths?: string[];
   existingPhotoCaptions?: string[];
   coverLayout?: ProposalCoverLayout;
+  /**
+   * Block-based editor version flag. Absent / "tiptap" = legacy Tiptap editor.
+   * "blocks" = new block builder (Phase 2+). Per-quote so existing quotes are unaffected.
+   * Future migration target: column in `quotes` table or `proposal_documents.builder_version`.
+   */
+  builderVersion?: "tiptap" | "blocks";
+  /**
+   * Ordered block list for builderVersion === "blocks". Stored inside the
+   * existing `quotes.data` JSON blob today; future target: `proposal_blocks` table.
+   * Import from types/proposal-blocks.ts — kept as unknown[] here to avoid
+   * a circular dependency at the type level.
+   */
+  proposalBlocks?: unknown[];
+  proposalDocumentSettings?: ProposalDocumentSettings;
 };
 
 /** One row of monthly overhead breakdown (Settings + onboarding). */
@@ -259,16 +276,23 @@ export type TierProduct = {
   description?: string;
   productBrand: string;
   productLine: string;
-  colorName?: string;
-  colorHex?: string;
   imageUrl: string;
   warrantyYears: number;
-  unitCost?: number;
-  laborCost?: number;
-  defaultMargin?: number;
-  defaultMarkup?: number;
   isActive?: boolean;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
   notes: string;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
+  unitCost?: number;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
+  laborCost?: number;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
+  colorName?: string;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
+  colorHex?: string;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
+  defaultMargin?: number;
+  /** @deprecated Kept only so older local pages can type-check; v2 does not store or render this. */
+  defaultMarkup?: number;
 };
 
 export function sumOverheadLineItems(items: OverheadLineItem[]): number {
@@ -433,6 +457,17 @@ export type AppSettings = {
     showPricingWarnings: boolean;
     /** Desktop sidebar narrow mode; synced via Supabase `company_settings`. */
     sidebarCollapsed?: boolean;
+    navLayout?: "sidebar" | "topbar";
+    density?: "compact" | "regular" | "comfy";
+    accent?: "gold" | "blue" | "green" | "purple" | "rose";
+  };
+  productsSettings: {
+    materialsMarkupPercent: number;
+    laborMarkupPercent: number;
+    defaultUnit: "each" | "sf" | "sq" | "lf" | "hour";
+    defaultTier: "Good" | "Better" | "Best";
+    showInactiveProducts: boolean;
+    autoSuggestByTrade: boolean;
   };
   /** When set (ISO date), onboarding wizard is skipped; stored in Supabase `company_settings`. */
   onboardingCompletedAt?: string;
@@ -751,6 +786,17 @@ export const defaultSettings: AppSettings = {
     showAdvancedPricingBreakdown: true,
     showPricingWarnings: true,
     sidebarCollapsed: false,
+    navLayout: "sidebar",
+    density: "regular",
+    accent: "gold",
+  },
+  productsSettings: {
+    materialsMarkupPercent: 20,
+    laborMarkupPercent: 50,
+    defaultUnit: "each",
+    defaultTier: "Better",
+    showInactiveProducts: false,
+    autoSuggestByTrade: true,
   },
 };
 
@@ -811,6 +857,10 @@ export function mergeAppSettings(settings: AppSettings): AppSettings {
     appPreferences: {
       ...defaultSettings.appPreferences,
       ...settings.appPreferences,
+    },
+    productsSettings: {
+      ...defaultSettings.productsSettings,
+      ...settings.productsSettings,
     },
   };
 }

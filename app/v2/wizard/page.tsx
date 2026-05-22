@@ -1,7 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  defaultSettings,
+  mergeAppSettings,
+  type AppSettings,
+  type CompanyLevel,
+  type SettingsTrade,
+} from "@/lib/app-data";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { loadCompanySettings, saveCompanySettings } from "@/lib/supabase/data";
 import { V2BodyTag } from "../_shared/body-tag";
 
 type SizeId = "solo" | "small" | "established" | "premium";
@@ -70,8 +79,12 @@ const STEPS = [
 ];
 
 export default function WizardV2() {
+  const router = useRouter();
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [step, setStep] = useState(1);
   const [data, setData] = useState<WizardData>(INITIAL);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const set = (patch: Partial<WizardData>) => setData((d) => ({ ...d, ...patch }));
   const totalSteps = STEPS.length;
   const isComplete = step > totalSteps;
@@ -86,9 +99,83 @@ export default function WizardV2() {
   }, [step, data]);
   const canSkip = step === 2;
 
-  const goNext = () => { if (!canAdvance) return; setStep((s) => s + 1); };
+  const goNext = () => {
+    if (!canAdvance) return;
+    if (step === totalSteps) {
+      void completeSetup();
+      return;
+    }
+    setStep((s) => s + 1);
+  };
   const goBack = () => setStep((s) => Math.max(1, s - 1));
   const restart = () => { setStep(1); setData({ ...INITIAL }); };
+
+  async function completeSetup() {
+    setError("");
+    setSaving(true);
+    try {
+      const raw = await loadCompanySettings<AppSettings | null>(supabase);
+      const base = mergeAppSettings(raw ?? defaultSettings);
+      const selectedSize = SIZE_OPTIONS.find((option) => option.id === data.size);
+      const overheadLineItems = Object.entries(data.overheadBreakdown)
+        .filter(([, amount]) => Number(amount) > 0)
+        .map(([id, amount]) => {
+          const category = OVERHEAD_CATEGORIES.find((item) => item.id === id);
+          return {
+            id,
+            label: category?.ttl ?? id,
+            amount: Number(amount),
+          };
+        })
+        .concat(
+          data.overheadCustom
+            .filter((item) => item.name.trim() && Number(item.amount) > 0)
+            .map((item) => ({
+              id: item.id,
+              label: item.name.trim(),
+              amount: Number(item.amount),
+            }))
+        );
+
+      const next = mergeAppSettings({
+        ...base,
+        companyProfile: {
+          ...base.companyProfile,
+          businessName: data.bizName.trim() || base.companyProfile.businessName,
+          contactName: data.yourName.trim() || base.companyProfile.contactName,
+          phone: data.phone.trim(),
+          address: data.address.trim(),
+          website: data.website.trim(),
+          mainTrade: mapTrade(data.trade),
+          companyLevel: mapCompanyLevel(data.size, selectedSize?.title),
+        },
+        pricingDefaults: {
+          ...base.pricingDefaults,
+          goodMargin: Math.max(10, data.margin - 7),
+          betterMargin: data.margin,
+          bestMargin: Math.min(80, data.margin + 7),
+          minimumSafeMargin: data.minMargin,
+        },
+        costRules: {
+          ...base.costRules,
+          monthlyOverhead: Number(data.overhead) || 0,
+          overheadLineItems,
+          laborBurdenPercent: data.burden,
+          includeOverhead: true,
+          includeMiscellaneousBuffer: true,
+          miscellaneousBufferPercent: 5,
+        },
+        onboardingCompletedAt: new Date().toISOString(),
+      });
+
+      await saveCompanySettings(supabase, next);
+      setStep(totalSteps + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save setup.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -155,18 +242,19 @@ export default function WizardV2() {
                 </button>
                 <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                   {canSkip && <button className="btn-skip" onClick={() => setStep((s) => s + 1)}>Skip for now</button>}
-                  <button className={`btn primary ${step === totalSteps ? "solid" : ""}`} onClick={goNext} disabled={!canAdvance}>
-                    {step === totalSteps ? "Finish setup" : "Continue"} <span className="arr">→</span>
+                  <button className={`btn primary ${step === totalSteps ? "solid" : ""}`} onClick={goNext} disabled={!canAdvance || saving}>
+                    {saving ? "Saving..." : step === totalSteps ? "Finish setup" : "Continue"} <span className="arr">→</span>
                   </button>
                 </div>
               </div>
+              {error && <div className="auth-alert error" style={{ marginTop: 14 }}>{error}</div>}
             </div>
           </div>
         ) : (
           <div className="stage">
             <div className="complete-stage">
               <MotionComplete confetti />
-              <StepComplete data={data} onRestart={restart} />
+              <StepComplete data={data} onRestart={restart} onOpen={() => router.push("/")} />
             </div>
           </div>
         )}
@@ -494,7 +582,21 @@ function Step5({ data, set }: { data: WizardData; set: (patch: Partial<WizardDat
   );
 }
 
-function StepComplete({ data, onRestart }: { data: WizardData; onRestart: () => void }) {
+function mapTrade(trade: string): SettingsTrade {
+  if (trade === "Roofing" || trade === "Painting" || trade === "Drywall" || trade === "Gutters" || trade === "Siding" || trade === "Remodeling") {
+    return trade;
+  }
+  return "General Contractor";
+}
+
+function mapCompanyLevel(size: SizeId | "", label?: string): CompanyLevel {
+  if (label === "Solo Owner") return "Solo Owner";
+  if (label === "Established Co.") return "Established Company";
+  if (label === "Premium Company") return "Premium Company";
+  return "Small Crew";
+}
+
+function StepComplete({ data, onRestart, onOpen }: { data: WizardData; onRestart: () => void; onOpen: () => void }) {
   return (
     <div className="step-pane" style={{ textAlign: "center", maxWidth: 480, margin: "0 auto" }}>
       <div className="step-eyebrow" style={{ display: "block" }}>WIZARD COMPLETE</div>
@@ -514,9 +616,9 @@ function StepComplete({ data, onRestart }: { data: WizardData; onRestart: () => 
         <SummaryRow label="Minimum margin" value={`${data.minMargin}%`} mono />
       </div>
       <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-        <Link href="/v2" className="btn primary solid">
+        <button type="button" onClick={onOpen} className="btn primary solid">
           Open dashboard <span className="arr">→</span>
-        </Link>
+        </button>
         <button className="btn" onClick={onRestart}>Restart wizard</button>
       </div>
     </div>

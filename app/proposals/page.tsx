@@ -1,1 +1,1 @@
-export { default } from "../quotes/page";
+export { default } from "@/app/v2/proposals/page";

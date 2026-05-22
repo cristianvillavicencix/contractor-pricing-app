@@ -1,0 +1,30 @@
+-- Migration: Block-based proposal builder — documentation only
+--
+-- Phase 1 stores builder_version and proposal_blocks inside the existing
+-- quotes.data JSON blob.  No schema change is required yet.
+--
+-- When Phase 3 lands (real proposal_blocks table), apply the statements below:
+--
+-- ALTER TABLE quotes ADD COLUMN IF NOT EXISTS builder_version text
+--   CHECK (builder_version IN ('tiptap', 'blocks')) DEFAULT 'tiptap';
+--
+-- CREATE TABLE IF NOT EXISTS proposal_blocks (
+--   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+--   quote_id      uuid NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+--   position      integer NOT NULL DEFAULT 0,
+--   type          text NOT NULL,
+--   data          jsonb NOT NULL DEFAULT '{}',
+--   enabled       boolean NOT NULL DEFAULT true,
+--   created_at    timestamptz NOT NULL DEFAULT now(),
+--   updated_at    timestamptz NOT NULL DEFAULT now()
+-- );
+--
+-- CREATE INDEX IF NOT EXISTS proposal_blocks_quote_id_idx ON proposal_blocks(quote_id);
+--
+-- ALTER TABLE proposal_blocks ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "company members only" ON proposal_blocks
+--   USING (
+--     quote_id IN (SELECT id FROM quotes WHERE company_id = current_company_id())
+--   );
+
+SELECT 1; -- no-op so Supabase migration runner does not error on empty file

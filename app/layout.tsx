@@ -1,22 +1,26 @@
 import type { Metadata } from "next";
-import { Inter, Geist_Mono } from "next/font/google";
-import { FloatingCalculatorButton } from "@/components/floating-calculator-button";
+import { Manrope, JetBrains_Mono } from "next/font/google";
 import { OnboardingGate } from "@/components/onboarding-gate";
 import { AppProviders } from "@/components/providers";
+import { V2BodyTag } from "@/app/v2/_shared/body-tag";
 import "./globals.css";
+import "./v2/v2.css";
+import "./v2/wizard.css";
 
-const inter = Inter({
+const manrope = Manrope({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-manrope",
+  weight: ["300", "400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-jetbrains-mono",
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
-  title: "Contractor Pricing App",
+  title: "Contractor Studio",
   description: "Pricing intelligence for contractors",
 };
 
@@ -27,20 +31,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`
-          ${inter.variable}
-          ${geistMono.variable}
-          font-sans
-          antialiased
-          bg-[var(--page-bg)]
-          text-foreground
-        `}
-      >
+      <body className={`${manrope.variable} ${jetbrainsMono.variable}`}>
+        <V2BodyTag />
         <AppProviders>
           <OnboardingGate>{children}</OnboardingGate>
         </AppProviders>
-        <FloatingCalculatorButton />
       </body>
     </html>
   );

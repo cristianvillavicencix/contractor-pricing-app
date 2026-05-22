@@ -3,6 +3,7 @@ import {
   defaultRoofingBestTierMaterialsTable,
   defaultRoofingGoodTierMaterialsTable,
 } from "./default-roofing-tier-materials";
+import type { ProposalBlock } from "@/types/proposal-blocks";
 
 // ─── Section types ────────────────────────────────────────────────────────────
 
@@ -133,6 +134,9 @@ export type ProposalTemplate = {
   trade: string;
   name: string;
   lastModified: string;
+  category?: ProposalTemplateCategory;
+  builderVersion?: "tiptap" | "blocks";
+  proposalBlocks?: ProposalBlock[];
   cover: CoverSection;
   executiveSummary: ExecutiveSummarySection;
   existingConditions: ExistingConditionsSection;
@@ -146,7 +150,28 @@ export type ProposalTemplate = {
   terms: TermsSection;
   acceptance: AcceptanceSection;
   customSections?: CustomSection[];
+  /** Tiptap JSON document per section ID — overrides structured fields when present. */
+  sectionDocs?: Record<string, unknown>;
 };
+
+export type ProposalTemplateCategory =
+  | "Roofing"
+  | "Siding"
+  | "Gutters"
+  | "Windows"
+  | "Solar"
+  | "Restoration"
+  | "Generic";
+
+export const PROPOSAL_TEMPLATE_CATEGORIES: ProposalTemplateCategory[] = [
+  "Roofing",
+  "Siding",
+  "Gutters",
+  "Windows",
+  "Solar",
+  "Restoration",
+  "Generic",
+];
 
 // ─── Section metadata for the editor ─────────────────────────────────────────
 
@@ -371,6 +396,110 @@ export function blankTemplate(trade: string): ProposalTemplate {
   };
 }
 
+function blockTemplateBlocks(kind: "roofing-full" | "insurance" | "retail-roofing" | "siding"): ProposalBlock[] {
+  const isSiding = kind === "siding";
+  const isInsurance = kind === "insurance";
+  const title = isSiding ? "Siding Proposal" : isInsurance ? "Insurance Restoration Proposal" : "Roofing Proposal";
+  const scope = isSiding
+    ? [
+        "Remove loose or damaged siding where required.",
+        "Install selected siding system per manufacturer specifications.",
+        "Install trim, flashing, starter strips, and accessories for a complete exterior envelope.",
+        "Clean work areas and complete final walkthrough with homeowner.",
+      ]
+    : isInsurance
+    ? [
+        "Document storm-related exterior damage with photo-backed scope.",
+        "Coordinate estimate alignment with insurance scope where applicable.",
+        "Remove and replace approved roofing components using code-compliant materials.",
+        "Complete final cleanup, inspection, and closeout documentation.",
+      ]
+    : [
+        "Protect landscaping, driveway, HVAC equipment, and exterior surfaces.",
+        "Remove existing roofing materials down to deck where required.",
+        "Inspect roof decking and document any hidden conditions before proceeding.",
+        "Install underlayment, flashing, ventilation, and selected roofing system.",
+        "Clean jobsite, perform magnetic nail sweep, and complete final walkthrough.",
+      ];
+
+  const today = new Date().toISOString();
+  const make = (id: string, position: number, data: ProposalBlock["data"]): ProposalBlock => ({
+    id,
+    type: data.type,
+    position,
+    enabled: true,
+    data,
+  } as ProposalBlock);
+
+  return [
+    make(`${kind}-cover`, 0, {
+      type: "cover",
+      layout: "centrado",
+      companyName: "{{company_name}}",
+      tagline: title,
+      clientName: "{{client_name}}",
+      projectAddress: "{{client_address}}",
+      proposalNumber: "{{proposal_number}}",
+      date: "{{proposal_date}}",
+    }),
+    make(`${kind}-summary`, 1, {
+      type: "executive_summary",
+      html: `<p>Hi {{client_name}},</p><p>This proposal outlines a professional ${isSiding ? "siding" : "roofing"} solution for <strong>{{client_address}}</strong>. Our goal is to protect the property, improve long-term performance, and make the process clear from approval through completion.</p><p>Your project will be managed by {{sales_rep}} with communication, scheduling, and closeout handled professionally.</p>`,
+    }),
+    make(`${kind}-scope`, 2, {
+      type: "scope",
+      html: `<ul>${scope.map((item) => `<li>${item}</li>`).join("")}</ul>`,
+      items: scope,
+    }),
+    make(`${kind}-pricing`, 3, {
+      type: "pricing",
+      showGood: true,
+      showBetter: true,
+      showBest: true,
+      selectedTier: "Better",
+    }),
+    make(`${kind}-warranty`, 4, {
+      type: "warranty",
+      html: `<p>Workmanship warranty is included with this proposal. Manufacturer warranties apply based on selected materials and product registration requirements.</p>`,
+    }),
+    make(`${kind}-terms`, 5, {
+      type: "terms",
+      html: `<p>Pricing is valid until {{proposal_date}} unless otherwise noted. Changes to approved scope, hidden conditions, permit requirements, or owner-requested upgrades may require a written change order.</p>`,
+    }),
+    make(`${kind}-acceptance`, 6, {
+      type: "acceptance",
+      html: `<p>By signing, {{client_name}} authorizes {{company_name}} to proceed with the work described in this proposal.</p>`,
+      requireSignature: true,
+    }),
+  ].map((block) => ({ ...block, createdAt: today }));
+}
+
+function blockTemplate(
+  id: string,
+  name: string,
+  category: ProposalTemplateCategory,
+  kind: "roofing-full" | "insurance" | "retail-roofing" | "siding"
+): ProposalTemplate {
+  const base = blankTemplate(category);
+  return {
+    ...base,
+    id,
+    trade: category,
+    category,
+    name,
+    builderVersion: "blocks",
+    proposalBlocks: blockTemplateBlocks(kind),
+    lastModified: new Date().toISOString().slice(0, 10),
+  };
+}
+
+export const defaultBlockProposalTemplates: ProposalTemplate[] = [
+  blockTemplate("block-roofing-full-replacement", "Roofing Full Replacement", "Roofing", "roofing-full"),
+  blockTemplate("block-insurance-restoration", "Insurance Restoration", "Restoration", "insurance"),
+  blockTemplate("block-retail-roofing", "Retail Roofing Proposal", "Roofing", "retail-roofing"),
+  blockTemplate("block-siding-proposal", "Siding Proposal", "Siding", "siding"),
+];
+
 export const defaultProposalTemplates: ProposalTemplate[] = [
   defaultRoofingTemplate,
   blankTemplate("Siding"),
@@ -379,6 +508,7 @@ export const defaultProposalTemplates: ProposalTemplate[] = [
   blankTemplate("Gutters"),
   blankTemplate("Remodeling"),
   blankTemplate("General Contractor"),
+  ...defaultBlockProposalTemplates,
 ];
 
 /**
@@ -400,11 +530,15 @@ export function cloneProposalTemplateWithNewIdentity(
 export function mergeProposalTemplates(saved: ProposalTemplate[]): ProposalTemplate[] {
   const merged = [...defaultProposalTemplates];
   for (const savedTemplate of saved) {
-    const idx = merged.findIndex((t) => t.trade === savedTemplate.trade);
+    const idx = merged.findIndex((t) => t.id === savedTemplate.id);
     if (idx >= 0) {
       merged[idx] = { ...merged[idx], ...savedTemplate };
     } else {
-      merged.push(savedTemplate);
+      const legacyIdx = savedTemplate.builderVersion !== "blocks"
+        ? merged.findIndex((t) => t.builderVersion !== "blocks" && t.trade === savedTemplate.trade)
+        : -1;
+      if (legacyIdx >= 0) merged[legacyIdx] = { ...merged[legacyIdx], ...savedTemplate };
+      else merged.push(savedTemplate);
     }
   }
   return merged;

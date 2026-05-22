@@ -10,6 +10,8 @@ export type ProposalStatus = "draft" | "sent" | "viewed" | "followup" | "accepte
 export type Proposal = {
   id: string; title: string; contactId: string; value: number;
   status: ProposalStatus; sent: string | null; age: number; margin: number; items: number;
+  quoteId?: string;
+  builderVersion?: "tiptap" | "blocks";
 };
 
 export type ProjectStatus = "scheduled" | "in_progress" | "on_hold" | "completed" | "invoiced" | "paid";
@@ -21,7 +23,7 @@ export type Project = {
 export type Product = {
   id: string; cat: string; tier: "good" | "better" | "best"; active: boolean;
   brand: string; name: string; type: string; line: string; warranty: string;
-  desc: string; price: number; unit: string;
+  desc: string; imageUrl?: string; warrantyYears?: number; price?: number; unit?: string;
 };
 
 export type ActivityEntry = {

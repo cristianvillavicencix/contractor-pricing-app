@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 type Body = {
-  bucket: "proposal-photos" | "branding";
+  bucket: "proposal-assets" | "proposal-photos" | "branding";
   path: string;
   expiresIn?: number; // seconds
 };
@@ -48,4 +48,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ url: data.signedUrl });
 }
-
