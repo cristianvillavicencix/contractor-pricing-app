@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { getAuthCallbackUrl } from "@/lib/auth-redirect-url";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function ForgotPasswordInner() {
@@ -20,9 +21,8 @@ function ForgotPasswordInner() {
     if (!email.trim()) { setError("Enter your email address."); return; }
     setBusy(true);
     try {
-      const nextDest = encodeURIComponent("/auth/update-password");
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/auth/callback?next=${nextDest}`,
+        redirectTo: getAuthCallbackUrl("/auth/update-password"),
       });
       if (error) throw error;
       setSent(true);

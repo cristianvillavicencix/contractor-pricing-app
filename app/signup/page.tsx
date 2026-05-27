@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
+import { getAuthCallbackUrl } from "@/lib/auth-redirect-url";
 import { resolvePostAuthPath } from "@/lib/post-auth-redirect";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -130,7 +131,7 @@ function SignupPageInner() {
     setBusy(true);
     setBusyKind("google");
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+      const redirectTo = getAuthCallbackUrl(next);
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo, skipBrowserRedirect: true },
@@ -166,7 +167,7 @@ function SignupPageInner() {
             company_name: companyName.trim(),
             phone: phone.trim(),
           },
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          emailRedirectTo: getAuthCallbackUrl(next),
         },
       });
       if (error) throw error;
