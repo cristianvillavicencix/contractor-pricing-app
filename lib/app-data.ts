@@ -438,7 +438,7 @@ export type AppSettings = {
   onboardingCompletedAt?: string;
 };
 
-export const DEFAULT_COMPANY_LOGO_URL = "/branding/bidwise-logo.png";
+export const DEFAULT_COMPANY_LOGO_URL = "/branding/bidwise-logo-light.png";
 
 export const storageKeys = {
   settings: "contractor-pricing-app:settings",

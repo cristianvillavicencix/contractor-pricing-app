@@ -145,7 +145,7 @@ export function AppSidebar() {
           className="flex min-w-0 items-center gap-3"
           aria-label="Bidwise dashboard"
         >
-          <BrandLogo className="h-12 w-[150px] object-contain sm:w-[172px]" />
+          <BrandLogo variant="dark" className="h-auto w-[160px] object-contain sm:w-[190px]" />
         </Link>
 
         <nav className="ml-4 hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex">

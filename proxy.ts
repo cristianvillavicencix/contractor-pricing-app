@@ -39,8 +39,13 @@ export async function proxy(request: NextRequest) {
   const isPublicProposalClientApi =
     /^\/api\/proposal\/[^/]+\/client(\/accept)?$/.test(path);
   const isPublicPlacesApi = path.startsWith("/api/places/");
+  const isPublicAsset =
+    path.startsWith("/branding/") ||
+    path === "/favicon.ico" ||
+    path === "/favicon.png" ||
+    path === "/apple-touch-icon.png";
 
-  if (!session && !isAuthRoute && !isPublicProposalClientPage && !isPublicProposalClientApi && !isPublicPlacesApi) {
+  if (!session && !isAuthRoute && !isPublicProposalClientPage && !isPublicProposalClientApi && !isPublicPlacesApi && !isPublicAsset) {
     url.pathname = "/login";
     url.searchParams.set("next", path + (request.nextUrl.search ?? ""));
     return NextResponse.redirect(url);
@@ -56,5 +61,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|vendor/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|favicon.png|apple-touch-icon.png|vendor/|branding/).*)"],
 };
