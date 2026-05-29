@@ -18,6 +18,7 @@ import {
 } from "@/lib/app-data";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { loadCompanySettings, saveCompanySettings } from "@/lib/supabase/data";
+import { BrandLogo } from "@/components/brand-logo";
 
 type WizardState = {
   businessName: string;
@@ -506,9 +507,7 @@ function OnboardingPageInner() {
       >
         {/* Top bar */}
         <div className="border-b border-[#E8E3D6] px-8 py-5">
-          <span className="text-lg font-bold tracking-tight text-[#213343]">
-            Bid<span className="text-[#ff5c35]">wise</span>
-          </span>
+          <BrandLogo className="h-10 w-[132px] object-contain" />
         </div>
         {/* Centered content */}
         <div className="flex flex-1 items-center justify-center px-6 py-16">
@@ -523,9 +522,7 @@ function OnboardingPageInner() {
       {/* ── Left visual panel ── */}
       <div className="relative hidden overflow-hidden bg-[#213343] lg:flex lg:w-[44%] lg:flex-col">
         <div className="absolute left-8 top-8 z-10">
-          <span className="text-lg font-bold tracking-tight text-white">
-            Bid<span className="text-[#ff5c35]">wise</span>
-          </span>
+          <BrandLogo className="h-10 w-[132px] object-contain" />
         </div>
         {/* Grid */}
         <div className="pointer-events-none absolute inset-0"
@@ -542,9 +539,7 @@ function OnboardingPageInner() {
       <div className="flex flex-1 flex-col bg-[#FAFAF6]">
         {/* Mobile brand */}
         <div className="flex items-center justify-between border-b border-[#E8E3D6] px-6 py-4 lg:hidden">
-          <span className="text-base font-bold tracking-tight text-[#213343]">
-            Bid<span className="text-[#ff5c35]">wise</span>
-          </span>
+          <BrandLogo className="h-10 w-[132px] object-contain" />
         </div>
 
         <div className="flex flex-1 items-center justify-center overflow-y-auto">

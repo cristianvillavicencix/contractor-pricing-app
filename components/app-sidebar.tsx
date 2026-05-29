@@ -13,9 +13,9 @@ import {
   Settings,
   Users,
   X,
-  Zap,
 } from "lucide-react";
 import { SignOutButton } from "@/components/sign-out-button";
+import { BrandLogo } from "@/components/brand-logo";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,10 +99,7 @@ export function AppSidebar() {
         const nextProfile = {
           companyName: nextCompanyName,
           contactName: merged.companyProfile.contactName.trim(),
-          companyIconUrls: uniqueUrls([
-            uploadedLogoUrl,
-            ...getWebsiteFaviconUrls(merged.companyProfile.website),
-          ]),
+          companyIconUrls: uniqueUrls([uploadedLogoUrl]),
         };
         cacheTopbarProfile(nextProfile);
         setTopbarProfile(nextProfile);
@@ -146,19 +143,9 @@ export function AppSidebar() {
             setMobileOpen(false);
           }}
           className="flex min-w-0 items-center gap-3"
-          aria-label="Contractor Pricing dashboard"
+          aria-label="Bidwise dashboard"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12 text-[#ffd400] ring-1 ring-white/15">
-            <Zap className="h-6 w-6 fill-[#ffd400]" />
-          </div>
-          <div className="hidden leading-none sm:block">
-            <p className="text-[0.8rem] font-black uppercase tracking-[0.28em] text-white">
-              Contractor
-            </p>
-            <p className="mt-1 text-[0.72rem] font-black uppercase tracking-[0.36em] text-[#ffd400]">
-              Studio
-            </p>
-          </div>
+          <BrandLogo className="h-12 w-[150px] object-contain sm:w-[172px]" />
         </Link>
 
         <nav className="ml-4 hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex">
@@ -392,25 +379,15 @@ function getInitials(value: string) {
     .toUpperCase();
 }
 
-function getWebsiteFaviconUrls(website: string) {
-  const trimmed = website.trim();
-  if (!trimmed) return [];
-
-  try {
-    const url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
-    return [
-      `${url.origin}/favicon.ico`,
-      `${url.origin}/favicon.png`,
-      `${url.origin}/apple-touch-icon.png`,
-      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url.hostname)}&sz=64`,
-    ];
-  } catch {
-    return [];
-  }
+function uniqueUrls(urls: string[]) {
+  return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean))).filter(
+    (url) => !isFaviconFallbackUrl(url)
+  );
 }
 
-function uniqueUrls(urls: string[]) {
-  return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
+function isFaviconFallbackUrl(url: string) {
+  return /\/(?:favicon\.ico|favicon\.png|apple-touch-icon\.png)(?:\?|$)/i.test(url)
+    || /\/\/www\.google\.com\/s2\/favicons/i.test(url);
 }
 
 function getCachedTopbarProfile() {

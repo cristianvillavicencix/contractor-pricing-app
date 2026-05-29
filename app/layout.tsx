@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Contractor Pricing App",
+  title: "Bidwise",
   description: "Pricing intelligence for contractors",
 };
 

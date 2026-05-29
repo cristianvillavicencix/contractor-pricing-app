@@ -438,7 +438,7 @@ export type AppSettings = {
   onboardingCompletedAt?: string;
 };
 
-export const DEFAULT_COMPANY_LOGO_URL = "/branding/default-company-logo.png";
+export const DEFAULT_COMPANY_LOGO_URL = "/branding/bidwise-logo.png";
 
 export const storageKeys = {
   settings: "contractor-pricing-app:settings",
@@ -734,7 +734,7 @@ export const defaultSettings: AppSettings = {
     },
   },
   branding: {
-    logoUrl: "",
+    logoUrl: DEFAULT_COMPANY_LOGO_URL,
     primaryColor: "#111111",
     accentColor: "#737373",
     tagline: "",
@@ -756,8 +756,7 @@ export const defaultSettings: AppSettings = {
 
 export function getUploadedCompanyLogoUrl(logoUrl: string | null | undefined) {
   const trimmed = logoUrl?.trim() ?? "";
-  if (!trimmed || trimmed === DEFAULT_COMPANY_LOGO_URL) return "";
-  return trimmed;
+  return trimmed || DEFAULT_COMPANY_LOGO_URL;
 }
 
 export function mergeAppSettings(settings: AppSettings): AppSettings {

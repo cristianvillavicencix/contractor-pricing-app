@@ -7,6 +7,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { getAuthCallbackUrl } from "@/lib/auth-redirect-url";
 import { resolvePostAuthPath } from "@/lib/post-auth-redirect";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { BrandLogo } from "@/components/brand-logo";
 
 function GoogleLogo() {
   return (
@@ -188,9 +189,7 @@ function SignupPageInner() {
     <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <span className="text-2xl font-bold tracking-tight text-[#213343]">
-            Bid<span className="text-[#ff5c35]">wise</span>
-          </span>
+          <BrandLogo className="mx-auto h-16 w-[190px] object-contain" />
         </div>
 
         <div className="rounded-xl border border-[#d9e2ec] bg-white p-8 shadow-sm">
