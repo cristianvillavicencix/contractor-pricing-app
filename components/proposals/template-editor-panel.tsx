@@ -11,11 +11,12 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSave: (template: ProposalTemplate) => void;
+  mode?: "modal" | "inline";
 };
 
 type SectionId = keyof Omit<ProposalTemplate, "id" | "trade" | "name" | "lastModified">;
 
-export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) {
+export function TemplateEditorPanel({ template, open, onClose, onSave, mode = "modal" }: Props) {
   const [draft, setDraft] = useState<ProposalTemplate>(template);
   const [activeSection, setActiveSection] = useState<SectionId>("cover");
 
@@ -30,6 +31,97 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
     onClose();
   }
 
+  const sectionNav = (compact: boolean) => (
+    <nav className={`shrink-0 overflow-y-auto border-r border-[#d9e2ec] bg-[#f5f8fa] ${compact ? "w-40 p-2" : "w-56 p-3"}`}>
+      <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Sections</p>
+      {PROPOSAL_SECTIONS.map((s) => {
+        const enabled = (draft[s.id] as { enabled: boolean }).enabled;
+        return (
+          <button
+            key={s.id}
+            onClick={() => setActiveSection(s.id)}
+            className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition ${
+              activeSection === s.id
+                ? "bg-white font-medium text-[#213343] shadow-sm"
+                : "text-gray-500 hover:bg-white/70 hover:text-black"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${enabled ? "bg-[#4C9A59]" : "bg-gray-300"}`} />
+            <span className={`truncate ${compact ? "text-xs" : "text-sm"}`}>{s.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  const sectionEditors = (
+    <>
+      {activeSection === "cover" && (
+        <CoverEditor section={draft.cover} onChange={(v) => set("cover", v)} />
+      )}
+      {activeSection === "executiveSummary" && (
+        <ExecSummaryEditor section={draft.executiveSummary} onChange={(v) => set("executiveSummary", v)} />
+      )}
+      {activeSection === "existingConditions" && (
+        <ExistingConditionsEditor section={draft.existingConditions} onChange={(v) => set("existingConditions", v)} />
+      )}
+      {activeSection === "scopeOfWork" && (
+        <ScopeEditor section={draft.scopeOfWork} onChange={(v) => set("scopeOfWork", v)} />
+      )}
+      {activeSection === "materialsSpecs" && (
+        <MaterialsEditor
+          section={draft.materialsSpecs}
+          onChange={(v) => set("materialsSpecs", v)}
+          tierMaterialsByPackage={draft.tierMaterialsByPackage}
+          onTierMaterialsByPackageChange={(v) =>
+            setDraft((prev) => ({ ...prev, tierMaterialsByPackage: v }))
+          }
+        />
+      )}
+      {activeSection === "timeline" && (
+        <TimelineEditor section={draft.timeline} onChange={(v) => set("timeline", v)} />
+      )}
+      {activeSection === "pricing" && (
+        <PricingEditor section={draft.pricing} onChange={(v) => set("pricing", v)} />
+      )}
+      {activeSection === "warranty" && (
+        <WarrantyEditor section={draft.warranty} onChange={(v) => set("warranty", v)} />
+      )}
+      {activeSection === "terms" && (
+        <TermsEditor section={draft.terms} onChange={(v) => set("terms", v)} />
+      )}
+      {activeSection === "acceptance" && (
+        <AcceptanceEditor section={draft.acceptance} onChange={(v) => set("acceptance", v)} />
+      )}
+    </>
+  );
+
+  if (mode === "inline") {
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-[#d9e2ec] px-4 py-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Template</p>
+            <p className="text-sm font-semibold text-[#213343]">{draft.trade}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="rounded-md bg-[#4C9A59] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#3C7F4A]"
+          >
+            Save Template
+          </button>
+        </div>
+        {/* Body */}
+        <div className="flex min-h-0 flex-1">
+          {sectionNav(true)}
+          <div className="flex-1 overflow-y-auto p-4">{sectionEditors}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Backdrop */}
@@ -37,7 +129,6 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
         className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       />
-
       {/* Panel */}
       <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[75vw] flex-col bg-white shadow-2xl md:w-[75vw]">
         {/* Header */}
@@ -50,7 +141,7 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
             <button
               type="button"
               onClick={handleSave}
-              className="rounded-md bg-[#ff5c35] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#e94820]"
+              className="rounded-md bg-[#4C9A59] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3C7F4A]"
             >
               Save Template
             </button>
@@ -58,77 +149,16 @@ export function TemplateEditorPanel({ template, open, onClose, onSave }: Props) 
               type="button"
               onClick={onClose}
               className="rounded-md p-2 text-gray-400 transition hover:bg-gray-100"
-              aria-label="Close without saving (or click outside)"
+              aria-label="Close without saving"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
         </div>
-
-        {/* Body: sidebar + content */}
+        {/* Body */}
         <div className="flex min-h-0 flex-1">
-          {/* Section nav */}
-          <nav className="w-56 shrink-0 overflow-y-auto border-r border-[#d9e2ec] bg-[#f5f8fa] p-3">
-            <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Sections</p>
-            {PROPOSAL_SECTIONS.map((s) => {
-              const enabled = (draft[s.id] as { enabled: boolean }).enabled;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setActiveSection(s.id)}
-                  className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition ${
-                    activeSection === s.id
-                      ? "bg-white font-medium text-[#213343] shadow-sm"
-                      : "text-gray-500 hover:bg-white/70 hover:text-black"
-                  }`}
-                >
-                  <span className={`h-2 w-2 rounded-full ${enabled ? "bg-[#ff5c35]" : "bg-gray-300"}`} />
-                  <span className="truncate">{s.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Section editor */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {activeSection === "cover" && (
-              <CoverEditor section={draft.cover} onChange={(v) => set("cover", v)} />
-            )}
-            {activeSection === "executiveSummary" && (
-              <ExecSummaryEditor section={draft.executiveSummary} onChange={(v) => set("executiveSummary", v)} />
-            )}
-            {activeSection === "existingConditions" && (
-              <ExistingConditionsEditor section={draft.existingConditions} onChange={(v) => set("existingConditions", v)} />
-            )}
-            {activeSection === "scopeOfWork" && (
-              <ScopeEditor section={draft.scopeOfWork} onChange={(v) => set("scopeOfWork", v)} />
-            )}
-            {activeSection === "materialsSpecs" && (
-              <MaterialsEditor
-                section={draft.materialsSpecs}
-                onChange={(v) => set("materialsSpecs", v)}
-                tierMaterialsByPackage={draft.tierMaterialsByPackage}
-                onTierMaterialsByPackageChange={(v) =>
-                  setDraft((prev) => ({ ...prev, tierMaterialsByPackage: v }))
-                }
-              />
-            )}
-            {activeSection === "timeline" && (
-              <TimelineEditor section={draft.timeline} onChange={(v) => set("timeline", v)} />
-            )}
-            {activeSection === "pricing" && (
-              <PricingEditor section={draft.pricing} onChange={(v) => set("pricing", v)} />
-            )}
-            {activeSection === "warranty" && (
-              <WarrantyEditor section={draft.warranty} onChange={(v) => set("warranty", v)} />
-            )}
-            {activeSection === "terms" && (
-              <TermsEditor section={draft.terms} onChange={(v) => set("terms", v)} />
-            )}
-            {activeSection === "acceptance" && (
-              <AcceptanceEditor section={draft.acceptance} onChange={(v) => set("acceptance", v)} />
-            )}
-          </div>
+          {sectionNav(false)}
+          <div className="flex-1 overflow-y-auto p-6">{sectionEditors}</div>
         </div>
       </div>
     </>
@@ -252,7 +282,7 @@ function CoverEditor({ section, onChange }: { section: ProposalTemplate["cover"]
           {section.elegantLogoUrl ? (
             <div className="mb-2 flex items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={section.elegantLogoUrl} alt="" className="h-12 max-w-[140px] border border-[#d9e2ec] bg-white object-contain p-1" />
+              <img src={section.elegantLogoUrl} alt="" className="h-12 max-w-35 border border-[#d9e2ec] bg-white object-contain p-1" />
               <button
                 type="button"
                 className="text-xs text-[#ff5c35] underline"

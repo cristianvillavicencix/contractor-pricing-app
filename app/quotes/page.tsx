@@ -137,7 +137,11 @@ export default function QuotesPage() {
   );
 
   function openQuoteEditor(quoteId: string) {
-    router.push(`/quotes/editor?id=${quoteId}`);
+    const q = quotes.find((item) => item.id === quoteId);
+    if (q) {
+      try { sessionStorage.setItem(`proposal-draft:${quoteId}`, JSON.stringify(q)); } catch {}
+    }
+    router.push(`/proposals/preview?id=${quoteId}`);
   }
 
   function openProposalSummary(quoteId: string) {

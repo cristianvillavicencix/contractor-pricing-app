@@ -20,7 +20,6 @@ function GoogleLogo() {
   );
 }
 
-// Auto-formats digits into (xxx) xxx-xxxx as the user types
 function formatPhone(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 10);
   if (digits.length === 0) return "";
@@ -78,7 +77,7 @@ function inputClass(hasError: boolean) {
   return `w-full rounded-lg border px-3 py-2 text-sm outline-none transition focus:ring-2 ${
     hasError
       ? "border-[#b42318] focus:border-[#b42318] focus:ring-[#b42318]/20"
-      : "border-[#d9e2ec] focus:border-[#ff5c35] focus:ring-[#ff5c35]/20"
+      : "border-[#d9e2ec] focus:border-[#4C9A59] focus:ring-[#4C9A59]/20"
   }`;
 }
 
@@ -96,7 +95,6 @@ function SignupPageInner() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  // Per-field errors (shown after blur or submit attempt)
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -152,7 +150,6 @@ function SignupPageInner() {
     setSubmitError(null);
     setInfoMessage(null);
 
-    // Mark all fields as touched to show errors
     setTouched({ fullName: true, companyName: true, phone: true, email: true, password: true });
     if (hasErrors) return;
 
@@ -186,21 +183,21 @@ function SignupPageInner() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-4 py-10">
+    <div className="flex min-h-dvh items-center justify-center bg-[#F0F4F1] px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <BrandLogo className="mx-auto h-auto w-[320px] max-w-full object-contain" />
         </div>
 
         <div className="rounded-xl border border-[#d9e2ec] bg-white p-8 shadow-sm">
-          <h1 className="text-lg font-semibold text-[#213343]">Create your account</h1>
+          <h1 className="text-lg font-semibold text-[#111827]">Create your account</h1>
           <p className="mt-1 text-sm text-gray-500">Get started — it only takes a minute.</p>
 
           <button
             type="button"
             disabled={busy}
             onClick={signInWithGoogle}
-            className="mt-6 flex w-full items-center justify-center gap-3 rounded-lg border border-[#d9e2ec] bg-white px-4 py-2.5 text-sm font-medium text-[#213343] shadow-sm transition hover:bg-[#f6f8fb] disabled:opacity-60"
+            className="mt-6 flex w-full items-center justify-center gap-3 rounded-lg border border-[#d9e2ec] bg-white px-4 py-2.5 text-sm font-medium text-[#111827] shadow-sm transition hover:bg-[#F0F4F1] disabled:opacity-60"
           >
             <GoogleLogo />
             {busy && busyKind === "google" ? "Opening Google…" : "Continue with Google"}
@@ -213,9 +210,8 @@ function SignupPageInner() {
           </div>
 
           <form onSubmit={createAccount} className="space-y-4" noValidate>
-            {/* Full name */}
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#213343]">Full name</label>
+              <label className="mb-1 block text-sm font-medium text-[#111827]">Full name</label>
               <input
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
@@ -223,30 +219,28 @@ function SignupPageInner() {
                 type="text"
                 autoComplete="name"
                 autoFocus
-                placeholder="John Smith"
+                placeholder="Jane Smith"
                 className={inputClass(!!touched.fullName && !!errors.fullName)}
               />
               {touched.fullName && <FieldError msg={errors.fullName} />}
             </div>
 
-            {/* Company name */}
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#213343]">Company name</label>
+              <label className="mb-1 block text-sm font-medium text-[#111827]">Company name</label>
               <input
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 onBlur={() => touch("companyName")}
                 type="text"
                 autoComplete="organization"
-                placeholder="Acme Contracting LLC"
+                placeholder="Smith Roofing LLC"
                 className={inputClass(!!touched.companyName && !!errors.companyName)}
               />
               {touched.companyName && <FieldError msg={errors.companyName} />}
             </div>
 
-            {/* Phone */}
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#213343]">
+              <label className="mb-1 block text-sm font-medium text-[#111827]">
                 Phone{" "}
                 <span className="font-normal text-gray-400">(optional)</span>
               </label>
@@ -262,9 +256,8 @@ function SignupPageInner() {
               {touched.phone && <FieldError msg={errors.phone} />}
             </div>
 
-            {/* Email */}
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#213343]">Email</label>
+              <label className="mb-1 block text-sm font-medium text-[#111827]">Email</label>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -277,9 +270,8 @@ function SignupPageInner() {
               {touched.email && <FieldError msg={errors.email} />}
             </div>
 
-            {/* Password */}
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#213343]">Password</label>
+              <label className="mb-1 block text-sm font-medium text-[#111827]">Password</label>
               <div className="relative">
                 <input
                   value={password}
@@ -293,7 +285,7 @@ function SignupPageInner() {
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#213343]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#111827]"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -338,7 +330,7 @@ function SignupPageInner() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-lg bg-[#ff5c35] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#e94820] disabled:opacity-60"
+              className="w-full rounded-lg bg-[#4C9A59] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#3C7F4A] disabled:opacity-60"
             >
               {busy && busyKind === "signup" ? "Creating account…" : "Create account"}
             </button>
@@ -349,7 +341,7 @@ function SignupPageInner() {
           Already have an account?{" "}
           <Link
             href={`/login?next=${encodeURIComponent(next)}`}
-            className="font-medium text-[#ff5c35] hover:underline"
+            className="font-medium text-[#2D6B3A] hover:underline"
           >
             Sign in
           </Link>
@@ -363,7 +355,7 @@ export default function SignupPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+        <div className="flex min-h-dvh items-center justify-center bg-[#F0F4F1] text-sm text-gray-500">
           Loading…
         </div>
       }

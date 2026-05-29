@@ -382,7 +382,7 @@ export async function upsertProposalTemplate(supabase: SupabaseClient, template:
     name: template.name,
     last_modified: template.lastModified,
     data: template,
-  });
+  }, { onConflict: "company_id,trade" });
   if (error) throw error;
 }
 

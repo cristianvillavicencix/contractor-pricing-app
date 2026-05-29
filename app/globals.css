@@ -64,99 +64,102 @@ input[type="number"] {
 }
 
 :root {
-  /* Solar-inspired visual system (ink + warm yellow + clean light surfaces) */
-  --brand-accent: #ffd400;
-  --brand-accent-hover: #e5be00;
+  /* Emil Kowalski motion curves — stronger than Tailwind's defaults */
+  --motion-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --motion-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Green brand system */
+  --brand-accent: #4C9A59;
+  --brand-accent-hover: #3C7F4A;
   --brand-ink: #1e1e1e;
   --brand-navy: #111111;
-  --page-bg: #f0f0f2;
+  --page-bg: #F0F4F1;
   --app-shell-topbar-height: 4.5rem;
 
-  --background: oklch(0.955 0.004 260);
-  --foreground: oklch(0.16 0.004 260);
+  --background: #FFFFFF;
+  --foreground: #111827;
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.255 0.035 245);
+  --card: #FFFFFF;
+  --card-foreground: #111827;
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --popover: #FFFFFF;
+  --popover-foreground: #111827;
 
-  --primary: oklch(0.875 0.18 92);
-  --primary-foreground: oklch(0.13 0 0);
+  --primary: #4C9A59;
+  --primary-foreground: #FFFFFF;
 
   --secondary: oklch(0.965 0.008 235);
-  --secondary-foreground: oklch(0.255 0.035 245);
+  --secondary-foreground: #111827;
 
   --muted: oklch(0.955 0.008 235);
   --muted-foreground: oklch(0.53 0.026 245);
 
-  --accent: oklch(0.94 0.17 96);
-  --accent-foreground: oklch(0.13 0 0);
+  --accent: #EBF5EC;
+  --accent-foreground: #1A4224;
 
   --destructive: oklch(0.577 0.245 27.325);
 
   --border: oklch(0.885 0.012 235);
   --input: oklch(0.885 0.012 235);
-  --ring: oklch(0.82 0.17 92);
+  --ring: #4C9A59;
 
   --radius: 0.5rem;
 
   --sidebar: oklch(0.16 0.004 260);
   --sidebar-foreground: oklch(1 0 0);
 
-  --sidebar-primary: oklch(0.875 0.18 92);
-  --sidebar-primary-foreground: oklch(0.13 0 0);
+  --sidebar-primary: #4C9A59;
+  --sidebar-primary-foreground: #FFFFFF;
 
   --sidebar-accent: oklch(0.24 0.004 260);
   --sidebar-accent-foreground: oklch(1 0 0);
 
   --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.875 0.18 92);
+  --sidebar-ring: #4C9A59;
 }
 
 .dark {
-  /* App shell (pages use these alongside shadcn tokens) */
-  --page-bg: oklch(0.17 0.02 245);
-  /* Keep --brand-navy as dark ink for charts / accents; body copy uses `text-foreground` */
+  --page-bg: #141a14;
 
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
+  --background: #111111;
+  --foreground: #F5F5F5;
 
   --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
+  --card-foreground: #F5F5F5;
 
   --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  --popover-foreground: #F5F5F5;
 
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.145 0 0);
+  --primary: #A6E33F;
+  --primary-foreground: #111111;
 
   --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  --secondary-foreground: #F5F5F5;
 
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground: #6B6B6B;
 
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent: #1A2D1A;
+  --accent-foreground: #F5F5F5;
 
   --destructive: oklch(0.704 0.191 22.216);
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: #5A9A2A;
 
   --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-foreground: #F5F5F5;
 
-  --sidebar-primary: oklch(0.985 0 0);
-  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --sidebar-primary: #A6E33F;
+  --sidebar-primary-foreground: #111111;
 
   --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-accent-foreground: #F5F5F5;
 
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: #A6E33F;
 }
 
 @layer base {
@@ -183,7 +186,7 @@ input[type="number"] {
   h2,
   h3,
   h4 {
-    color: #0f172a;
+    color: var(--foreground);
   }
 
   /* Tighter main column padding when compact mode is on (see `app-compact` on <html>) */
@@ -212,6 +215,19 @@ input[type="number"] {
   textarea,
   select {
     font: inherit;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="button"],
+    [data-slot="dialog-content"],
+    [data-slot="dialog-overlay"],
+    [data-slot="sheet-content"],
+    [data-slot="sheet-overlay"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="select-content"] {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 
   /* Professional defaults for app forms/tables */
@@ -275,10 +291,10 @@ input[type="number"] {
 }
 
 @layer utilities {
-  /* Global remap: legacy orange accent -> solar yellow accent */
+  /* Global remap: legacy orange accent -> green brand */
   [class*="bg-[#ff5c35]"] {
     background-color: var(--brand-accent) !important;
-    color: #111111 !important;
+    color: #FFFFFF !important;
   }
 
   [class*="hover:bg-[#e94820]"]:hover {
@@ -286,7 +302,7 @@ input[type="number"] {
   }
 
   [class*="text-[#ff5c35]"] {
-    color: #b39500 !important;
+    color: #2D6B3A !important;
   }
 
   [class*="hover:text-[#e94820]"]:hover {
@@ -307,10 +323,6 @@ input[type="number"] {
 
   [class*="accent-[#ff5c35]"] {
     accent-color: var(--brand-accent) !important;
-  }
-
-  [class*="bg-[#fff1ea]"] {
-    background-color: #fff7c2 !important;
   }
 
   [class*="border-[#d9e2ec]"] {

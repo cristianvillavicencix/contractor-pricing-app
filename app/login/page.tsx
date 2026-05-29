@@ -133,21 +133,21 @@ function LoginPageInner() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] px-4">
+    <div className="flex min-h-dvh items-center justify-center bg-[#F0F4F1] px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <BrandLogo className="mx-auto h-auto w-[320px] max-w-full object-contain" />
         </div>
 
         <div className="rounded-xl border border-[#d9e2ec] bg-white p-8 shadow-sm">
-          <h1 className="text-lg font-semibold text-[#213343]">Sign in</h1>
+          <h1 className="text-lg font-semibold text-[#111827]">Sign in</h1>
           <p className="mt-1 text-sm text-gray-500">Access your workspace.</p>
 
           <button
             type="button"
             disabled={busy}
             onClick={signInWithGoogle}
-            className="mt-6 flex w-full items-center justify-center gap-3 rounded-lg border border-[#d9e2ec] bg-white px-4 py-2.5 text-sm font-medium text-[#213343] shadow-sm transition hover:bg-[#f6f8fb] disabled:opacity-60"
+            className="mt-6 flex w-full items-center justify-center gap-3 rounded-lg border border-[#d9e2ec] bg-white px-4 py-2.5 text-sm font-medium text-[#111827] shadow-sm transition hover:bg-[#F0F4F1] disabled:opacity-60"
           >
             <GoogleLogo />
             {busy && busyKind === "google" ? "Opening Google…" : "Continue with Google"}
@@ -161,7 +161,7 @@ function LoginPageInner() {
 
           <form onSubmit={signIn} className="space-y-4">
             <label className="block">
-              <span className="mb-1 block text-sm font-medium text-[#213343]">Email</span>
+              <span className="mb-1 block text-sm font-medium text-[#111827]">Email</span>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -169,12 +169,12 @@ function LoginPageInner() {
                 autoComplete="email"
                 autoFocus
                 placeholder="you@company.com"
-                className="w-full rounded-lg border border-[#d9e2ec] px-3 py-2 text-sm outline-none transition focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
+                className="w-full rounded-lg border border-[#d9e2ec] px-3 py-2 text-sm outline-none transition focus:border-[#4C9A59] focus:ring-2 focus:ring-[#4C9A59]/20"
               />
             </label>
 
             <label className="block">
-              <span className="mb-1 block text-sm font-medium text-[#213343]">Password</span>
+              <span className="mb-1 block text-sm font-medium text-[#111827]">Password</span>
               <div className="relative">
                 <input
                   value={password}
@@ -182,12 +182,12 @@ function LoginPageInner() {
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   placeholder="••••••••"
-                  className="w-full rounded-lg border border-[#d9e2ec] py-2 pl-3 pr-10 text-sm outline-none transition focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
+                  className="w-full rounded-lg border border-[#d9e2ec] py-2 pl-3 pr-10 text-sm outline-none transition focus:border-[#4C9A59] focus:ring-2 focus:ring-[#4C9A59]/20"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#213343]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#111827]"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -212,7 +212,7 @@ function LoginPageInner() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-lg bg-[#213343] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#2e4a60] disabled:opacity-60"
+              className="w-full rounded-lg bg-[#4C9A59] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#3C7F4A] disabled:opacity-60"
             >
               {busy && busyKind === "signin" ? "Signing in…" : "Sign in"}
             </button>
@@ -223,7 +223,7 @@ function LoginPageInner() {
           Don&apos;t have an account?{" "}
           <Link
             href={`/signup?next=${encodeURIComponent(next)}`}
-            className="font-medium text-[#ff5c35] hover:underline"
+            className="font-medium text-[#2D6B3A] hover:underline"
           >
             Create one
           </Link>
@@ -237,7 +237,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#f5f8fa] text-sm text-gray-500">
+        <div className="flex min-h-dvh items-center justify-center bg-[#F0F4F1] text-sm text-gray-500">
           Loading…
         </div>
       }

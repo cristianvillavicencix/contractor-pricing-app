@@ -3,8 +3,12 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowLeft,
   AlertTriangle,
+  Bold,
   Check,
   ChevronDown,
   Download,
@@ -14,14 +18,17 @@ import {
   EyeOff,
   GripVertical,
   ImagePlus,
+  Italic,
+  List,
+  ListOrdered,
   Minus,
   Plus,
   Printer,
   Send,
   Trash2,
+  Type,
+  Underline,
   X,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -49,7 +56,6 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   getQuote,
   getProposalTemplateForTrade,
-  listProposalTemplates,
   listQuoteVersions,
   loadCompanySettings,
   saveQuoteVersion,
@@ -59,7 +65,6 @@ import {
   getSignedUrlViaApi,
 } from "@/lib/supabase/data";
 import {
-  cloneProposalTemplateWithNewIdentity,
   mergeProposalTemplates,
   PROPOSAL_SECTIONS,
   type CustomSection,
@@ -74,7 +79,6 @@ import type {
   SectionLayouts,
   SectionOverrides,
 } from "@/components/proposals/proposal-document";
-import { TemplateEditorPanel } from "@/components/proposals/template-editor-panel";
 
 type ServiceItem = { name: string; visible: boolean };
 type ProposalHealthItem = { label: string; ok: boolean; detail: string };
@@ -101,6 +105,16 @@ type QuotePhotosFields = {
   coverLayout?: CoverLayout;
 };
 
+function readCachedQuote(quoteId: string | null): Quote | undefined {
+  if (!quoteId || typeof window === "undefined") return undefined;
+  try {
+    const raw = sessionStorage.getItem(`proposal-draft:${quoteId}`);
+    return raw ? (JSON.parse(raw) as Quote) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const SERVICES_COLLAPSE_AT = 6;
 // localStorage keys removed — this screen is Supabase-backed
 
@@ -120,9 +134,9 @@ function QuotePreviewContent() {
 function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [quote, setQuote] = useState<Quote | null | undefined>(undefined);
+  const [quote, setQuote] = useState<Quote | null | undefined>(() => readCachedQuote(quoteId));
   const [project, setProject] = useState<Project | undefined>(undefined);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !readCachedQuote(quoteId));
   const [loadError, setLoadError] = useState<string | null>(null);
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersionSnapshot[]>([]);
 
@@ -203,22 +217,24 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
   const [isSaved, setIsSaved] = useState(false);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const [mobileTab, setMobileTab] = useState<"edit" | "preview">("preview");
+  /** Mobile-only: whether to show the preview column or the sidebar. Desktop shows both always. */
+  const [mobileView, setMobileView] = useState<"sidebar" | "preview">("preview");
   const [dragSectionIndex, setDragSectionIndex] = useState<number | null>(null);
   const [dragOverSectionIndex, setDragOverSectionIndex] = useState<number | null>(null);
   const isInitialized = useRef(false);
 
-  // Proposal modal + photos + template editor
+  // Proposal modal + photos
   const [showProposalModal, setShowProposalModal] = useState(false);
-  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
-  /** When duplicating to a new trade, the panel edits this clone instead of the quote’s template. */
-  const [templateEditorDraft, setTemplateEditorDraft] = useState<ProposalTemplate | null>(null);
-  const [showDuplicateTemplateModal, setShowDuplicateTemplateModal] = useState(false);
-  const [duplicateTemplateTradeName, setDuplicateTemplateTradeName] = useState("");
-  const [duplicateTemplateError, setDuplicateTemplateError] = useState("");
-  const [duplicateTemplateBusy, setDuplicateTemplateBusy] = useState(false);
   const [existingPhotos, setExistingPhotos] = useState<string[]>([]);
   const [existingPhotoCaptions, setExistingPhotoCaptions] = useState<string[]>([]);
+
+  // TODO: recuperar feature "duplicar template" (ej. clonar Roofing → Siding)
+  // const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  // const [templateEditorDraft, setTemplateEditorDraft] = useState<ProposalTemplate | null>(null);
+  // const [showDuplicateTemplateModal, setShowDuplicateTemplateModal] = useState(false);
+  // const [duplicateTemplateTradeName, setDuplicateTemplateTradeName] = useState("");
+  // const [duplicateTemplateError, setDuplicateTemplateError] = useState("");
+  // const [duplicateTemplateBusy, setDuplicateTemplateBusy] = useState(false);
 
   // Collapsible panel state
   const [showScope, setShowScope] = useState(false);
@@ -726,53 +742,8 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
     e.target.value = "";
   }
 
-  function handleTemplateSave(updated: ProposalTemplate) {
-    if (proposalTemplate && updated.trade.trim() === proposalTemplate.trade.trim()) {
-      setProposalTemplate(updated);
-    }
-    upsertProposalTemplate(supabase, updated).catch(() => undefined);
-    setShowTemplateEditor(false);
-    setTemplateEditorDraft(null);
-  }
-
-  async function handleDuplicateTemplateSubmit() {
-    if (!proposalTemplate) return;
-    const name = duplicateTemplateTradeName.trim();
-    if (!name) {
-      setDuplicateTemplateError("Enter a trade name for the new template.");
-      return;
-    }
-    if (name.toLowerCase() === proposalTemplate.trade.trim().toLowerCase()) {
-      setDuplicateTemplateError("Use a different name than this quote’s trade.");
-      return;
-    }
-    setDuplicateTemplateBusy(true);
-    setDuplicateTemplateError("");
-    try {
-      const saved = await listProposalTemplates(supabase);
-      const merged = mergeProposalTemplates(saved);
-      if (merged.some((t) => t.trade.trim().toLowerCase() === name.toLowerCase())) {
-        setDuplicateTemplateError("A template with this trade name already exists.");
-        return;
-      }
-      const id = `custom-${Math.random().toString(36).slice(2, 10)}`;
-      const copy = cloneProposalTemplateWithNewIdentity(proposalTemplate, {
-        id,
-        trade: name,
-        name: `${name} Proposal`,
-      });
-      setShowDuplicateTemplateModal(false);
-      setDuplicateTemplateTradeName("");
-      setTemplateEditorDraft(copy);
-      setShowTemplateEditor(true);
-    } catch (e) {
-      setDuplicateTemplateError(
-        e instanceof Error ? e.message : "Could not verify template names. Try again."
-      );
-    } finally {
-      setDuplicateTemplateBusy(false);
-    }
-  }
+  // TODO: recuperar feature "duplicar template" (ej. clonar Roofing → Siding)
+  // async function handleDuplicateTemplateSubmit() { ... }
 
   function updateTemplate<K extends keyof ProposalTemplate>(
     key: K,
@@ -1018,18 +989,18 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
             <span className="text-gray-300">|</span>
             <span className="text-sm font-semibold text-[#213343]">{doc.proposalNumber}</span>
           </div>
-          <div className="hidden items-center gap-3 sm:flex">
-            <div className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Good</span>
-              <span className="text-sm font-bold text-[#213343]">{formatMoney(quote.good.salePrice)}</span>
+          <div className="hidden items-center gap-2 sm:flex">
+            <div className="flex items-center gap-1.5 rounded-md border border-[#DDD8CC] bg-[#F1EFE8] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#7A7060]">Good</span>
+              <span className="text-sm font-bold text-[#3D3826]">{formatMoney(quote.good.salePrice)}</span>
             </div>
-            <div className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Better</span>
-              <span className="text-sm font-bold text-[#213343]">{formatMoney(quote.better.salePrice)}</span>
+            <div className="flex items-center gap-1.5 rounded-md border border-[#B8D4F0] bg-[#E6F1FB] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#185FA5]">Better</span>
+              <span className="text-sm font-bold text-[#0D3B6E]">{formatMoney(quote.better.salePrice)}</span>
             </div>
-            <div className="flex items-center gap-1.5 rounded-md border border-[#d9e2ec] bg-[#f6f8fb] px-3 py-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Best</span>
-              <span className="text-sm font-bold text-[#213343]">{formatMoney(quote.best.salePrice)}</span>
+            <div className="flex items-center gap-1.5 rounded-md border border-[#F0D5A0] bg-[#FAEEDA] px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8B6A0A]">Best</span>
+              <span className="text-sm font-bold text-[#5A4100]">{formatMoney(quote.best.salePrice)}</span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1039,34 +1010,34 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                 isSaved
                   ? "border-green-200 bg-green-50 text-green-700"
                   : isDirty
-                  ? "border-[#ff5c35] bg-[#fff1ea] text-[#ff5c35]"
-                  : "border-[#d9e2ec] hover:bg-[#f6f8fb]"
+                  ? "border-[#185FA5] bg-[#E6F1FB] text-[#185FA5]"
+                  : "border-[#d9e2ec] text-[#213343] hover:bg-[#f6f8fb]"
               }`}
             >
               {isSaved ? <Check className="h-4 w-4" /> : null}
               <span className="hidden sm:inline">
-                {isAutoSaving ? "Auto-saving…" : isSaved ? "Saved!" : isDirty ? "Save changes" : "Save"}
+                {isAutoSaving ? "Guardando…" : isSaved ? "¡Guardado!" : isDirty ? "Guardar cambios" : "Guardar"}
               </span>
               <span className="sm:hidden">
-                {isSaved ? "✓" : isDirty ? "●" : "Save"}
+                {isSaved ? "✓" : isDirty ? "●" : "Guardar"}
               </span>
             </button>
             <button
               onClick={handleDownload}
               disabled={isDownloading}
-              className="flex items-center gap-2 rounded-lg bg-[var(--brand-accent)] px-4 py-2 text-sm font-semibold text-black shadow-sm transition hover:bg-[var(--brand-accent-hover)] disabled:opacity-60"
+              className="flex items-center gap-2 rounded-lg bg-[#185FA5] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0D3B6E] disabled:opacity-60"
             >
               <Download className="h-4 w-4" />
               <span className="hidden sm:inline">
-                {isDownloading ? "Generating…" : "Download"}
+                {isDownloading ? "Generando…" : "Descargar"}
               </span>
             </button>
             <button
               onClick={() => setShowSendModal(true)}
-              className="flex items-center gap-2 rounded-lg border border-[#213343] bg-[#213343] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a2a38]"
+              className="flex items-center gap-2 rounded-lg bg-[#0D3B6E] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0a2d55]"
             >
               <Send className="h-4 w-4" />
-              <span className="hidden sm:inline">Send</span>
+              <span className="hidden sm:inline">Enviar</span>
             </button>
           </div>
         </div>
@@ -1075,23 +1046,23 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
       {/* Mobile tab bar */}
       <div className="print:hidden sticky top-16.25 z-10 flex border-b border-[#d9e2ec] bg-white lg:hidden">
         <button
-          onClick={() => setMobileTab("preview")}
-          className={`flex-1 py-3 text-sm font-semibold transition ${mobileTab === "preview" ? "border-b-2 border-[var(--brand-accent)] text-[#213343]" : "text-gray-400"}`}
+          onClick={() => setMobileView("preview")}
+          className={`flex-1 py-3 text-sm font-semibold transition ${mobileView === "preview" ? "border-b-2 border-[var(--brand-accent)] text-[#213343]" : "text-gray-400"}`}
         >
-          Preview
+          Vista previa
         </button>
         <button
-          onClick={() => setMobileTab("edit")}
-          className={`flex-1 py-3 text-sm font-semibold transition ${mobileTab === "edit" ? "border-b-2 border-[var(--brand-accent)] text-[#213343]" : "text-gray-400"}`}
+          onClick={() => setMobileView("sidebar")}
+          className={`flex-1 py-3 text-sm font-semibold transition ${mobileView === "sidebar" ? "border-b-2 border-[var(--brand-accent)] text-[#213343]" : "text-gray-400"}`}
         >
-          Edit
+          Editar
         </button>
       </div>
 
       {/* Layout */}
       <div className="mx-auto flex h-[calc(100vh-65px)] max-w-[1680px] gap-10 overflow-hidden px-5 py-6 sm:px-8 lg:h-[calc(100vh-65px)]">
         {/* ── Editor sidebar ── */}
-        <aside className={`print:hidden h-full shrink-0 overflow-y-auto pr-1 lg:block lg:w-90 xl:w-105 ${mobileTab === "edit" ? "block w-full" : "hidden"}`}>
+        <aside className={`print:hidden h-full shrink-0 overflow-y-auto pr-1 lg:block lg:w-90 xl:w-105 ${mobileView === "sidebar" ? "block w-full" : "hidden"}`}>
           <div className="space-y-5">
 
           <input
@@ -1130,12 +1101,25 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
               const custom = customSections.find((s) => s.id === sectionId);
               if (!builtIn && !custom) return null;
 
-              const panelLabel = builtIn?.label ?? custom?.title ?? "Custom Section";
+              const SPANISH_LABELS: Record<string, string> = {
+                cover: "Portada",
+                executiveSummary: "Resumen ejecutivo",
+                existingConditions: "Condiciones existentes",
+                scopeOfWork: "Alcance del trabajo",
+                materialsSpecs: "Materiales y especificaciones",
+                timeline: "Cronograma",
+                pricing: "Inversión / Precios",
+                warranty: "Garantía",
+                terms: "Términos y condiciones",
+                acceptance: "Aceptación",
+              };
+              const panelLabel = SPANISH_LABELS[sectionId]
+                ?? (builtIn?.label.replace(/^\d+\.\s*/, "") ?? custom?.title ?? "Sección personalizada");
               const panelOrdinal =
                 sectionId === "cover"
                   ? null
                   : sectionOrder.slice(0, index + 1).filter((id) => id !== "cover").length;
-              const panelDescription = builtIn?.description ?? "Custom content for your proposal";
+              const panelDescription = builtIn?.description ?? "Contenido personalizado para tu propuesta";
               const sectionVisible = isSectionVisible(sectionId);
               const open = activeProposalSection === sectionId;
               const isDragging = dragSectionIndex === index;
@@ -1159,10 +1143,11 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
                     setDragOverSectionIndex(null);
                   }}
                   onDragEnd={() => { setDragSectionIndex(null); setDragOverSectionIndex(null); }}
-                  className={`transition-opacity ${isDragging ? "opacity-40" : "opacity-100"} ${isDragOver && dragSectionIndex !== index ? "ring-2 ring-[#ff5c35] ring-offset-1 rounded" : ""}`}
+                  className={`transition-opacity ${isDragging ? "opacity-40" : "opacity-100"} ${isDragOver && dragSectionIndex !== index ? "ring-2 ring-[#185FA5] ring-offset-1 rounded" : ""}`}
                 >
                 <ProposalSectionPanel
-                  label={panelOrdinal != null ? `${panelOrdinal}. ${panelLabel}` : panelLabel}
+                  ordinal={panelOrdinal}
+                  label={panelLabel}
                   description={panelDescription}
                   open={open}
                   visible={sectionVisible}
@@ -2140,10 +2125,10 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
             <button
               type="button"
               onClick={addCustomSection}
-              className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-[#d9e2ec] py-2.5 text-xs text-gray-400 transition hover:border-[#213343] hover:text-[#213343]"
+              className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-[#185FA5]/50 py-2.5 text-xs font-medium text-[#185FA5] transition hover:border-[#185FA5] hover:bg-[#E6F1FB]"
             >
               <Plus className="h-3.5 w-3.5" />
-              Add Custom Section
+              Agregar sección
             </button>
 
             <div className="rounded border border-[#d9e2ec] bg-white">
@@ -2254,39 +2239,52 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
             </div>
           </div>
           </div>
+          </div>{/* end proposal tab content */}
+          {/* Template tab — always mounted to preserve draft state across tab switches */}
+          {proposalTemplate && (
+            <div className={`${sidebarTab === "template" ? "flex-1 min-h-0" : "hidden"}`}>
+              <TemplateEditorPanel
+                key={`${proposalTemplate.id}-${proposalTemplate.lastModified}`}
+                mode="inline"
+                open={true}
+                template={proposalTemplate}
+                onClose={() => setSidebarTab("proposal")}
+                onSave={handleTemplateSave}
+              />
+            </div>
+          )}
         </aside>
 
         {/* ── Document preview ── */}
-        <div ref={previewScrollRef} className={`min-w-0 flex-1 overflow-y-auto pr-1 ${mobileTab === "edit" ? "hidden lg:block" : "block"}`}>
+        <div ref={previewScrollRef} className={`min-w-0 flex-1 overflow-y-auto pr-1 ${mobileView === "sidebar" ? "hidden lg:block" : "block"}`}>
           <div className="mx-auto max-w-260 space-y-4">
 
-            {/* Zoom controls */}
-            <div className="print:hidden flex items-center justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={() => setPreviewZoom((z) => Math.max(50, z - 10))}
-                className="flex h-7 w-7 items-center justify-center rounded border border-[#d9e2ec] bg-white text-gray-500 transition hover:bg-[#f6f8fb]"
-                title="Zoom out"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <span className="min-w-[3.5rem] text-center text-xs font-semibold text-gray-500">{previewZoom}%</span>
-              <button
-                type="button"
-                onClick={() => setPreviewZoom((z) => Math.min(150, z + 10))}
-                className="flex h-7 w-7 items-center justify-center rounded border border-[#d9e2ec] bg-white text-gray-500 transition hover:bg-[#f6f8fb]"
-                title="Zoom in"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewZoom(100)}
-                className="rounded border border-[#d9e2ec] bg-white px-2 py-1 text-[11px] font-semibold text-gray-400 transition hover:bg-[#f6f8fb]"
-                title="Reset zoom"
-              >
-                Reset
-              </button>
+            {/* Editor toolbar — visual, Commit 2 conectará las acciones */}
+            <div className="print:hidden sticky top-0 z-10 flex items-center gap-0.5 rounded-lg border border-[#d9e2ec] bg-white px-2 py-1.5 shadow-sm">
+              {/* Formato */}
+              <button type="button" title="Negrita" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><Bold className="h-3.5 w-3.5" /></button>
+              <button type="button" title="Cursiva" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><Italic className="h-3.5 w-3.5" /></button>
+              <button type="button" title="Subrayado" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><Underline className="h-3.5 w-3.5" /></button>
+              <div className="mx-1.5 h-4 w-px bg-[#d9e2ec]" />
+              {/* Estructura */}
+              <button type="button" title="Título / Encabezado" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><Type className="h-3.5 w-3.5" /></button>
+              <button type="button" title="Lista con viñetas" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><List className="h-3.5 w-3.5" /></button>
+              <button type="button" title="Lista numerada" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><ListOrdered className="h-3.5 w-3.5" /></button>
+              <div className="mx-1.5 h-4 w-px bg-[#d9e2ec]" />
+              {/* Alineación */}
+              <button type="button" title="Alinear izquierda" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><AlignLeft className="h-3.5 w-3.5" /></button>
+              <button type="button" title="Centrar" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><AlignCenter className="h-3.5 w-3.5" /></button>
+              <button type="button" title="Alinear derecha" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><AlignRight className="h-3.5 w-3.5" /></button>
+              <div className="mx-1.5 h-4 w-px bg-[#d9e2ec]" />
+              {/* Insertar */}
+              <button type="button" title="Insertar foto" className="flex h-7 w-7 items-center justify-center rounded text-gray-500 transition hover:bg-[#E6F1FB] hover:text-[#185FA5]"><ImagePlus className="h-3.5 w-3.5" /></button>
+              {/* Zoom — derecha */}
+              <div className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={() => setPreviewZoom((z) => Math.max(50, z - 10))} title="Reducir zoom" className="flex h-7 w-7 items-center justify-center rounded border border-[#d9e2ec] bg-white text-gray-500 transition hover:bg-[#f6f8fb]"><Minus className="h-3.5 w-3.5" /></button>
+                <span className="min-w-[2.75rem] text-center text-xs font-semibold text-gray-500">{previewZoom}%</span>
+                <button type="button" onClick={() => setPreviewZoom((z) => Math.min(150, z + 10))} title="Ampliar zoom" className="flex h-7 w-7 items-center justify-center rounded border border-[#d9e2ec] bg-white text-gray-500 transition hover:bg-[#f6f8fb]"><Plus className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => setPreviewZoom(100)} title="Restablecer" className="rounded border border-[#d9e2ec] bg-white px-2 py-1 text-[10px] font-semibold text-gray-400 transition hover:bg-[#f6f8fb]">100%</button>
+              </div>
             </div>
 
             {/* Placeholder — in-flow, shown only when no section is open */}
@@ -2421,72 +2419,6 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
         />
       )}
 
-      {/* ── Template Editor Panel ── */}
-      {proposalTemplate && (
-        <>
-          {showDuplicateTemplateModal ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-              <div className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-2xl">
-                <h3 className="text-lg font-bold text-[#213343]">Duplicate template</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  Copying from <span className="font-medium text-[#213343]">{proposalTemplate.trade}</span>. The new
-                  name must be unique — quotes use it to pick which template to load.
-                </p>
-                <div className="mt-5">
-                  <label className="mb-1.5 block text-sm font-medium text-[#213343]">New trade / service name</label>
-                  <input
-                    autoFocus
-                    value={duplicateTemplateTradeName}
-                    onChange={(e) => {
-                      setDuplicateTemplateTradeName(e.target.value);
-                      setDuplicateTemplateError("");
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && void handleDuplicateTemplateSubmit()}
-                    placeholder="e.g. Commercial Roofing"
-                    className="w-full rounded-lg border border-[#d9e2ec] px-4 py-2.5 text-sm outline-none focus:border-[#ff5c35] focus:ring-2 focus:ring-[#ff5c35]/20"
-                  />
-                  {duplicateTemplateError ? (
-                    <p className="mt-1.5 text-xs text-red-500">{duplicateTemplateError}</p>
-                  ) : null}
-                </div>
-                <div className="mt-5 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDuplicateTemplateModal(false);
-                      setDuplicateTemplateTradeName("");
-                      setDuplicateTemplateError("");
-                    }}
-                    className="flex-1 rounded-lg border border-[#d9e2ec] py-2.5 text-sm text-gray-500 transition hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={duplicateTemplateBusy}
-                    onClick={() => void handleDuplicateTemplateSubmit()}
-                    className="flex-1 rounded-lg bg-[#ff5c35] py-2.5 text-sm font-semibold text-white transition hover:bg-[#e94820] disabled:opacity-60"
-                  >
-                    {duplicateTemplateBusy ? "Checking…" : "Open copy in editor"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          <TemplateEditorPanel
-            key={`${(templateEditorDraft ?? proposalTemplate).id}-${
-              (templateEditorDraft ?? proposalTemplate).lastModified
-            }-${showTemplateEditor ? "open" : "closed"}`}
-            template={templateEditorDraft ?? proposalTemplate}
-            open={showTemplateEditor}
-            onClose={() => {
-              setShowTemplateEditor(false);
-              setTemplateEditorDraft(null);
-            }}
-            onSave={handleTemplateSave}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -2498,6 +2430,7 @@ function ProposalSectionPanel({
   visible,
   onOpen,
   onToggleVisible,
+  ordinal,
   children,
 }: {
   label: string;
@@ -2506,68 +2439,74 @@ function ProposalSectionPanel({
   visible: boolean;
   onOpen: () => void;
   onToggleVisible: () => void;
+  ordinal?: number | null;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`overflow-hidden rounded border transition ${
+      className={`overflow-hidden rounded border transition ${!visible ? "opacity-70" : ""} ${
         open
-          ? visible
-            ? "border-[#213343] bg-white"
-            : "border-gray-300 bg-[#f6f8fb]"
+          ? "border-[#185FA5] bg-white shadow-sm"
           : visible
-            ? "border-[#d9e2ec] bg-white"
-            : "border-[#e6edf4] bg-[#f6f8fb]"
+          ? "border-[#d9e2ec] bg-white"
+          : "border-[#e6edf4] bg-[#f6f8fb]"
       }`}
     >
       <div className="flex items-center gap-1.5 px-2 py-2">
-        <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-300 active:cursor-grabbing" />
+        <span title="Arrastra para reordenar" className="flex shrink-0 cursor-grab active:cursor-grabbing">
+          <GripVertical className="h-3.5 w-3.5 text-gray-300" />
+        </span>
+        {ordinal != null && (
+          <span
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold leading-none ${
+              open
+                ? "bg-[#185FA5] text-white"
+                : visible
+                ? "bg-[#E6F1FB] text-[#0C447C]"
+                : "bg-gray-100 text-gray-400"
+            }`}
+          >
+            {ordinal}
+          </span>
+        )}
         <button
           onClick={onOpen}
           className="min-w-0 flex-1 text-left"
           type="button"
-          title={open ? "Collapse section editor" : "Expand section editor"}
+          title={open ? "Contraer editor de sección" : "Expandir editor de sección"}
         >
           <div className="flex items-center gap-1.5">
             <ChevronDown
               className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${open ? "" : "-rotate-90"}`}
               aria-hidden
             />
-            <span className={`truncate text-sm font-medium ${visible ? "text-[#213343]" : "text-gray-400"}`}>
+            <span className={`truncate text-sm font-medium ${open ? "text-[#185FA5]" : visible ? "text-[#213343]" : "text-gray-400"}`}>
               {label}
             </span>
           </div>
           {open && (
-            <p className="mt-1 pl-5 text-xs leading-relaxed text-gray-400">{description}</p>
+            <p className="mt-0.5 pl-5 text-xs leading-relaxed text-gray-400">{description}</p>
           )}
         </button>
-        <span
-          className={`hidden shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium sm:inline-flex ${
-            visible ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-400"
+        <button
+          type="button"
+          onClick={onToggleVisible}
+          title={visible ? "Ocultar del proposal (cliente no verá esta sección)" : "Mostrar en el proposal del cliente"}
+          className={`shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+            visible
+              ? "bg-[#EAF3DE] text-[#27500A] hover:bg-[#d5ebb8]"
+              : "bg-gray-100 text-gray-400 hover:bg-gray-200"
           }`}
         >
-          {visible ? "Shown" : "Hidden"}
-        </span>
-        <button
-          onClick={onToggleVisible}
-          title={
-            visible
-              ? "Eye: hide this block from the client (PDF, preview, portal). Chevron on the title collapses the editor only."
-              : "Eye: show this block to the client again"
-          }
-          className="shrink-0 rounded p-1 text-gray-400 transition hover:bg-[#f6f8fb] hover:text-[#213343]"
-          type="button"
-        >
-          {visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5 opacity-40" />}
+          {visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+          <span className="hidden sm:inline">{visible ? "Visible" : "Oculto"}</span>
         </button>
       </div>
       {open && (
-        <div className="border-t border-[#eef2f6] px-3 py-3">
+        <div className="border-t border-[#E6F1FB] px-3 py-3">
           {!visible ? (
-            <div className="mb-3 rounded border border-gray-200 bg-white px-3 py-2 text-xs leading-relaxed text-gray-500">
-              Hidden from the client: preview, PDF, and portal. Use the <strong>chevron on the section title</strong> to
-              collapse this editor; use the <strong>eye</strong> only to include or exclude the section from what the
-              client sees.
+            <div className="mb-3 rounded border border-[#B8D4F0] bg-[#E6F1FB] px-3 py-2 text-xs leading-relaxed text-[#185FA5]">
+              Esta sección está <strong>oculta</strong>: no aparece en el PDF, preview ni portal del cliente. Usa el badge <strong>Oculto</strong> para volver a incluirla; el chevron solo colapsa este editor.
             </div>
           ) : null}
           {children}

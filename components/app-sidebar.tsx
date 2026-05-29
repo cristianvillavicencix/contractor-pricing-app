@@ -229,7 +229,7 @@ function TopNavLink({
               item.children?.forEach((child) => onPrefetch(child.href));
             }}
             onFocus={() => onPrefetch(item.href)}
-            className={`relative inline-flex h-18 items-center gap-2 px-4 text-sm font-semibold transition after:absolute after:bottom-0 after:left-4 after:right-4 after:h-0.5 after:rounded-full after:bg-[#ffd400] after:transition ${
+            className={`relative inline-flex h-18 items-center gap-2 px-4 text-sm font-semibold transition after:absolute after:bottom-0 after:left-4 after:right-4 after:h-0.5 after:rounded-full after:bg-[#4C9A59] after:transition ${
               active
                 ? "text-white after:opacity-100"
                 : "text-white/68 after:opacity-0 hover:text-white hover:after:opacity-100"
@@ -263,7 +263,7 @@ function TopNavLink({
       onMouseEnter={() => onPrefetch(item.href)}
       onFocus={() => onPrefetch(item.href)}
       onClick={() => onPrefetch(item.href)}
-      className={`relative inline-flex h-18 items-center gap-2 px-4 text-sm font-semibold transition after:absolute after:bottom-0 after:left-4 after:right-4 after:h-0.5 after:rounded-full after:bg-[#ffd400] after:transition ${
+      className={`relative inline-flex h-18 items-center gap-2 px-4 text-sm font-semibold transition after:absolute after:bottom-0 after:left-4 after:right-4 after:h-0.5 after:rounded-full after:bg-[#4C9A59] after:transition ${
         active
           ? "text-white after:opacity-100"
           : "text-white/68 after:opacity-0 hover:text-white hover:after:opacity-100"
@@ -311,7 +311,7 @@ function AdminMenu({
           </div>
           <span
             className={`flex h-8 w-8 items-center justify-center rounded-full transition ${
-              active ? "bg-[#ffd400] text-black" : "bg-white/12 text-white/65 hover:bg-white/18 hover:text-white"
+              active ? "bg-[#4C9A59] text-white" : "bg-white/12 text-white/65 hover:bg-white/18 hover:text-white"
             }`}
           >
             <ChevronDown className="h-4 w-4" />
@@ -445,7 +445,7 @@ function MobileNavLink({
         onClose();
       }}
       className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
-        active ? "bg-[#ffd400] text-black" : "text-white/70 hover:bg-white/10 hover:text-white"
+        active ? "bg-[#4C9A59] text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
       }`}
     >
       <Icon className="h-4 w-4" />
