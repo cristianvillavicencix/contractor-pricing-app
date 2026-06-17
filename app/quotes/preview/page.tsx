@@ -2239,20 +2239,6 @@ function QuotePreviewContentClient({ quoteId }: { quoteId: string | null }) {
             </div>
           </div>
           </div>
-          </div>{/* end proposal tab content */}
-          {/* Template tab — always mounted to preserve draft state across tab switches */}
-          {proposalTemplate && (
-            <div className={`${sidebarTab === "template" ? "flex-1 min-h-0" : "hidden"}`}>
-              <TemplateEditorPanel
-                key={`${proposalTemplate.id}-${proposalTemplate.lastModified}`}
-                mode="inline"
-                open={true}
-                template={proposalTemplate}
-                onClose={() => setSidebarTab("proposal")}
-                onSave={handleTemplateSave}
-              />
-            </div>
-          )}
         </aside>
 
         {/* ── Document preview ── */}
