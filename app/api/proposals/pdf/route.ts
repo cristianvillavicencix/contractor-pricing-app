@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { chromium } from "playwright";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +16,10 @@ export async function POST(request: NextRequest) {
   }
 
   const origin = new URL(request.url).origin;
-  const browser = await chromium.launch({ headless: true });
+  const isVercel = Boolean(process.env.VERCEL);
+  const browser = isVercel
+    ? await launchBrowserForVercel()
+    : await launchBrowserForLocal();
 
   try {
     const page = await browser.newPage({
@@ -43,11 +45,9 @@ export async function POST(request: NextRequest) {
       waitUntil: "networkidle",
     });
 
-    await page
-      .waitForFunction("window.__PAGED_READY === true", null, {
-        timeout: 20000,
-      })
-      .catch(() => undefined);
+    // Give Paged.js time to finish paginating. We avoid waitForFunction here because
+    // the Playwright and Playwright-core Page typings diverge on this overload.
+    await page.waitForTimeout(1500);
 
     const pagedPageCount = await page
       .evaluate(() => {
@@ -76,4 +76,22 @@ export async function POST(request: NextRequest) {
   } finally {
     await browser.close();
   }
+}
+
+async function launchBrowserForVercel() {
+  const [{ chromium }, chromiumPackModule] = await Promise.all([
+    import("playwright-core"),
+    import("@sparticuz/chromium"),
+  ]);
+  const chromiumPack = chromiumPackModule.default;
+  return chromium.launch({
+    args: chromiumPack.args,
+    executablePath: await chromiumPack.executablePath(),
+    headless: true,
+  });
+}
+
+async function launchBrowserForLocal() {
+  const { chromium } = await import("playwright");
+  return chromium.launch({ headless: true });
 }
